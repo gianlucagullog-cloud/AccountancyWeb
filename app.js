@@ -924,7 +924,7 @@ function exportZIP(){
 
 // ── SMART ADVISORY ────────────────────────────────────────────────────────────
 function renderAdvisory(){
-  var panel=document.getElementById('advisory-panel');
+  var panel=document.getElementById('advisory-panel&#39;);
   var content=document.getElementById('advisory-content');
   if(!panel||!content)return;
   var arr=getFilteredSummaryTxs();
@@ -960,7 +960,7 @@ function renderAdvisory(){
       var revAllowed=distanza;
       tips.push({type:'info',
         title:'Vicino alla soglia '+b.label,
-        body:'Sei a '+fmt(distanza)+'€ dal bracket successivo. Puoi ancora fatturare circa '+fmt(revAllowed)+'€ netti prima di salire all'aliquota '+Math.round(b.next*100)+'%.'
+        body:'Sei a '+fmt(distanza)+'€ dal bracket successivo. Puoi ancora fatturare circa '+fmt(revAllowed)+'€ netti prima di salire all&#39;aliquota +Math.round(b.next*100)+'%.'
       });
     }
   });
