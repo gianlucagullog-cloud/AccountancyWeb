@@ -14,6 +14,9 @@ var catFilterSet=null; // null = all
 var isGuestMode=false;
 var guestPermissions={};
 var adminUserId=null;
+var appStarted=false;
+var catEntrateExpanded=true;
+var catUsciteExpanded=true;
 
 // DATE FORMAT
 var MESI=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
