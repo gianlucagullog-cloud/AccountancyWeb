@@ -569,6 +569,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
 </div>
 
 <div id="app-content" style="display:none">
+<div id="guest-banner" style="display:none;background:var(--accent-light);border:1px solid var(--border2);padding:8px 16px;font-size:12px;color:var(--accent);border-radius:var(--radius-sm);margin-bottom:10px"><b>Modalita ospite</b> — Accesso in sola lettura ai dati del tuo cliente. Alcune funzioni sono disabilitate.</div>
 
 <header>
   <h1>Invoice Register</h1>
@@ -794,33 +795,33 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
       <button class="period-pill" data-p="12" onclick="togglePeriodS('12',this)">Dic</button>
     </div>
   </div>
-  <!-- Category merge filter -->
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-    <span style="font-size:11px;color:var(--text2);font-weight:600">Vista categorie:</span>
-    <div style="display:flex;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px;gap:2px">
-      <button id="cat-merge-detail" class="cat-merge-btn active" onclick="setCatMerge('detail')" style="padding:4px 12px;border:none;border-radius:4px;font-size:11px;cursor:pointer;background:var(--surface);font-weight:600;color:var(--accent)">Dettaglio</button>
-      <button id="cat-merge-group" class="cat-merge-btn" onclick="setCatMerge('group')" style="padding:4px 12px;border:none;border-radius:4px;font-size:11px;cursor:pointer;background:transparent;color:var(--text2)">Raggruppato</button>
+  <!-- Category filter multi-select -->
+  <div style="margin-bottom:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;box-shadow:var(--shadow)">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span style="font-size:11px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Filtra categorie</span>
+      <button onclick="selectAllCats(true)" style="font-size:10px;padding:2px 8px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer">Tutte</button>
+      <button onclick="selectAllCats(false)" style="font-size:10px;padding:2px 8px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer">Nessuna</button>
     </div>
-    <span style="font-size:10.5px;color:var(--text3)">Raggruppato unisce Travel, Revenue, Professional Services...</span>
+    <div id="cat-filter-chips" style="display:flex;flex-wrap:wrap;gap:5px"></div>
   </div>
   <!-- Entrate -->
   <div style="margin-bottom:10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)">
-    <div onclick="toggleCatSection('in')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;cursor:pointer;background:var(--green-light);border-bottom:1px solid var(--border)">
-      <p class="cat-split-title" style="color:var(--green);margin:0">&#8593; Entrate per categoria</p>
-      <button id="cat-toggle-in" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;pointer-events:none">Riduci</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:rgba(22,163,74,0.08);border-bottom:1px solid var(--border)">
+      <p style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin:0">&#8593; Entrate per categoria</p>
+      <button id="cat-toggle-in" onclick="toggleCatSection('in')" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Riduci</button>
     </div>
     <div id="cat-section-in"><table class="cat-table" style="width:100%"><thead><tr><th>Category</th><th>Net</th><th>VAT</th><th>Total</th></tr></thead><tbody id="cat-tbody-in"></tbody></table></div>
   </div>
   <!-- Uscite -->
   <div style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)">
-    <div onclick="toggleCatSection('out')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;cursor:pointer;background:var(--red-light);border-bottom:1px solid var(--border)">
-      <p class="cat-split-title" style="color:var(--red);margin:0">&#8595; Uscite per categoria</p>
-      <button id="cat-toggle-out" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;pointer-events:none">Riduci</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:rgba(220,38,38,0.08);border-bottom:1px solid var(--border)">
+      <p style="font-size:12px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.5px;margin:0">&#8595; Uscite per categoria</p>
+      <button id="cat-toggle-out" onclick="toggleCatSection('out')" class="btn btn-secondary" style="font-size:11px;padding:3px 10px">Riduci</button>
     </div>
     <div id="cat-section-out"><table class="cat-table" style="width:100%"><thead><tr><th>Category</th><th>Net</th><th>VAT</th><th>Total</th></tr></thead><tbody id="cat-tbody-out"></tbody></table></div>
   </div>
   <div class="tax-panel" style="margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <h3 style="margin-bottom:0">Stima Fiscale</h3>
       <div class="regime-tabs-wrap">
         <button class="regime-tab active" onclick="setRegime('malta-se',this)">Malta SE</button>
@@ -830,8 +831,19 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
         <button class="regime-tab" onclick="setRegime('italy-piva',this)">IT P.IVA</button>
       </div>
     </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;background:var(--surface2);border-radius:var(--radius-sm);border:1px solid var(--border)">
+      <div class="form-group" style="min-width:160px;margin:0">
+        <label style="font-size:10.5px">Lump sum aggiuntiva entrate (&#8364;)</label>
+        <input type="number" id="tax-lump-in" placeholder="0" step="1000" min="0" oninput="renderTax();renderAdvisory()">
+      </div>
+      <div class="form-group" style="min-width:160px;margin:0">
+        <label style="font-size:10.5px">Lump sum aggiuntiva spese (&#8364;)</label>
+        <input type="number" id="tax-lump-out" placeholder="0" step="500" min="0" oninput="renderTax();renderAdvisory()">
+      </div>
+      <div style="font-size:11px;color:var(--text2);padding-bottom:6px">Simula un imponibile diverso aggiungendo entrate/uscite ipotetiche</div>
+    </div>
     <div id="tax-rows"></div>
-    <div style="font-size:10px;color:var(--text3);margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">* Malta SSC Class 2: importo fisso settimanale. Aliquote 2026 stimate. Non costituisce consulenza fiscale.</div>
+    <div style="font-size:10px;color:var(--text3);margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">* Malta SSC 2026: 15% reddito netto, min 31.97/sett, max 83.89/sett (nati dal 1962). IRPEF 2026: 0%/12k, 15%/16k, 25%/60k, 35%. Fonte: MTCA + PWC Tax Summaries. Non costituisce consulenza fiscale.</div>
   </div>
   <div class="sim-panel">
     <h3>Simulatore — Proiezione Fiscale</h3>
@@ -919,6 +931,16 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
       <label class="btn btn-secondary" style="cursor:pointer;font-size:12px">&#128194; Importa CSV<input type="file" accept=".csv" style="display:none" onchange="importCSV(this)"></label>
       <button class="btn btn-danger" onclick="clearAll()">Cancella tutti i dati</button>
       <span style="color:var(--text2);font-size:10.5px" id="tx-count"></span>
+    </div>
+    <!-- Guest access (admin only) -->
+    <div id="guest-access-section" style="display:none;margin-top:24px;border-top:1px solid var(--border);padding-top:20px">
+      <p style="font-family:var(--font-display);font-size:14px;font-weight:700;margin-bottom:4px">Accesso Ospiti (Commercialista)</p>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Invita un utente a visualizzare i tuoi dati con permessi limitati.</p>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
+        <div class="form-group" style="min-width:220px;margin:0"><label>Email ospite</label><input type="email" id="guest-email" placeholder="commercialista@studio.com"></div>
+        <button class="btn btn-primary" onclick="inviteGuest()" style="font-size:12px;padding:9px 16px;white-space:nowrap">Invita ospite</button>
+      </div>
+      <div id="guest-list"></div>
     </div>
   </div>
 </div>
