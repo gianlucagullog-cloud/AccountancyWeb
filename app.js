@@ -10,7 +10,10 @@ var filterPeriodsS=new Set(['all']), filterYearS='all';
 var currentRegime='malta-se';
 var selectedIds=new Set();
 var sortField='date', sortDir=1;
-var catMergeMode='detail'; // 'detail' or 'group'
+var catFilterSet=null; // null = all
+var isGuestMode=false;
+var guestPermissions={};
+var adminUserId=null;
 
 // DATE FORMAT
 var MESI=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
@@ -461,13 +464,20 @@ function setRegime(r,btn){
   document.querySelectorAll('.regime-tab').forEach(function(b){b.classList.remove('active');});
   if(btn)btn.classList.add('active');renderTax();
 }
-function renderTax(){
+function getTaxInputs(){
   var arr=getFilteredSummaryTxs();
   var gRev=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
   var dExp=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
+  var lumpIn=parseFloat((document.getElementById('tax-lump-in')||{}).value)||0;
+  var lumpOut=parseFloat((document.getElementById('tax-lump-out')||{}).value)||0;
+  return {gRev:gRev+lumpIn, dExp:dExp+lumpOut, hasLump:lumpIn>0||lumpOut>0};
+}
+function renderTax(){
+  var inp=getTaxInputs();
   var el=document.getElementById('tax-rows');if(!el)return;
-  var c=getCalc(currentRegime,gRev,dExp);
-  el.innerHTML=c.rows.map(function(r){return '<div class="tax-row"><span class="tax-label">'+r[0]+'</span><span class="tax-value" style="'+(r[2]?'color:'+r[2]:'')+'">'+r[1]+'</span></div>';}).join('');
+  var c=getCalc(currentRegime,inp.gRev,inp.dExp);
+  var lumpNote=inp.hasLump?'<div style="font-size:10px;color:var(--orange);margin-bottom:8px;padding:5px 10px;background:rgba(217,119,6,0.08);border-radius:4px">Simulazione con lump sum aggiuntiva attiva</div>':'';
+  el.innerHTML=lumpNote+c.rows.map(function(r){return '<div class="tax-row"><span class="tax-label">'+r[0]+'</span><span class="tax-value" style="'+(r[2]?'color:'+r[2]:'')+'">'+r[1]+'</span></div>';}).join('');
 }
 
 // SIMULATOR
@@ -821,23 +831,211 @@ var catGroupMap={
   'Utilities':['Utilities - Internet/Mobile','Utilities - Office','Utilities - Other'],
   'Equipment':['Equipment - Office','Equipment - Other','Equipment - Software']
 };
-var catEntrateExpanded=true;
-var catUsciteExpanded=true;
 
 function groupCatName(cat){
   if(catMergeMode==='detail')return cat;
   for(var g in catGroupMap){if(catGroupMap[g].indexOf(cat)>=0)return g;}
   return cat;
 }
-function setCatMerge(mode){
-  catMergeMode=mode;
-  document.querySelectorAll('.cat-merge-btn').forEach(function(b){b.classList.remove('active');});
-  var btn=document.getElementById('cat-merge-'+mode);if(btn)btn.classList.add('active');
+function selectAllCats(all){
+  var chips=document.querySelectorAll('.cat-chip');
+  chips.forEach(function(c){
+    var active=all;
+    c.dataset.active=active?'1':'0';
+    c.style.background=active?'var(--accent)':'var(--surface2)';
+    c.style.color=active?'#fff':'var(--text2)';
+    c.style.borderColor=active?'var(--accent)':'var(--border)';
+  });
+  if(all){catFilterSet=null;}else{catFilterSet=new Set();}
   renderCat();
 }
-function toggleCatSection(which){
-  if(which==='in'){catEntrateExpanded=!catEntrateExpanded;}else{catUsciteExpanded=!catUsciteExpanded;}
+function toggleCatChip(idx,el){
+  // idx is the index into allCatsArr, cat name stored in chip text
+  var cat=el.textContent.trim();
+  if(catFilterSet===null){
+    // was "all" - now deselect this one
+    var allChips=Array.from(document.querySelectorAll('.cat-chip'));
+    catFilterSet=new Set(allChips.map(function(c){return c.textContent.trim();}));
+    catFilterSet.delete(cat);
+    allChips.forEach(function(c){
+      var on=catFilterSet.has(c.textContent.trim());
+      c.dataset.active=on?'1':'0';
+      c.style.background=on?'var(--accent)':'var(--surface2)';
+      c.style.color=on?'#fff':'var(--text2)';
+      c.style.borderColor=on?'var(--accent)':'var(--border)';
+    });
+  } else {
+    if(catFilterSet.has(cat)){catFilterSet.delete(cat);}else{catFilterSet.add(cat);}
+    var on=catFilterSet.has(cat);
+    el.dataset.active=on?'1':'0';
+    el.style.background=on?'var(--accent)':'var(--surface2)';
+    el.style.color=on?'#fff':'var(--text2)';
+    el.style.borderColor=on?'var(--accent)':'var(--border)';
+  }
   renderCat();
+}
+function groupCatName(cat){return cat;} // kept for compatibility
+function toggleCatSection(which){
+  if(which==='in'){
+    catEntrateExpanded=!catEntrateExpanded;
+    var sec=document.getElementById('cat-section-in');
+    var btn=document.getElementById('cat-toggle-in');
+    if(sec)sec.style.display=catEntrateExpanded?'':'none';
+    if(btn)btn.textContent=catEntrateExpanded?'Riduci':'Espandi';
+  } else {
+    catUsciteExpanded=!catUsciteExpanded;
+    var sec=document.getElementById('cat-section-out');
+    var btn=document.getElementById('cat-toggle-out');
+    if(sec)sec.style.display=catUsciteExpanded?'':'none';
+    if(btn)btn.textContent=catUsciteExpanded?'Riduci':'Espandi';
+  }
+}
+function renderCat(){
+  var arr=getFilteredSummaryTxs();
+  var allCatsArr=Array.from(new Set(arr.map(function(t){return t.category||'Other';}))).sort();
+
+  // Build filter chips
+  var chipsEl=document.getElementById('cat-filter-chips');
+  if(chipsEl){
+    chipsEl.innerHTML='';
+    allCatsArr.forEach(function(c){
+      var on=catFilterSet===null||catFilterSet.has(c);
+      var btn=document.createElement('button');
+      btn.className='cat-chip';
+      btn.textContent=c||'Other';
+      btn.dataset.active=on?'1':'0';
+      btn.style.padding='3px 10px';
+      btn.style.borderRadius='20px';
+      btn.style.border='1.5px solid '+(on?'var(--accent)':'var(--border)');
+      btn.style.background=on?'var(--accent)':'var(--surface2)';
+      btn.style.color=on?'#fff':'var(--text2)';
+      btn.style.fontSize='11px';
+      btn.style.cursor='pointer';
+      btn.style.fontWeight=on?'600':'400';
+      btn.addEventListener('click',function(){toggleCatChip(btn);});
+      chipsEl.appendChild(btn);
+    });
+  }
+
+  // Filter by catFilterSet
+  var filteredArr=catFilterSet===null?arr:arr.filter(function(t){return catFilterSet.has(t.category||'Other');});
+  var mapIn={},mapOut={};
+  filteredArr.forEach(function(t){
+    var c=t.category||'Other';
+    if(!mapIn[c])mapIn[c]={n:0,v:0,t:0};
+    if(!mapOut[c])mapOut[c]={n:0,v:0,t:0};
+    if(t.type==='Issued'){mapIn[c].n+=t.entrateNet;mapIn[c].v+=t.entrateVat;mapIn[c].t+=t.entrateTotal;}
+    else{mapOut[c].n+=t.usciteNet;mapOut[c].v+=t.usciteVat;mapOut[c].t+=t.usciteTotal;}
+  });
+  var usedCats=Array.from(new Set(Object.keys(mapIn).concat(Object.keys(mapOut)))).sort();
+  function buildRows(map,cats){
+    var tN=0,tV=0,tT=0;
+    var r=cats.filter(function(c){return map[c]&&map[c].t!==0;}).map(function(c){
+      tN+=map[c].n;tV+=map[c].v;tT+=map[c].t;
+      return '<tr><td style="color:var(--text2);font-size:11px">'+c+'</td><td>'+fmt(map[c].n)+'</td><td>'+fmt(map[c].v)+'</td><td>'+fmt(map[c].t)+'</td></tr>';
+    }).join('');
+    if(!r)return '<tr><td colspan="4" style="color:var(--text3);text-align:center;padding:14px">Nessun dato</td></tr>';
+    return r+'<tr style="font-weight:700"><td>TOTAL</td><td>'+fmt(tN)+'</td><td>'+fmt(tV)+'</td><td>'+fmt(tT)+'</td></tr>';
+  }
+  var bi=document.getElementById('cat-tbody-in');if(bi)bi.innerHTML=buildRows(mapIn,usedCats);
+  var bo=document.getElementById('cat-tbody-out');if(bo)bo.innerHTML=buildRows(mapOut,usedCats);
+}
+
+
+function toggleCatChip(idx,el){
+  // idx is the index into allCatsArr, cat name stored in chip text
+  var cat=el.textContent.trim();
+  if(catFilterSet===null){
+    // was "all" - now deselect this one
+    var allChips=Array.from(document.querySelectorAll('.cat-chip'));
+    catFilterSet=new Set(allChips.map(function(c){return c.textContent.trim();}));
+    catFilterSet.delete(cat);
+    allChips.forEach(function(c){
+      var on=catFilterSet.has(c.textContent.trim());
+      c.dataset.active=on?'1':'0';
+      c.style.background=on?'var(--accent)':'var(--surface2)';
+      c.style.color=on?'#fff':'var(--text2)';
+      c.style.borderColor=on?'var(--accent)':'var(--border)';
+    });
+  } else {
+    if(catFilterSet.has(cat)){catFilterSet.delete(cat);}else{catFilterSet.add(cat);}
+    var on=catFilterSet.has(cat);
+    el.dataset.active=on?'1':'0';
+    el.style.background=on?'var(--accent)':'var(--surface2)';
+    el.style.color=on?'#fff':'var(--text2)';
+    el.style.borderColor=on?'var(--accent)':'var(--border)';
+  }
+  renderCat();
+}
+function groupCatName(cat){return cat;} // kept for compatibility
+function toggleCatSection(which){
+  if(which==='in'){
+    catEntrateExpanded=!catEntrateExpanded;
+    var sec=document.getElementById('cat-section-in');
+    var btn=document.getElementById('cat-toggle-in');
+    if(sec)sec.style.display=catEntrateExpanded?'':'none';
+    if(btn)btn.textContent=catEntrateExpanded?'Riduci':'Espandi';
+  } else {
+    catUsciteExpanded=!catUsciteExpanded;
+    var sec=document.getElementById('cat-section-out');
+    var btn=document.getElementById('cat-toggle-out');
+    if(sec)sec.style.display=catUsciteExpanded?'':'none';
+    if(btn)btn.textContent=catUsciteExpanded?'Riduci':'Espandi';
+  }
+}
+
+function selectAllCats(all){
+  var chips=document.querySelectorAll('.cat-chip');
+  chips.forEach(function(c){
+    var active=all;
+    c.dataset.active=active?'1':'0';
+    c.style.background=active?'var(--accent)':'var(--surface2)';
+    c.style.color=active?'#fff':'var(--text2)';
+    c.style.borderColor=active?'var(--accent)':'var(--border)';
+  });
+  if(all){catFilterSet=null;}else{catFilterSet=new Set();}
+  renderCat();
+}
+function toggleCatChip(idx,el){
+  // idx is the index into allCatsArr, cat name stored in chip text
+  var cat=el.textContent.trim();
+  if(catFilterSet===null){
+    // was "all" - now deselect this one
+    var allChips=Array.from(document.querySelectorAll('.cat-chip'));
+    catFilterSet=new Set(allChips.map(function(c){return c.textContent.trim();}));
+    catFilterSet.delete(cat);
+    allChips.forEach(function(c){
+      var on=catFilterSet.has(c.textContent.trim());
+      c.dataset.active=on?'1':'0';
+      c.style.background=on?'var(--accent)':'var(--surface2)';
+      c.style.color=on?'#fff':'var(--text2)';
+      c.style.borderColor=on?'var(--accent)':'var(--border)';
+    });
+  } else {
+    if(catFilterSet.has(cat)){catFilterSet.delete(cat);}else{catFilterSet.add(cat);}
+    var on=catFilterSet.has(cat);
+    el.dataset.active=on?'1':'0';
+    el.style.background=on?'var(--accent)':'var(--surface2)';
+    el.style.color=on?'#fff':'var(--text2)';
+    el.style.borderColor=on?'var(--accent)':'var(--border)';
+  }
+  renderCat();
+}
+function groupCatName(cat){return cat;} // kept for compatibility
+function toggleCatSection(which){
+  if(which==='in'){
+    catEntrateExpanded=!catEntrateExpanded;
+    var sec=document.getElementById('cat-section-in');
+    var btn=document.getElementById('cat-toggle-in');
+    if(sec)sec.style.display=catEntrateExpanded?'':'none';
+    if(btn)btn.textContent=catEntrateExpanded?'Riduci':'Espandi';
+  } else {
+    catUsciteExpanded=!catUsciteExpanded;
+    var sec=document.getElementById('cat-section-out');
+    var btn=document.getElementById('cat-toggle-out');
+    if(sec)sec.style.display=catUsciteExpanded?'':'none';
+    if(btn)btn.textContent=catUsciteExpanded?'Riduci':'Espandi';
+  }
 }
 function renderCat(){
   var arr=getFilteredSummaryTxs();
@@ -879,9 +1077,8 @@ function renderAdvisory(){
   var panel=document.getElementById('advisory-panel');
   var content=document.getElementById('advisory-content');
   if(!panel||!content)return;
-  var arr=getFilteredSummaryTxs();
-  var gRev=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
-  var dExp=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
+  var inp=getTaxInputs();
+  var gRev=inp.gRev, dExp=inp.dExp;
   var ci=Math.max(0,gRev-dExp);
   var tips=[];
   if(ci===0&&gRev===0){
@@ -1190,3 +1387,521 @@ document.addEventListener('DOMContentLoaded',function(){
     dz.addEventListener('drop',function(e){e.preventDefault();dz.classList.remove('drag');var f=e.dataTransfer.files[0];if(f)handleFile(f);});
   }
 });
+
+// ============================================================
+// GUEST ACCESS MANAGEMENT
+// ============================================================
+
+var PERM_DEFAULTS = {
+  sections:{carica:false,registro:true,summary:true,settings:false},
+  actions:{download:true,delete:false,edit:false,export:true,import:false},
+  period_from:null, period_to:null
+};
+
+function canDo(action){
+  if(!isGuestMode)return true;
+  if(action==='section'){return true;} // handled by showTab
+  return guestPermissions.actions&&guestPermissions.actions[action]!==false;
+}
+function canSeeSection(section){
+  if(!isGuestMode)return true;
+  return guestPermissions.sections&&guestPermissions.sections[section]!==false;
+}
+
+// Override showTab for guest
+var _origShowTab=showTab;
+function showTab(t){
+  if(isGuestMode&&!canSeeSection(t)){
+    showMsg('Sezione non disponibile in modalita ospite.','error');return;
+  }
+  _origShowTab(t);
+}
+
+// Check if current user is a guest
+async function checkGuestMode(){
+  var {data,error}=await sb.from('guest_access').select('*').eq('guest_user_id',currentUser.id).eq('active',true).maybeSingle();
+  if(data){
+    isGuestMode=true;
+    adminUserId=data.admin_user_id;
+    guestPermissions=data.permissions||PERM_DEFAULTS;
+    // Show guest banner
+    var banner=document.getElementById('guest-banner');
+    if(banner){banner.style.display='';banner.innerHTML='<b>Modalita ospite</b> — Stai visualizzando i dati del tuo cliente in sola lettura. Permessi: '+
+      Object.entries(guestPermissions.actions||{}).filter(function(e){return e[1];}).map(function(e){return e[0];}).join(', ')+'.';}
+    // Hide sections not allowed
+    ['carica','registro','summary','settings'].forEach(function(s){
+      var btn=document.getElementById('tab-btn-'+s);
+      if(btn&&!canSeeSection(s))btn.style.display='none';
+    });
+    // Hide forbidden buttons
+    if(!canDo('delete')){document.querySelectorAll('.btn-danger').forEach(function(b){b.style.display='none';});}
+    if(!canDo('edit')){document.querySelectorAll('.btn-edit').forEach(function(b){b.style.display='none';});}
+  } else {
+    isGuestMode=false;
+    // Show guest management in settings (admin only)
+    var gs=document.getElementById('guest-access-section');
+    if(gs)gs.style.display='';
+    loadGuestList();
+  }
+}
+
+// Load guest list for admin
+async function loadGuestList(){
+  var {data}=await sb.from('guest_access').select('*').eq('admin_user_id',currentUser.id);
+  var el=document.getElementById('guest-list');if(!el||!data)return;
+  if(!data.length){el.innerHTML='<p style="font-size:12px;color:var(--text3)">Nessun ospite invitato.</p>';return;}
+  el.innerHTML=data.map(function(g){
+    var p=g.permissions||PERM_DEFAULTS;
+    var secOpts=['carica','registro','summary','settings'];
+    var actOpts=['download','delete','edit','export','import'];
+    return '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:10px">'+
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'+
+        '<span style="font-weight:600;font-size:13px">'+g.guest_email+'</span>'+
+        '<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:'+(g.active?'var(--green-light)':'var(--surface)')+';color:'+(g.active?'var(--green)':'var(--text3)')+';border:1px solid '+(g.active?'var(--green)':'var(--border)')+'">'+
+          (g.active?'Attivo':'Disattivato')+'</span>'+
+        (g.guest_user_id?'':(
+          '<span style="font-size:10px;color:var(--orange)">In attesa registrazione</span>'
+        ))+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'+
+        '<div><div style="font-size:10px;font-weight:600;text-transform:uppercase;color:var(--text3);margin-bottom:6px">Sezioni visibili</div>'+
+          secOpts.map(function(s){
+            var on=p.sections&&p.sections[s]!==false;
+            return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;cursor:pointer">'+
+              '<input type="checkbox" '+(on?'checked':'')+' onchange="updateGuestPerm('+g.id+',\'sections\',\''+s+'\',this.checked)" style="accent-color:var(--accent)"> '+s+'</label>';
+          }).join('')+
+        '</div>'+
+        '<div><div style="font-size:10px;font-weight:600;text-transform:uppercase;color:var(--text3);margin-bottom:6px">Azioni consentite</div>'+
+          actOpts.map(function(a){
+            var on=p.actions&&p.actions[a]!==false;
+            return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;cursor:pointer">'+
+              '<input type="checkbox" '+(on?'checked':'')+' onchange="updateGuestPerm('+g.id+',\'actions\',\''+a+'\',this.checked)" style="accent-color:var(--accent)"> '+a+'</label>';
+          }).join('')+
+        '</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
+        '<button class="btn btn-secondary" style="font-size:11px" onclick="toggleGuestActive('+g.id+','+(!g.active)+')">'+(g.active?'Disattiva':'Riattiva')+' accesso</button>'+
+        '<button class="btn btn-danger" style="font-size:11px" onclick="removeGuest('+g.id+')">Rimuovi</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+
+async function inviteGuest(){
+  var email=(document.getElementById('guest-email')||{}).value;
+  if(!email){alert('Inserisci email ospite.');return;}
+  // Check if guest user exists
+  var {data:guestUser}=await sb.from('guest_access').select('id').eq('admin_user_id',currentUser.id).eq('guest_email',email);
+  if(guestUser&&guestUser.length){alert('Ospite gia invitato con questa email.');return;}
+  // Insert invite
+  var {error}=await sb.from('guest_access').insert({
+    admin_user_id:currentUser.id,
+    guest_email:email,
+    permissions:PERM_DEFAULTS
+  });
+  if(error){alert('Errore: '+error.message);return;}
+  document.getElementById('guest-email').value='';
+  showMsg('Ospite invitato! L\'utente deve registrarsi con questa email su '+window.location.href,'success');
+  loadGuestList();
+}
+
+async function updateGuestPerm(id,section,key,val){
+  var {data}=await sb.from('guest_access').select('permissions').eq('id',id).single();
+  var p=data.permissions||PERM_DEFAULTS;
+  if(!p[section])p[section]={};
+  p[section][key]=val;
+  await sb.from('guest_access').update({permissions:p}).eq('id',id);
+}
+
+async function toggleGuestActive(id,active){
+  await sb.from('guest_access').update({active:active}).eq('id',id);
+  loadGuestList();
+}
+
+async function removeGuest(id){
+  if(!confirm('Rimuovere questo ospite?'))return;
+  await sb.from('guest_access').delete().eq('id',id);
+  loadGuestList();
+}
+
+// Link guest user when they log in (match email)
+async function linkGuestIfNeeded(){
+  if(!currentUser)return;
+  var email=currentUser.email;
+  var {data}=await sb.from('guest_access').select('id,guest_user_id').eq('guest_email',email).is('guest_user_id',null);
+  if(data&&data.length){
+    await sb.from('guest_access').update({guest_user_id:currentUser.id}).eq('guest_email',email).is('guest_user_id',null);
+  }
+}
+
+// Override showApp to check guest mode
+var _origShowApp=showApp;
+async function showApp(){
+  _origShowApp();
+  await linkGuestIfNeeded();
+  await checkGuestMode();
+  // If guest, load admin's data
+  if(isGuestMode&&adminUserId){
+    var {data}=await sb.from('invoices').select('*').eq('user_id',adminUserId).order('date',{ascending:true});
+    txs=(data||[]).map(dbToTx);
+    populateYearFilters();renderTable();renderStats('stats-a');updateCount();
+  }
+}
+
+
+// ============================================================
+// TRADING SECTION
+// ============================================================
+
+var positions = [];       // loaded from DB
+var priceCache = {};      // {ticker: {price, change, changePct, high52, low52, ts}}
+var txType = 'buy';
+
+// ── TABS: extend showTab ──────────────────────────────────────────────────────
+var _origShowTab2 = showTab;
+showTab = function(t){
+  _origShowTab2(t);
+  if(t==='trading'){ loadPositions(); }
+};
+
+// ── DB: positions ─────────────────────────────────────────────────────────────
+async function loadPositions(){
+  var uid = isGuestMode ? adminUserId : currentUser.id;
+  var {data,error} = await sb.from('trading_positions').select('*').eq('user_id', uid).order('created_at');
+  if(error){ console.error(error); return; }
+  positions = data || [];
+  renderPositions();
+  if(positions.length > 0) refreshAllPrices();
+}
+
+async function savePosition(){
+  var id = document.getElementById('pos-edit-id').value;
+  var row = {
+    user_id:   currentUser.id,
+    ticker:    document.getElementById('pos-ticker').value.trim().toUpperCase(),
+    name:      document.getElementById('pos-name').value.trim(),
+    asset_type:document.getElementById('pos-type').value,
+    quantity:  parseFloat(document.getElementById('pos-qty').value)||0,
+    avg_buy_price: parseFloat(document.getElementById('pos-avgprice').value)||0,
+    currency:  document.getElementById('pos-currency').value,
+    notes:     document.getElementById('pos-notes').value.trim()
+  };
+  if(!row.ticker){ alert('Inserisci il Ticker Symbol.'); return; }
+  var {error} = id
+    ? await sb.from('trading_positions').update(row).eq('id', id)
+    : await sb.from('trading_positions').insert(row);
+  if(error){ alert('Errore: '+error.message); return; }
+  closePosModal();
+  await loadPositions();
+}
+
+async function deletePosition(id){
+  if(!confirm('Eliminare questa posizione e tutte le sue transazioni?')) return;
+  await sb.from('trading_transactions').delete().eq('position_id', id);
+  await sb.from('trading_positions').delete().eq('id', id);
+  await loadPositions();
+}
+
+// ── MODALS ────────────────────────────────────────────────────────────────────
+function openAddPosition(){
+  document.getElementById('pos-edit-id').value='';
+  document.getElementById('pos-ticker').value='';
+  document.getElementById('pos-name').value='';
+  document.getElementById('pos-type').value='stock';
+  document.getElementById('pos-qty').value='';
+  document.getElementById('pos-avgprice').value='';
+  document.getElementById('pos-currency').value='USD';
+  document.getElementById('pos-notes').value='';
+  document.getElementById('pos-modal-title').textContent='Aggiungi posizione';
+  var m=document.getElementById('pos-modal'); m.style.display='flex';
+}
+function openEditPosition(id){
+  var p=positions.find(function(x){return x.id===id;}); if(!p) return;
+  document.getElementById('pos-edit-id').value=p.id;
+  document.getElementById('pos-ticker').value=p.ticker;
+  document.getElementById('pos-name').value=p.name||'';
+  document.getElementById('pos-type').value=p.asset_type||'stock';
+  document.getElementById('pos-qty').value=p.quantity;
+  document.getElementById('pos-avgprice').value=p.avg_buy_price;
+  document.getElementById('pos-currency').value=p.currency||'USD';
+  document.getElementById('pos-notes').value=p.notes||'';
+  document.getElementById('pos-modal-title').textContent='Modifica posizione';
+  var m=document.getElementById('pos-modal'); m.style.display='flex';
+}
+function closePosModal(){ document.getElementById('pos-modal').style.display='none'; }
+
+function openTxModal(posId){
+  document.getElementById('tx-pos-id').value=posId;
+  document.getElementById('tx-qty').value='';
+  document.getElementById('tx-price').value='';
+  document.getElementById('tx-fees').value='0';
+  document.getElementById('tx-notes').value='';
+  var today=new Date().toISOString().slice(0,10);
+  document.getElementById('tx-date').value=today;
+  setTxType('buy');
+  var p=positions.find(function(x){return x.id===posId;});
+  document.getElementById('tx-modal-title').textContent='Transazione — '+(p?p.ticker:'');
+  document.getElementById('tx-modal').style.display='flex';
+  updateTxSummary();
+}
+function closeTxModal(){ document.getElementById('tx-modal').style.display='none'; }
+function setTxType(type){
+  txType=type;
+  document.getElementById('tx-type').value=type;
+  var bb=document.getElementById('tx-buy-btn'); var sb2=document.getElementById('tx-sell-btn');
+  if(bb){bb.className=type==='buy'?'btn btn-primary':'btn btn-secondary';}
+  if(sb2){sb2.className=type==='sell'?'btn btn-primary':'btn btn-secondary';}
+  updateTxSummary();
+}
+function updateTxSummary(){
+  var qty=parseFloat(document.getElementById('tx-qty').value)||0;
+  var price=parseFloat(document.getElementById('tx-price').value)||0;
+  var fees=parseFloat(document.getElementById('tx-fees').value)||0;
+  var total=qty*price+(txType==='buy'?fees:-fees);
+  var el=document.getElementById('tx-summary');
+  if(!el) return;
+  if(qty>0&&price>0){
+    el.style.display='';
+    el.innerHTML=(txType==='buy'?'Acquisto: ':'Vendita: ')+qty+' x '+price.toFixed(2)+' + commissioni '+fees.toFixed(2)+' = <b>'+(total).toFixed(2)+'</b>';
+  } else { el.style.display='none'; }
+}
+
+async function saveTransaction2(){
+  var posId=parseInt(document.getElementById('tx-pos-id').value);
+  var qty=parseFloat(document.getElementById('tx-qty').value)||0;
+  var price=parseFloat(document.getElementById('tx-price').value)||0;
+  var fees=parseFloat(document.getElementById('tx-fees').value)||0;
+  var date=document.getElementById('tx-date').value;
+  if(!qty||!price||!date){ alert('Completa tutti i campi obbligatori.'); return; }
+  // Save transaction
+  var {error}=await sb.from('trading_transactions').insert({
+    user_id:currentUser.id, position_id:posId, type:txType,
+    quantity:qty, price:price, fees:fees, date:date,
+    notes:document.getElementById('tx-notes').value
+  });
+  if(error){ alert('Errore: '+error.message); return; }
+  // Recalculate position avg price & quantity
+  var {data:txs2}=await sb.from('trading_transactions').select('*').eq('position_id',posId).order('date');
+  if(txs2){
+    var totalQty=0, totalCost=0;
+    txs2.forEach(function(t){
+      if(t.type==='buy'){totalQty+=parseFloat(t.quantity);totalCost+=parseFloat(t.quantity)*parseFloat(t.price)+parseFloat(t.fees||0);}
+      else{totalQty-=parseFloat(t.quantity);totalCost-=parseFloat(t.quantity)*parseFloat(t.price);}
+    });
+    totalQty=Math.max(0,totalQty);
+    var newAvg=totalQty>0?totalCost/totalQty:0;
+    await sb.from('trading_positions').update({quantity:totalQty,avg_buy_price:newAvg}).eq('id',posId);
+  }
+  closeTxModal();
+  await loadPositions();
+}
+
+// ── PRICE FETCHING (Yahoo Finance) ────────────────────────────────────────────
+async function fetchPrice(ticker){
+  if(priceCache[ticker]&&Date.now()-priceCache[ticker].ts<300000) return priceCache[ticker]; // 5min cache
+  try{
+    var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?interval=1d&range=3mo&events=div';
+    var r=await fetch(url);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    var d=await r.json();
+    var meta=d.result[0].meta;
+    var closes=d.result[0].indicators.quote[0].close;
+    var timestamps=d.result[0].timestamp;
+    var currentPrice=meta.regularMarketPrice||meta.chartPreviousClose;
+    var prevClose=meta.chartPreviousClose||currentPrice;
+    var change=currentPrice-prevClose;
+    var changePct=prevClose>0?change/prevClose*100:0;
+    // 52w high/low from 3mo data (approximate)
+    var validCloses=closes.filter(function(c){return c!==null;});
+    var high52=Math.max.apply(null,validCloses);
+    var low52=Math.min.apply(null,validCloses);
+    var result={price:currentPrice,change:change,changePct:changePct,high52:high52,low52:low52,
+      closes:closes,timestamps:timestamps,currency:meta.currency||'USD',ts:Date.now()};
+    priceCache[ticker]=result;
+    return result;
+  } catch(e){
+    console.warn('Price fetch failed for '+ticker+':', e.message);
+    return null;
+  }
+}
+
+async function refreshAllPrices(){
+  var btn=document.getElementById('refresh-btn');
+  if(btn){btn.disabled=true;btn.textContent='Aggiornamento...';}
+  var tickers=positions.map(function(p){return p.ticker;});
+  var unique=[...new Set(tickers)];
+  for(var i=0;i<unique.length;i++){
+    await fetchPrice(unique[i]);
+    // Yield to UI
+    await new Promise(function(r){setTimeout(r,200);});
+  }
+  if(btn){btn.disabled=false;btn.textContent='\u21BB Aggiorna prezzi';}
+  var upd=document.getElementById('last-update');
+  if(upd)upd.textContent='Aggiornato: '+new Date().toLocaleTimeString('it-IT');
+  renderPositions();
+  generateRecommendations();
+}
+
+// ── SPARKLINE ─────────────────────────────────────────────────────────────────
+function drawSparkline(closes, width, height, color){
+  if(!closes||closes.length<2) return '';
+  var valid=closes.filter(function(c){return c!==null;}).slice(-30);
+  if(valid.length<2) return '';
+  var mn=Math.min.apply(null,valid);
+  var mx=Math.max.apply(null,valid);
+  var range=mx-mn||1;
+  var pts=valid.map(function(c,i){
+    var x=i/(valid.length-1)*width;
+    var y=height-(c-mn)/range*height;
+    return x.toFixed(1)+','+y.toFixed(1);
+  }).join(' ');
+  return '<svg class="sparkline" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+' '+height+'">'+
+    '<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5" stroke-linejoin="round"/>'+
+    '</svg>';
+}
+
+// ── RENDER POSITIONS ──────────────────────────────────────────────────────────
+function renderPositions(){
+  var filterType=document.getElementById('pos-filter-type');
+  var ftype=filterType?filterType.value:'all';
+  var arr=ftype==='all'?positions:positions.filter(function(p){return p.asset_type===ftype;});
+  var grid=document.getElementById('pos-grid');
+  var empty=document.getElementById('pos-empty');
+  var recPanel=document.getElementById('ai-rec-panel');
+  if(!arr.length){
+    if(grid)grid.innerHTML='';if(empty)empty.style.display='';if(recPanel)recPanel.style.display='none';return;
+  }
+  if(empty)empty.style.display='none';if(recPanel)recPanel.style.display='';
+
+  var totalValue=0,totalCost=0;
+  var cards=arr.map(function(p){
+    var data=priceCache[p.ticker];
+    var qty=parseFloat(p.quantity)||0;
+    var avgCost=parseFloat(p.avg_buy_price)||0;
+    var currentPrice=data?data.price:null;
+    var cost=qty*avgCost;
+    var value=currentPrice?qty*currentPrice:cost;
+    var pnl=currentPrice?value-cost:null;
+    var pnlPct=cost>0&&pnl!==null?pnl/cost*100:null;
+    totalValue+=value; totalCost+=cost;
+    var badgeClass='pos-badge-'+(p.asset_type||'other');
+    var priceStr=currentPrice?currentPrice.toFixed(2)+'<small style="font-size:11px;color:var(--text2);margin-left:4px">'+(p.currency||'USD')+'</small>':'<span style="color:var(--text3);font-size:13px">N/D</span>';
+    var changeStr=data?'<span class="'+(data.change>=0?'price-up':'price-down')+'">'+
+      (data.change>=0?'+':'')+data.change.toFixed(2)+' ('+data.changePct.toFixed(2)+'%)</span>':'';
+    var pnlStr=pnl!==null?'<span class="'+(pnl>=0?'pnl-pos':'pnl-neg')+'">'+
+      (pnl>=0?'+':'')+pnl.toFixed(2)+' ('+pnlPct.toFixed(1)+'%)</span>':'<span style="color:var(--text3)">--</span>';
+    var spark=data?drawSparkline(data.closes,80,28,pnlPct>=0?'#16a34a':'#dc2626'):'';
+    return '<div class="pos-card">'+
+      '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">'+
+        '<div>'+
+          '<div style="font-size:16px;font-weight:700;color:var(--text)">'+p.ticker+'</div>'+
+          '<div style="font-size:11.5px;color:var(--text2);margin-top:1px">'+(p.name||'')+'</div>'+
+        '</div>'+
+        '<span class="pos-badge '+badgeClass+'">'+(p.asset_type||'other')+'</span>'+
+      '</div>'+
+      '<div style="margin-bottom:8px">'+
+        '<span class="price-tag">'+priceStr+'</span> '+spark+
+        '<div style="margin-top:2px">'+changeStr+'</div>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11.5px;margin-bottom:10px">'+
+        '<div><div style="color:var(--text3);font-size:10px">QUANTITA</div><b>'+qty.toLocaleString('it-IT',{maximumFractionDigits:6})+'</b></div>'+
+        '<div><div style="color:var(--text3);font-size:10px">PREZZO MEDIO</div><b>'+avgCost.toFixed(2)+'</b></div>'+
+        '<div><div style="color:var(--text3);font-size:10px">VALORE</div><b>'+value.toFixed(2)+'</b></div>'+
+        '<div><div style="color:var(--text3);font-size:10px">P&amp;L</div>'+pnlStr+'</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
+        '<button class="btn btn-primary" style="font-size:10.5px;padding:5px 10px" onclick="openTxModal('+p.id+')">+ Transazione</button>'+
+        '<button class="btn btn-secondary" style="font-size:10.5px;padding:5px 10px" onclick="openEditPosition('+p.id+')">&#9998; Modifica</button>'+
+        '<button class="btn btn-danger" style="font-size:10.5px;padding:5px 10px" onclick="deletePosition('+p.id+')">&#215;</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+
+  if(grid)grid.innerHTML=cards;
+
+  // Stats bar
+  var totalPnl=totalValue-totalCost;
+  var totalPnlPct=totalCost>0?totalPnl/totalCost*100:0;
+  var statsEl=document.getElementById('trading-stats');
+  if(statsEl){
+    statsEl.innerHTML=
+      stat('Valore Portfolio',totalValue.toFixed(2),'var(--accent)')+
+      stat('Costo Totale',totalCost.toFixed(2),'var(--text2)')+
+      stat('P&L Totale',(totalPnl>=0?'+':'')+totalPnl.toFixed(2)+'  ('+totalPnlPct.toFixed(1)+'%)',totalPnl>=0?'var(--green)':'var(--red)')+
+      stat('Posizioni',positions.length,'var(--accent)');
+  }
+}
+
+// ── AI RECOMMENDATIONS ────────────────────────────────────────────────────────
+async function generateRecommendations(){
+  var el=document.getElementById('ai-rec-content');
+  if(!el) return;
+  el.innerHTML='<div class="ai-thinking"><div style="animation:spin 1s linear infinite;display:inline-block">&#9654;</div>Analisi AI in corso...</div>';
+
+  // Build context for Claude
+  var positionsSummary=positions.map(function(p){
+    var data=priceCache[p.ticker];
+    var qty=parseFloat(p.quantity)||0;
+    var avg=parseFloat(p.avg_buy_price)||0;
+    var curr=data?data.price:null;
+    var pnlPct=curr&&avg>0?(curr-avg)/avg*100:null;
+    var recentCloses=data&&data.closes?data.closes.filter(function(c){return c!==null;}).slice(-10):[];
+    var trend=recentCloses.length>=2?(recentCloses[recentCloses.length-1]-recentCloses[0])/recentCloses[0]*100:null;
+    return {
+      ticker:p.ticker, name:p.name||p.ticker, type:p.asset_type,
+      qty:qty, avgCost:avg, currentPrice:curr,
+      pnlPct:pnlPct?pnlPct.toFixed(1)+'%':null,
+      dayChange:data?data.changePct.toFixed(2)+'%':null,
+      trend10d:trend?trend.toFixed(1)+'%':null,
+      high3m:data?data.high52.toFixed(2):null,
+      low3m:data?data.low52.toFixed(2):null,
+      currency:p.currency
+    };
+  });
+
+  var prompt='Sei un consulente finanziario esperto. Analizza questo portafoglio e fornisci consigli specifici su QUANDO e PERCHE\' comprare di piu o vendere per ciascuna posizione. Rispondi SOLO con un JSON array, nessun testo fuori dal JSON.\n\nPortafoglio:\n'+JSON.stringify(positionsSummary,null,2)+'\n\nRispondi ESATTAMENTE in questo formato JSON:\n[{"ticker":"AAPL","action":"buy|sell|hold|watch","urgency":"high|medium|low","title":"Titolo breve del consiglio","reason":"Spiegazione dettagliata in italiano (2-4 frasi) con riferimento ai numeri specifici","detail":"Dettaglio tecnico: livelli di prezzo target, percentuali, contesto di mercato","warning":"Eventuali rischi o avvertenze (opzionale, puo essere null)"}]';
+
+  try{
+    var response=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:2000,
+        messages:[{role:'user',content:prompt}]
+      })
+    });
+    var data=await response.json();
+    var text=data.content[0].text;
+    // Parse JSON from response
+    var jsonMatch=text.match(/\[[\s\S]*\]/);
+    if(!jsonMatch) throw new Error('No JSON found');
+    var recs=JSON.parse(jsonMatch[0]);
+
+    var typeMap={buy:'rec-buy',sell:'rec-sell',hold:'rec-hold',watch:'rec-watch'};
+    var iconMap={buy:'&#128200;',sell:'&#128201;',hold:'&#128336;',watch:'&#128270;'};
+    var urgencyMap={high:'&#128308;',medium:'&#128992;',low:'&#9899;'};
+    var titleColorMap={buy:'var(--green)',sell:'var(--red)',hold:'#854d0e',watch:'var(--accent)'};
+
+    el.innerHTML='<div style="font-size:10.5px;color:var(--text3);margin-bottom:12px">Analisi generata da Claude AI. Non costituisce consulenza finanziaria professionale.</div>'+
+      recs.map(function(r){
+        return '<div class="rec-card '+typeMap[r.action]+'">'+
+          '<div class="rec-icon">'+iconMap[r.action]+'</div>'+
+          '<div style="flex:1">'+
+            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'+
+              '<span style="font-weight:800;font-size:13px">'+r.ticker+'</span>'+
+              (urgencyMap[r.urgency]||'')+
+              '<span class="rec-title" style="color:'+titleColorMap[r.action]+';margin-left:4px">'+r.title+'</span>'+
+            '</div>'+
+            '<div style="margin-bottom:5px">'+r.reason+'</div>'+
+            '<div style="font-size:11px;color:var(--text2);background:rgba(0,0,0,0.04);padding:6px 10px;border-radius:4px">'+r.detail+'</div>'+
+            (r.warning?'<div style="font-size:10.5px;color:var(--orange);margin-top:5px">&#9888; '+r.warning+'</div>':'')+
+          '</div>'+
+        '</div>';
+      }).join('');
+
+  } catch(e){
+    el.innerHTML='<div style="color:var(--red);font-size:12px;padding:12px">Errore analisi AI: '+e.message+'. Assicurati che i prezzi siano stati aggiornati.</div>';
+  }
+}
+
