@@ -549,6 +549,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
 .adv-info .adv-title{color:var(--accent)}
 .adv-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);margin-top:14px}
 .adv-section h3{font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--accent2);margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.cat-merge-btn.active{background:var(--surface)!important;color:var(--accent)!important;font-weight:600!important;}
 </style>
 </head>
 <body>
@@ -793,15 +794,30 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
       <button class="period-pill" data-p="12" onclick="togglePeriodS('12',this)">Dic</button>
     </div>
   </div>
-  <div class="cat-split" style="margin-bottom:14px">
-    <div>
-      <p class="cat-split-title" style="color:var(--green)">&#8593; Entrate per categoria</p>
-      <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden"><table class="cat-table"><thead><tr><th>Category</th><th>Net</th><th>VAT</th><th>Total</th></tr></thead><tbody id="cat-tbody-in"></tbody></table></div>
+  <!-- Category merge filter -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+    <span style="font-size:11px;color:var(--text2);font-weight:600">Vista categorie:</span>
+    <div style="display:flex;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px;gap:2px">
+      <button id="cat-merge-detail" class="cat-merge-btn active" onclick="setCatMerge('detail')" style="padding:4px 12px;border:none;border-radius:4px;font-size:11px;cursor:pointer;background:var(--surface);font-weight:600;color:var(--accent)">Dettaglio</button>
+      <button id="cat-merge-group" class="cat-merge-btn" onclick="setCatMerge('group')" style="padding:4px 12px;border:none;border-radius:4px;font-size:11px;cursor:pointer;background:transparent;color:var(--text2)">Raggruppato</button>
     </div>
-    <div>
-      <p class="cat-split-title" style="color:var(--red)">&#8595; Uscite per categoria</p>
-      <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden"><table class="cat-table"><thead><tr><th>Category</th><th>Net</th><th>VAT</th><th>Total</th></tr></thead><tbody id="cat-tbody-out"></tbody></table></div>
+    <span style="font-size:10.5px;color:var(--text3)">Raggruppato unisce Travel, Revenue, Professional Services...</span>
+  </div>
+  <!-- Entrate -->
+  <div style="margin-bottom:10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)">
+    <div onclick="toggleCatSection('in')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;cursor:pointer;background:var(--green-light);border-bottom:1px solid var(--border)">
+      <p class="cat-split-title" style="color:var(--green);margin:0">&#8593; Entrate per categoria</p>
+      <button id="cat-toggle-in" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;pointer-events:none">Riduci</button>
     </div>
+    <div id="cat-section-in"><table class="cat-table" style="width:100%"><thead><tr><th>Category</th><th>Net</th><th>VAT</th><th>Total</th></tr></thead><tbody id="cat-tbody-in"></tbody></table></div>
+  </div>
+  <!-- Uscite -->
+  <div style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)">
+    <div onclick="toggleCatSection('out')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;cursor:pointer;background:var(--red-light);border-bottom:1px solid var(--border)">
+      <p class="cat-split-title" style="color:var(--red);margin:0">&#8595; Uscite per categoria</p>
+      <button id="cat-toggle-out" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;pointer-events:none">Riduci</button>
+    </div>
+    <div id="cat-section-out"><table class="cat-table" style="width:100%"><thead><tr><th>Category</th><th>Net</th><th>VAT</th><th>Total</th></tr></thead><tbody id="cat-tbody-out"></tbody></table></div>
   </div>
   <div class="tax-panel" style="margin-bottom:14px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
