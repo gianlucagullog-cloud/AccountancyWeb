@@ -14,7 +14,7 @@ var catFilterSet=null; // null = all
 var isGuestMode=false;
 var guestPermissions={};
 var adminUserId=null;
-var appStarted=false;
+window.appStarted=false;
 var catEntrateExpanded=true;
 var catUsciteExpanded=true;
 
@@ -67,12 +67,12 @@ function doLogout(){
     document.getElementById('lock-email').value='';
     document.getElementById('lock-input').value='';
     ['user-email-badge','logout-btn','hdr-badge'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
-    appStarted=false; // allow re-login
+    window.appStarted=false;
   });
 }
 function showLockError(msg){var el=document.getElementById('lock-error');el.textContent=msg;el.style.display='';setTimeout(function(){el.style.display='none';},5000);}
 async function showApp(){
-  if(appStarted) return; // prevent recursive/multiple calls
+  if(window.appStarted) return; // prevent recursive/multiple calls
   appStarted=true;
   document.getElementById('lock-screen').style.display='none';
   document.getElementById('app-content').style.display='';
@@ -1395,28 +1395,35 @@ function exportZIP(){
   _buildZIP(arr,q==='all'?'Anno':q);
 }
 
-// INIT
-sb.auth.getSession().then(function(r){
-  if(r.data&&r.data.session){currentUser=r.data.session.user;showApp();}
-  else{document.getElementById('lock-screen').style.display='flex';document.getElementById('app-content').style.display='none';}
-});
-sb.auth.onAuthStateChange(function(event,session){
-  if(event==='SIGNED_IN'&&session){
-    currentUser=session.user;
-    // Only call showApp if not already started (first login)
-    if(!appStarted) showApp();
-  }
-  if(event==='SIGNED_OUT'){currentUser=null;appStarted=false;}
-});
-document.addEventListener('DOMContentLoaded',function(){
+// INIT — tutto dentro DOMContentLoaded per garantire che le variabili siano pronte
+document.addEventListener('DOMContentLoaded', function(){
   updateAmountSections();
-  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeEditModal();});
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeEditModal(); });
   var dz=document.getElementById('dropzone');
   if(dz){
-    dz.addEventListener('dragover',function(e){e.preventDefault();dz.classList.add('drag');});
-    dz.addEventListener('dragleave',function(){dz.classList.remove('drag');});
-    dz.addEventListener('drop',function(e){e.preventDefault();dz.classList.remove('drag');var f=e.dataTransfer.files[0];if(f)handleFile(f);});
+    dz.addEventListener('dragover',  function(e){ e.preventDefault(); dz.classList.add('drag'); });
+    dz.addEventListener('dragleave', function(){ dz.classList.remove('drag'); });
+    dz.addEventListener('drop',      function(e){ e.preventDefault(); dz.classList.remove('drag'); var f=e.dataTransfer.files[0]; if(f) handleFile(f); });
   }
+
+  // Auth — inizializzato dopo il DOM per garantire scope corretto
+  sb.auth.onAuthStateChange(function(event, session){
+    if(event==='SIGNED_IN' && session){
+      currentUser = session.user;
+      if(!window.appStarted) showApp();
+    }
+    if(event==='SIGNED_OUT'){ currentUser=null; window.appStarted=false; }
+  });
+
+  sb.auth.getSession().then(function(r){
+    if(r.data && r.data.session){
+      currentUser = r.data.session.user;
+      showApp();
+    } else {
+      document.getElementById('lock-screen').style.display='flex';
+      document.getElementById('app-content').style.display='none';
+    }
+  });
 });
 
 // ============================================================
