@@ -895,13 +895,13 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
   <div class="stats" id="trading-stats"></div>
 
   <!-- Toolbar -->
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-    <button class="btn btn-primary" onclick="openAddPosition()" style="font-size:12px">+ Aggiungi posizione</button>
-    <button class="btn btn-secondary" onclick="refreshAllPrices()" id="refresh-btn" style="font-size:12px">&#8635; Aggiorna prezzi</button>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+    <button class="btn btn-primary" onclick="openAddPosition()" style="font-size:12px">+ Aggiungi</button>
+    <button class="btn btn-secondary" onclick="refreshAllPrices()" id="refresh-btn" style="font-size:12px">&#8635; Prezzi</button>
     <span id="last-update" style="font-size:10.5px;color:var(--text3)"></span>
     <div style="flex:1"></div>
     <select id="pos-filter-type" onchange="renderPositions()" style="font-size:12px;padding:5px 8px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--font)">
-      <option value="all">Tutti i tipi</option>
+      <option value="all">Tutti</option>
       <option value="stock">Stock</option>
       <option value="etf">ETF</option>
       <option value="bond">Bond</option>
@@ -909,6 +909,35 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
       <option value="commodity">Commodity</option>
       <option value="other">Other</option>
     </select>
+  </div>
+
+  <!-- Period selector + multi-select comparison -->
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;box-shadow:var(--shadow)">
+    <span style="font-size:11px;color:var(--text2);font-weight:600">Periodo:</span>
+    <div style="display:flex;gap:3px;flex-wrap:wrap">
+      <button class="period-pill active" data-range="1d"   onclick="setTradingPeriod('1d',this)">1G</button>
+      <button class="period-pill" data-range="5d"   onclick="setTradingPeriod('5d',this)">1S</button>
+      <button class="period-pill" data-range="1mo"  onclick="setTradingPeriod('1mo',this)">1M</button>
+      <button class="period-pill" data-range="3mo"  onclick="setTradingPeriod('3mo',this)">3M</button>
+      <button class="period-pill" data-range="6mo"  onclick="setTradingPeriod('6mo',this)">6M</button>
+      <button class="period-pill" data-range="1y"   onclick="setTradingPeriod('1y',this)">1A</button>
+      <button class="period-pill" data-range="5y"   onclick="setTradingPeriod('5y',this)">5A</button>
+    </div>
+    <div class="pill-sep" style="height:18px"></div>
+    <span style="font-size:11px;color:var(--text2)">Compara: seleziona uno o piu titoli</span>
+    <button class="btn btn-secondary" id="compare-btn" style="font-size:11px;display:none" onclick="openCompareChart()">&#128200; Confronta selezionati</button>
+    <button class="btn btn-secondary" style="font-size:11px" onclick="deselectAllPos()">Deseleziona</button>
+  </div>
+
+  <!-- Compare chart panel -->
+  <div id="compare-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;margin-bottom:14px;box-shadow:var(--shadow)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h3 style="font-size:13px;font-weight:700;margin:0">Confronto Prezzi — <span id="compare-period-label">1 Giorno</span></h3>
+      <button class="btn btn-secondary" style="font-size:11px" onclick="document.getElementById('compare-panel').style.display='none'">&#215; Chiudi</button>
+    </div>
+    <div id="compare-legend" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;font-size:11px"></div>
+    <svg id="compare-svg" width="100%" height="200" style="display:block"></svg>
+    <div id="compare-stats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-top:12px"></div>
   </div>
 
   <!-- Portfolio grid -->
@@ -1019,11 +1048,23 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
 <!-- INVITE MODAL -->
 <div id="invite-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2000;align-items:center;justify-content:center">
   <div class="modal-box" style="max-width:480px;width:94vw">
-    <h3 style="font-size:15px;margin-bottom:6px">Invita un utente</h3>
-    <p style="font-size:12px;color:var(--text2);margin-bottom:18px">L'utente dovra registrarsi con questa email sul sito. Il collegamento avviene automaticamente al primo login.</p>
-    <div class="form-group">
-      <label>Email</label>
-      <input type="email" id="invite-email" placeholder="commercialista@studio.it" onkeydown="if(event.key==='Enter')submitInvite()">
+    <h3 style="font-size:15px;margin-bottom:6px">Crea accesso utente</h3>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:18px">Crea direttamente le credenziali per il nuovo utente. Comunicagli email e password in modo sicuro.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px">
+      <div class="form-group" style="margin:0">
+        <label>Email</label>
+        <input type="email" id="invite-email" placeholder="commercialista@studio.it">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Password (min 6 caratteri)</label>
+        <div style="position:relative">
+          <input type="password" id="invite-password" placeholder="Scegli una password" style="width:100%;padding-right:36px">
+          <button onclick="togglePwdVisibility()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:14px;color:var(--text2)" id="pwd-eye">&#128065;</button>
+        </div>
+      </div>
+    </div>
+    <div style="background:var(--accent-light);border:1px solid var(--border2);border-radius:var(--radius-sm);padding:8px 12px;font-size:11px;color:var(--accent);margin-bottom:14px">
+      &#128274; Le credenziali vengono create su Supabase. Dopo la creazione comunica email e password all'utente in modo sicuro.
     </div>
     <div style="margin-bottom:18px">
       <label style="font-size:12px;font-weight:600;color:var(--text);display:block;margin-bottom:10px">Permessi iniziali</label>

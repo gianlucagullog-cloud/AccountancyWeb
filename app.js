@@ -1452,6 +1452,13 @@ var validatedDupIds=new Set(JSON.parse(localStorage.getItem('inv_valid_dups')||'
 // UTENTI (USER MANAGEMENT) - Tab dedicato
 // ============================================================
 
+function togglePwdVisibility(){
+  var inp=document.getElementById('invite-password');
+  var eye=document.getElementById('pwd-eye');
+  if(!inp)return;
+  inp.type=inp.type==='password'?'text':'password';
+  if(eye)eye.textContent=inp.type==='password'?'\u{1F441}':'\u{1F648}';
+}
 function openInviteModal(){
   document.getElementById('invite-email').value='';
   document.getElementById('inv-period-from').value='';
@@ -1472,29 +1479,49 @@ function closeInviteModal(){
 
 async function submitInvite(){
   var email=(document.getElementById('invite-email').value||'').trim();
-  if(!email){alert('Inserisci la email dell utente.');return;}
+  var pwd=(document.getElementById('invite-password').value||'').trim();
+  if(!email){alert('Inserisci la email.');return;}
+  if(!pwd||pwd.length<6){alert('La password deve essere di almeno 6 caratteri.');return;}
 
-  // Build permissions from checkboxes
+  // Build permissions
   var sections={};
   document.querySelectorAll('.inv-sec').forEach(function(cb){sections[cb.dataset.key]=cb.checked;});
   var actions={};
   document.querySelectorAll('.inv-act').forEach(function(cb){actions[cb.dataset.key]=cb.checked;});
   var periodFrom=document.getElementById('inv-period-from').value||null;
   var periodTo=document.getElementById('inv-period-to').value||null;
-
   var perms={sections:sections,actions:actions,period_from:periodFrom,period_to:periodTo};
 
-  // Check for existing invite
+  // Check existing
   var {data:existing}=await sb.from('guest_access').select('id').eq('admin_user_id',currentUser.id).eq('guest_email',email);
-  if(existing&&existing.length){alert('Utente gia invitato con questa email.');return;}
+  if(existing&&existing.length){alert('Utente gia presente con questa email.');return;}
 
-  var {error}=await sb.from('guest_access').insert({
-    admin_user_id:currentUser.id, guest_email:email, permissions:perms
+  // Create user account using a temporary Supabase client
+  // (so the admin session is not affected)
+  var tmpClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{
+    auth:{storageKey:'tmp_auth_'+Date.now(),autoRefreshToken:false,persistSession:false}
   });
-  if(error){alert('Errore: '+error.message);return;}
+  var {data:signUpData,error:signUpErr}=await tmpClient.auth.signUp({email:email,password:pwd});
+  if(signUpErr){
+    alert('Errore creazione account: '+signUpErr.message);return;
+  }
+  var guestUserId=signUpData&&signUpData.user?signUpData.user.id:null;
+
+  // Save to guest_access
+  var {error:gaErr}=await sb.from('guest_access').insert({
+    admin_user_id:currentUser.id,
+    guest_email:email,
+    guest_user_id:guestUserId,
+    permissions:perms,
+    active:true
+  });
+  if(gaErr){alert('Account creato ma errore salvataggio permessi: '+gaErr.message);return;}
 
   closeInviteModal();
-  showMsg('Utente invitato! Si registri con questa email su '+window.location.origin+window.location.pathname,'success');
+  // Show credentials to admin
+  setTimeout(function(){
+    alert('Utente creato!\n\nCredenziali da comunicare:\nEmail: '+email+'\nPassword: '+pwd+'\n\nL utente accede direttamente con queste credenziali.');
+  },200);
   loadUtenti();
 }
 
@@ -1644,9 +1671,14 @@ async function loadGuestList(){ loadUtenti(); }
 // TRADING SECTION
 // ============================================================
 
-var positions = [];       // loaded from DB
-var priceCache = {};      // {ticker: {price, change, changePct, high52, low52, ts}}
+var positions = [];
+var priceCache = {};
 var txType = 'buy';
+var tradingPeriod = '1d';
+var tradingPeriodInterval = '5m';
+var selectedPosTickers = new Set();
+var PERIOD_LABELS = {'1d':'1 Giorno','5d':'1 Settimana','1mo':'1 Mese','3mo':'3 Mesi','6mo':'6 Mesi','1y':'1 Anno','5y':'5 Anni'};
+var PERIOD_INTERVALS = {'1d':'5m','5d':'60m','1mo':'1d','3mo':'1d','6mo':'1d','1y':'1wk','5y':'1mo'};
 
 // Trading tab handled in main showTab
 
@@ -1783,32 +1815,163 @@ async function saveTransaction2(){
 }
 
 // ── PRICE FETCHING (Yahoo Finance) ────────────────────────────────────────────
-async function fetchPrice(ticker){
-  if(priceCache[ticker]&&Date.now()-priceCache[ticker].ts<300000) return priceCache[ticker]; // 5min cache
+async function fetchPrice(ticker, range, interval){
+  range = range || '3mo';
+  interval = interval || '1d';
+  var cacheKey = ticker+'_'+range;
+  var cached = priceCache[cacheKey];
+  if(cached && Date.now()-cached.ts < (range==='1d'?60000:300000)) return cached;
   try{
-    var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?interval=1d&range=3mo&events=div';
+    var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?interval='+interval+'&range='+range;
     var r=await fetch(url);
     if(!r.ok) throw new Error('HTTP '+r.status);
     var d=await r.json();
+    if(!d.result||!d.result[0]) throw new Error('No data');
     var meta=d.result[0].meta;
-    var closes=d.result[0].indicators.quote[0].close;
-    var timestamps=d.result[0].timestamp;
+    var closes=d.result[0].indicators.quote[0].close||[];
+    var timestamps=d.result[0].timestamp||[];
     var currentPrice=meta.regularMarketPrice||meta.chartPreviousClose;
     var prevClose=meta.chartPreviousClose||currentPrice;
     var change=currentPrice-prevClose;
     var changePct=prevClose>0?change/prevClose*100:0;
-    // 52w high/low from 3mo data (approximate)
     var validCloses=closes.filter(function(c){return c!==null;});
-    var high52=Math.max.apply(null,validCloses);
-    var low52=Math.min.apply(null,validCloses);
-    var result={price:currentPrice,change:change,changePct:changePct,high52:high52,low52:low52,
-      closes:closes,timestamps:timestamps,currency:meta.currency||'USD',ts:Date.now()};
-    priceCache[ticker]=result;
+    var firstValid=validCloses[0]||currentPrice;
+    var periodChange=currentPrice-firstValid;
+    var periodChangePct=firstValid>0?periodChange/firstValid*100:0;
+    var high=validCloses.length?Math.max.apply(null,validCloses):currentPrice;
+    var low=validCloses.length?Math.min.apply(null,validCloses):currentPrice;
+    var result={price:currentPrice,change:change,changePct:changePct,
+      periodChange:periodChange,periodChangePct:periodChangePct,
+      high:high,low:low,closes:closes,timestamps:timestamps,
+      currency:meta.currency||'USD',ts:Date.now()};
+    priceCache[cacheKey]=result;
+    // Also store as default for current period
+    if(range===tradingPeriod) priceCache[ticker]=result;
     return result;
   } catch(e){
     console.warn('Price fetch failed for '+ticker+':', e.message);
     return null;
   }
+}
+
+function setTradingPeriod(range, btn){
+  tradingPeriod=range;
+  tradingPeriodInterval=PERIOD_INTERVALS[range]||'1d';
+  document.querySelectorAll('[data-range]').forEach(function(b){b.classList.remove('active');});
+  if(btn)btn.classList.add('active');
+  // Clear cache for this period to force refetch
+  positions.forEach(function(p){ delete priceCache[p.ticker+'_'+range]; });
+  refreshAllPrices();
+}
+
+function handlePosSelect(cb){ togglePosSelect(cb.dataset.ticker); }
+function togglePosSelect(ticker){
+  if(selectedPosTickers.has(ticker)) selectedPosTickers.delete(ticker);
+  else selectedPosTickers.add(ticker);
+  var btn=document.getElementById('compare-btn');
+  if(btn) btn.style.display=selectedPosTickers.size>1?'':'none';
+  renderPositions();
+}
+function deselectAllPos(){
+  selectedPosTickers.clear();
+  var btn=document.getElementById('compare-btn');
+  if(btn) btn.style.display='none';
+  renderPositions();
+}
+
+async function openCompareChart(){
+  if(selectedPosTickers.size<1) return;
+  var panel=document.getElementById('compare-panel');
+  if(panel) panel.style.display='';
+  var lbl=document.getElementById('compare-period-label');
+  if(lbl) lbl.textContent=PERIOD_LABELS[tradingPeriod]||tradingPeriod;
+
+  var colors=['#4f46e5','#16a34a','#dc2626','#d97706','#0891b2','#7c3aed','#db2777'];
+  var tickers=Array.from(selectedPosTickers);
+  var allData=[];
+
+  // Fetch all data
+  for(var i=0;i<tickers.length;i++){
+    var d=await fetchPrice(tickers[i],tradingPeriod,tradingPeriodInterval);
+    if(d) allData.push({ticker:tickers[i],data:d,color:colors[i%colors.length]});
+  }
+
+  // Build legend
+  var legend=document.getElementById('compare-legend');
+  if(legend) legend.innerHTML=allData.map(function(a){
+    var chg=a.data.periodChangePct;
+    return '<span style="display:flex;align-items:center;gap:5px">'+
+      '<span style="width:12px;height:3px;background:'+a.color+';display:inline-block;border-radius:2px"></span>'+
+      '<b>'+a.ticker+'</b>'+
+      '<span style="color:'+(chg>=0?'var(--green)':'var(--red)')+'">'+(chg>=0?'+':'')+chg.toFixed(2)+'%</span>'+
+    '</span>';
+  }).join('');
+
+  // Draw normalized SVG chart
+  var svg=document.getElementById('compare-svg');
+  if(!svg) return;
+  var W=svg.parentElement.offsetWidth||700, H=200;
+  svg.setAttribute('viewBox','0 0 '+W+' '+H);
+  svg.innerHTML='';
+
+  // Grid lines
+  [0,25,50,75,100].forEach(function(pct){
+    var y=H-pct/100*(H-20)-10;
+    var line=document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1',0);line.setAttribute('x2',W);line.setAttribute('y1',y);line.setAttribute('y2',y);
+    line.setAttribute('stroke','#e5e7eb');line.setAttribute('stroke-width','1');
+    svg.appendChild(line);
+  });
+  // Zero line
+  var zeroLine=document.createElementNS('http://www.w3.org/2000/svg','line');
+  zeroLine.setAttribute('x1',0);zeroLine.setAttribute('x2',W);
+  zeroLine.setAttribute('y1',H/2+10);zeroLine.setAttribute('y2',H/2+10);
+  zeroLine.setAttribute('stroke','#9ca3af');zeroLine.setAttribute('stroke-width','1.5');zeroLine.setAttribute('stroke-dasharray','4');
+  svg.appendChild(zeroLine);
+
+  // Determine global min/max % for scaling
+  var allPcts=[];
+  allData.forEach(function(a){
+    var cls=a.data.closes.filter(function(c){return c!==null;});
+    if(cls.length<2) return;
+    var first=cls[0];
+    cls.forEach(function(c){allPcts.push((c-first)/first*100);});
+  });
+  var minPct=allPcts.length?Math.min.apply(null,allPcts):-5;
+  var maxPct=allPcts.length?Math.max.apply(null,allPcts):5;
+  var range2=(maxPct-minPct)||10;
+  minPct-=range2*0.1; maxPct+=range2*0.1;
+
+  // Draw lines
+  allData.forEach(function(a){
+    var cls=a.data.closes.filter(function(c){return c!==null;});
+    if(cls.length<2) return;
+    var first=cls[0];
+    var pts=cls.map(function(c,i){
+      var x=i/(cls.length-1)*W;
+      var pct=(c-first)/first*100;
+      var y=H-((pct-minPct)/(maxPct-minPct))*(H-20)-10;
+      return x.toFixed(1)+','+y.toFixed(1);
+    }).join(' ');
+    var poly=document.createElementNS('http://www.w3.org/2000/svg','polyline');
+    poly.setAttribute('points',pts);poly.setAttribute('fill','none');
+    poly.setAttribute('stroke',a.color);poly.setAttribute('stroke-width','2');
+    poly.setAttribute('stroke-linejoin','round');
+    svg.appendChild(poly);
+  });
+
+  // Stats
+  var statsEl=document.getElementById('compare-stats');
+  if(statsEl) statsEl.innerHTML=allData.map(function(a){
+    var chg=a.data.periodChangePct;
+    var vol=a.data.high&&a.data.low?((a.data.high-a.data.low)/a.data.low*100).toFixed(1)+'%':'N/D';
+    return '<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 12px;border-left:3px solid '+a.color+'">'+
+      '<div style="font-weight:700;margin-bottom:4px">'+a.ticker+'</div>'+
+      '<div style="font-size:11px;color:var(--text2)">Prezzo: <b>'+a.data.price.toFixed(2)+'</b></div>'+
+      '<div style="font-size:11px;color:'+(chg>=0?'var(--green)':'var(--red)')+'">Periodo: '+(chg>=0?'+':'')+chg.toFixed(2)+'%</div>'+
+      '<div style="font-size:11px;color:var(--text2)">Volatilita: '+vol+'</div>'+
+    '</div>';
+  }).join('');
 }
 
 async function refreshAllPrices(){
@@ -1817,7 +1980,7 @@ async function refreshAllPrices(){
   var tickers=positions.map(function(p){return p.ticker;});
   var unique=[...new Set(tickers)];
   for(var i=0;i<unique.length;i++){
-    await fetchPrice(unique[i]);
+    await fetchPrice(unique[i], tradingPeriod, tradingPeriodInterval);
     // Yield to UI
     await new Promise(function(r){setTimeout(r,200);});
   }
@@ -1861,7 +2024,7 @@ function renderPositions(){
 
   var totalValue=0,totalCost=0;
   var cards=arr.map(function(p){
-    var data=priceCache[p.ticker];
+    var data=priceCache[p.ticker+'_'+tradingPeriod]||priceCache[p.ticker];
     var qty=parseFloat(p.quantity)||0;
     var avgCost=parseFloat(p.avg_buy_price)||0;
     var currentPrice=data?data.price:null;
@@ -1869,25 +2032,31 @@ function renderPositions(){
     var value=currentPrice?qty*currentPrice:cost;
     var pnl=currentPrice?value-cost:null;
     var pnlPct=cost>0&&pnl!==null?pnl/cost*100:null;
+    var periodChg=data?data.periodChangePct:null;
     totalValue+=value; totalCost+=cost;
     var badgeClass='pos-badge-'+(p.asset_type||'other');
-    var priceStr=currentPrice?currentPrice.toFixed(2)+'<small style="font-size:11px;color:var(--text2);margin-left:4px">'+(p.currency||'USD')+'</small>':'<span style="color:var(--text3);font-size:13px">N/D</span>';
+    var isSelected=selectedPosTickers.has(p.ticker);
+    var priceStr=currentPrice?currentPrice.toFixed(2)+'<small style="font-size:11px;color:var(--text2);margin-left:4px">'+(data&&data.currency||p.currency||'USD')+'</small>':'<span style="color:var(--text3);font-size:13px">N/D</span>';
     var changeStr=data?'<span class="'+(data.change>=0?'price-up':'price-down')+'">'+
       (data.change>=0?'+':'')+data.change.toFixed(2)+' ('+data.changePct.toFixed(2)+'%)</span>':'';
+    var periodStr=periodChg!==null?'<span style="font-size:10.5px;padding:2px 6px;border-radius:12px;background:'+(periodChg>=0?'var(--green-light)':'var(--red-light)')+';color:'+(periodChg>=0?'var(--green)':'var(--red)')+'">'+(periodChg>=0?'+':'')+periodChg.toFixed(2)+'% ('+PERIOD_LABELS[tradingPeriod]+')</span>':'';
     var pnlStr=pnl!==null?'<span class="'+(pnl>=0?'pnl-pos':'pnl-neg')+'">'+
       (pnl>=0?'+':'')+pnl.toFixed(2)+' ('+pnlPct.toFixed(1)+'%)</span>':'<span style="color:var(--text3)">--</span>';
-    var spark=data?drawSparkline(data.closes,80,28,pnlPct>=0?'#16a34a':'#dc2626'):'';
-    return '<div class="pos-card">'+
-      '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">'+
-        '<div>'+
-          '<div style="font-size:16px;font-weight:700;color:var(--text)">'+p.ticker+'</div>'+
-          '<div style="font-size:11.5px;color:var(--text2);margin-top:1px">'+(p.name||'')+'</div>'+
+    var spark=data?drawSparkline(data.closes,80,28,periodChg>=0?'#16a34a':'#dc2626'):'';
+    return '<div class="pos-card" style="'+(isSelected?'border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)':'')+'">'+ 
+      '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">'+
+        '<div style="display:flex;align-items:center;gap:8px">'+
+          '<input type="checkbox" '+(isSelected?'checked':'')+ ' style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer" data-ticker="'+p.ticker+'" onchange="handlePosSelect(this)">'+
+          '<div>'+
+            '<div style="font-size:16px;font-weight:700;color:var(--text)">'+p.ticker+'</div>'+
+            '<div style="font-size:11.5px;color:var(--text2);margin-top:1px">'+(p.name||'')+'</div>'+
+          '</div>'+
         '</div>'+
         '<span class="pos-badge '+badgeClass+'">'+(p.asset_type||'other')+'</span>'+
       '</div>'+
       '<div style="margin-bottom:8px">'+
         '<span class="price-tag">'+priceStr+'</span> '+spark+
-        '<div style="margin-top:2px">'+changeStr+'</div>'+
+        '<div style="margin-top:3px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'+changeStr+periodStr+'</div>'+
       '</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11.5px;margin-bottom:10px">'+
         '<div><div style="color:var(--text3);font-size:10px">QUANTITA</div><b>'+qty.toLocaleString('it-IT',{maximumFractionDigits:6})+'</b></div>'+
