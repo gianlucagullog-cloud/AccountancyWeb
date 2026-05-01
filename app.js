@@ -1,8 +1,7 @@
-// ══ CONFIG ═══════════════════════════════════════════════════════════════════
+// CONFIG
 var SUPABASE_URL = 'https://tabobhdntfnedwjrqboc.supabase.co';
 var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhYm9iaGRudGZuZWR3anJxYm9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2MTcyMTUsImV4cCI6MjA5MzE5MzIxNX0.Q7p0cd7aseU08JEwrQ2GHpbYQukbctRJlM1A3Y4FTaA';
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
 var currentUser=null, txs=[], filter='all', dateRef='date', editingId=null;
 var settings={name:'',vat:'',key:'',gclientid:'',gfolderid:''};
 var filterPeriods=new Set(['all']), filterYear='all';
@@ -11,8 +10,7 @@ var currentRegime='malta-se';
 var selectedIds=new Set();
 var sortField='date', sortDir=1;
 
-
-// ── DATE FORMAT ───────────────────────────────────────────────────────────────
+// DATE FORMAT
 var MESI=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
 function formatDate(d){
   if(!d)return '';
@@ -20,7 +18,7 @@ function formatDate(d){
   return parseInt(p[2])+' '+MESI[parseInt(p[1])-1]+' '+p[0];
 }
 
-// ── SORT ──────────────────────────────────────────────────────────────────────
+// SORT
 function setSort(field){
   if(sortField===field)sortDir=-sortDir;else{sortField=field;sortDir=1;}
   document.querySelectorAll('.th-sort').forEach(function(th){
@@ -30,7 +28,7 @@ function setSort(field){
   renderTable();
 }
 
-// ── AUTH ──────────────────────────────────────────────────────────────────────
+// AUTH
 function doLogin(){
   var email=document.getElementById('lock-email').value.trim();
   var pwd=document.getElementById('lock-input').value;
@@ -74,7 +72,7 @@ function showApp(){
   updateAmountSections();showTab('carica');
 }
 
-// ── DB HELPERS ────────────────────────────────────────────────────────────────
+// DB HELPERS
 function txToDb(t){
   return {user_id:currentUser.id,date:t.date,service_month:t.serviceMonth,type:t.type,
     invoice_num:t.invoice,counterparty:t.counterparty,category:t.category,country:t.country,
@@ -92,8 +90,8 @@ function dbToTx(r){
     notes:r.notes,filePath:r.file_path||null,fileName:r.file_name||null};
 }
 
-// ── FILE STORAGE ──────────────────────────────────────────────────────────────
-function uploadInvoiceFile(file, invoiceId){
+// FILE STORAGE
+function uploadInvoiceFile(file,invoiceId){
   var ext=file.name.split('.').pop();
   var path=currentUser.id+'/'+invoiceId+'.'+ext;
   return sb.storage.from('invoice-files').upload(path,file,{upsert:true}).then(function(r){
@@ -109,7 +107,7 @@ function downloadInvoiceFile(t){
   });
 }
 
-// ── DATA FUNCTIONS ────────────────────────────────────────────────────────────
+// DATA
 function loadInvoices(){
   return sb.from('invoices').select('*').order('date',{ascending:true}).then(function(r){
     if(r.error){console.error(r.error);return;}
@@ -127,24 +125,18 @@ function saveTransaction(){
   sb.from('invoices').insert(txToDb(t)).select().then(function(r){
     if(r.error){showMsg('Errore: '+r.error.message,'error');return;}
     var newId=r.data[0].id;
-    var uploadPromises=[];
     if(driveCurrentFile){
       var fc=driveCurrentFile;
-      // Save to Supabase Storage
-      uploadPromises.push(uploadInvoiceFile(fc,newId));
-      // Save locally for ZIP
+      uploadInvoiceFile(fc,newId);
       toB64(fc).then(function(b64){try{localStorage.setItem('inv_file_'+newId,JSON.stringify({name:fc.name,type:fc.type||'application/octet-stream',b64:b64}));}catch(e){}});
-      // Google Drive
       if(driveIsReady()){
-        var fname=t.date+'_'+(t.invoice||'fattura').replace(/[/\\:*?"<>|]/g,'-')+'_'+t.counterparty.slice(0,25).replace(/[/\\:*?"<>|]/g,'-')+'.'+fc.name.split('.').pop();
+        var fname=t.date+'_'+(t.invoice||'fattura').replace(/[\/\\:*?"<>|]/g,'-')+'_'+t.counterparty.slice(0,25).replace(/[\/\\:*?"<>|]/g,'-')+'.'+fc.name.split('.').pop();
         setDriveUploadStatus(true,'Upload...',null);
         driveUploadFile(fc,fname,function(ok,info){ok?setDriveUploadStatus(true,'Drive OK',true):setDriveUploadStatus(true,'Err: '+info,false);});
       }
     }
-    Promise.all(uploadPromises).then(function(){
-      driveCurrentFile=null;loadInvoices();showMsg('Transazione salvata!','success');
-      setState('upload');document.getElementById('file-input').value='';
-    });
+    driveCurrentFile=null;loadInvoices();showMsg('Transazione salvata!','success');
+    setState('upload');document.getElementById('file-input').value='';
   });
 }
 function delTx(id){
@@ -177,7 +169,6 @@ function saveEdit(){
 }
 function clearAll(){
   if(!confirm('Cancellare TUTTE le transazioni?'))return;
-  // Delete all files from storage
   var paths=txs.filter(function(t){return t.filePath;}).map(function(t){return t.filePath;});
   var p=paths.length?sb.storage.from('invoice-files').remove(paths):Promise.resolve();
   p.then(function(){
@@ -188,23 +179,23 @@ function clearAll(){
   });
 }
 
-// ── SELECTION ─────────────────────────────────────────────────────────────────
+// SELECTION
 function toggleSelect(id,cb){
-  if(cb.checked)selectedIds.add(id); else selectedIds.delete(id);
+  if(cb.checked)selectedIds.add(id);else selectedIds.delete(id);
   updateSelBar();
   var allCb=document.getElementById('cb-all');
   if(allCb){var vis=getFilteredTxs();allCb.checked=vis.length>0&&vis.every(function(t){return selectedIds.has(t.id);});}
 }
 function toggleSelectAll(cb){
   var arr=getFilteredTxs();
-  if(cb.checked)arr.forEach(function(t){selectedIds.add(t.id);}); else arr.forEach(function(t){selectedIds.delete(t.id);});
+  if(cb.checked)arr.forEach(function(t){selectedIds.add(t.id);});else arr.forEach(function(t){selectedIds.delete(t.id);});
   document.querySelectorAll('.row-cb').forEach(function(c){c.checked=cb.checked;});
   updateSelBar();
 }
 function clearSelection(){selectedIds.clear();renderTable();}
 function updateSelBar(){
   var bar=document.getElementById('sel-bar');var cnt=document.getElementById('sel-count');
-  if(bar){bar.style.display=selectedIds.size>0?'flex':'none';}
+  if(bar)bar.style.display=selectedIds.size>0?'flex':'none';
   if(cnt)cnt.textContent=selectedIds.size+' selezionate';
 }
 function deleteSelected(){
@@ -214,7 +205,6 @@ function deleteSelected(){
   var paths=txs.filter(function(t){return ids.indexOf(t.id)>=0&&t.filePath;}).map(function(t){return t.filePath;});
   var p=paths.length?sb.storage.from('invoice-files').remove(paths):Promise.resolve();
   p.then(function(){
-    // Delete in batches
     var done=0;
     ids.forEach(function(id){
       sb.from('invoices').delete().eq('id',id).then(function(){
@@ -227,11 +217,10 @@ function deleteSelected(){
 function exportSelectedZIP(){
   var ids=Array.from(selectedIds);
   if(!ids.length)return;
-  var arr=txs.filter(function(t){return ids.indexOf(t.id)>=0;});
-  _buildZIP(arr,'Selezione');
+  _buildZIP(txs.filter(function(t){return ids.indexOf(t.id)>=0;}),'Selezione');
 }
 
-// ── IMPORT CSV ────────────────────────────────────────────────────────────────
+// IMPORT CSV
 function importCSV(input){
   var file=input.files[0];if(!file)return;
   var reader=new FileReader();
@@ -244,12 +233,14 @@ function importCSV(input){
       var cols=lines[i].match(/(".*?"|[^,]+)(?=,|$)/g)||[];
       cols=cols.map(function(c){return c.replace(/^"|"$/g,'').trim();});
       var row={};headers.forEach(function(h,j){row[h]=cols[j]||'';});
-      var t={user_id:currentUser.id,date:row['date']||row['data']||'',
+      var t={user_id:currentUser.id,
+        date:row['date']||row['data']||'',
         service_month:row['service month']||row['service_month']||'',
-        type:row['type']||row['tipo']||'Received',invoice_num:row['invoice #']||row['invoice_num']||'',
-        counterparty:row['counterparty']||row['controparte']||'',category:row['category']||row['categoria']||'Other',
-        country:row['country']||'',vat_id:row['vat / tax id']||'',address:row['address']||'',
-        description:row['description']||row['descrizione']||'',
+        type:row['type']||'Received',invoice_num:row['invoice #']||row['invoice_num']||'',
+        counterparty:row['counterparty']||row['controparte']||'',
+        category:row['category']||row['categoria']||'Other',
+        country:row['country']||'',vat_id:row['vat / tax id']||'',
+        address:row['address']||'',description:row['description']||row['descrizione']||'',
         entrate_net:parseFloat(row['entrate net']||row['entrate_net']||0)||0,
         entrate_vat:parseFloat(row['entrate vat']||row['entrate_vat']||0)||0,
         entrate_total:parseFloat(row['entrate total']||row['entrate_total']||0)||0,
@@ -269,7 +260,7 @@ function importCSV(input){
   reader.readAsText(file,'UTF-8');input.value='';
 }
 
-// ── SETTINGS ──────────────────────────────────────────────────────────────────
+// SETTINGS
 function loadSettings(){
   return sb.from('profile').select('*').maybeSingle().then(function(r){
     if(r.data){settings.name=r.data.name||'';settings.vat=r.data.vat_number||'';
@@ -292,7 +283,7 @@ function saveSettings(){
 function cfg(k){return settings[k]||'';}
 function updateCount(){var el=document.getElementById('tx-count');if(el)el.textContent=txs.length+' transazioni';}
 
-// ── TABS ──────────────────────────────────────────────────────────────────────
+// TABS
 function showTab(t){
   ['carica','registro','summary','settings'].forEach(function(id){
     document.getElementById('tab-'+id).style.display=id===t?'':'none';
@@ -302,7 +293,7 @@ function showTab(t){
   if(t==='summary'){renderStats('stats-b');renderCat();renderTax();renderSimulator();renderAdvisory();}
 }
 
-// ── PERIOD FILTERS ────────────────────────────────────────────────────────────
+// PERIOD FILTERS
 function populateYearFilters(){
   var years={};txs.forEach(function(t){var y=(t.date||'').slice(0,4);if(y)years[y]=1;});
   var ya=Object.keys(years).sort();
@@ -330,9 +321,9 @@ function togglePeriodS(p,btn){
     if(filterPeriodsS.size===0)filterPeriodsS.add('all');
   }
   document.querySelectorAll('#period-pills-s .period-pill').forEach(function(b){b.classList.toggle('active',filterPeriodsS.has(b.dataset.p));});
-  renderCat();renderTax();renderSimulator();renderStats('stats-b');
+  renderCat();renderTax();renderSimulator();renderStats('stats-b');renderAdvisory();
 }
-function setFilterYearS(y){filterYearS=y;renderCat();renderTax();renderSimulator();renderStats('stats-b');}
+function setFilterYearS(y){filterYearS=y;renderCat();renderTax();renderSimulator();renderStats('stats-b');renderAdvisory();}
 function matchesPeriodMulti(t,periods,year){
   var d=getRefDate(t);
   if(year!=='all'&&d.slice(0,4)!==year)return false;
@@ -346,7 +337,6 @@ function getRefDate(t){return dateRef==='serviceMonth'?(t.serviceMonth||t.date):
 function getFilteredTxs(){return txs.filter(function(t){return(filter==='all'||t.type===filter)&&matchesPeriodMulti(t,filterPeriods,filterYear);});}
 function getFilteredSummaryTxs(){return txs.filter(function(t){return matchesPeriodMulti(t,filterPeriodsS,filterYearS);});}
 
-// ── GOOGLE DRIVE ──
 var driveToken=null, driveTokenExpiry=0;
 var driveCurrentFile=null; // {name, blob} set when a file is picked
 
@@ -381,7 +371,7 @@ function driveConnect(){
       if(resp.error){driveBadge('error','Errore auth');document.getElementById('drive-connect-msg').textContent='Errore: '+resp.error;return;}
       driveToken=resp.access_token;
       driveTokenExpiry=Date.now()+(parseInt(resp.expires_in,10)||3599)*1000;
-      driveBadge('connected','Drive connesso ✓');
+      driveBadge('connected','Drive connesso \u2713');
       document.getElementById('drive-connect-msg').textContent='';
       document.getElementById('drive-setup-guide').style.display='none';
     }
@@ -422,10 +412,12 @@ function setDriveUploadStatus(show,msg,ok){
   if(!el)return;
   if(!show){el.style.display='none';return;}
   el.style.display='flex';
-  el.innerHTML=(ok===true?'<span style="color:var(--green)">☁️ '+esc(msg)+'</span>'
-    :ok===false?'<span style="color:var(--red)">⚠️ '+esc(msg)+'</span>'
-    :'<span style="color:var(--accent)">⏳ '+esc(msg)+'</span>');
+  el.innerHTML=(ok===true?'<span style="color:var(--green)">\u2601\uFE0F '+esc(msg)+'</span>'
+    :ok===false?'<span style="color:var(--red)">\u26A0\uFE0F '+esc(msg)+'</span>'
+    :'<span style="color:var(--accent)">\u23F3 '+esc(msg)+'</span>');
 }
+function toB64(file){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(r.result.split(',')[1]);};r.onerror=rej;r.readAsDataURL(file);});}
+
 function handleFile(file){
   if(!file) return;
   var key=cfg('key');
@@ -481,7 +473,7 @@ function fillForm(d){
   var cats=Array.from(document.getElementById('f-category').options).map(function(o){return o.value;});
   set('f-category',cats.indexOf(d.category)>=0?d.category:'Other');
   set('f-country',d.country||'');
-  set('f-vatid',d.vatId||'—');
+  set('f-vatid',d.vatId||'\u2014');
   set('f-address',d.address||'');
   set('f-description',d.description||'');
   set('f-en-net',d.entrateNet||'');
@@ -503,8 +495,6 @@ function calcE(){var n=num('f-en-net'),vt=num('f-en-vat');if(n||vt)set('f-en-tot
 function calcU(){var n=num('f-us-net'),vt=num('f-us-vat');if(n||vt)set('f-us-tot',(n+vt).toFixed(2));}
 
 function openManualForm(){driveCurrentFile=null;fillForm({});setState('form');}
-
-function toB64(file){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(r.result.split(',')[1]);};r.onerror=rej;r.readAsDataURL(file);});}
 
 function editTx(id){
   var t=txs.find(function(x){return x.id===id;});
@@ -588,30 +578,30 @@ function setDateRef(ref,btn){
 }
 
 function renderTable(){
-  var arr=getFilteredTxs();
+  var arr=getFilteredTxs().slice().sort(function(a,b){
+    var va=a[sortField]||'',vb=b[sortField]||'';
+    if(typeof va==='number'||typeof vb==='number')return((parseFloat(va)||0)-(parseFloat(vb)||0))*sortDir;
+    return String(va).localeCompare(String(vb))*sortDir;
+  });
   var tbody=document.getElementById('tbody');var empty=document.getElementById('empty');
   if(!tbody)return;
   renderFilteredStats(arr);
   if(!arr.length){tbody.innerHTML='';empty.style.display='';updateSelBar();return;}
   empty.style.display='none';
-  // Apply sort
-  arr=arr.slice().sort(function(a,b){
-    var va=a[sortField]||'',vb=b[sortField]||'';
-    if(typeof va==='number'||typeof vb==='number')return((parseFloat(va)||0)-(parseFloat(vb)||0))*sortDir;
-    return String(va).localeCompare(String(vb))*sortDir;
-  });
   tbody.innerHTML=arr.map(function(t){
     var isIn=t.type==='Issued';var sel=selectedIds.has(t.id);
     var hasFile=t.filePath||localStorage.getItem('inv_file_'+t.id);
-    var net=((t.entrateTotal||0)-(t.usciteTotal||0));var netCls=net>0?'net-pos':net<0?'net-neg':'';
+    var net=((t.entrateTotal||0)-(t.usciteTotal||0));
+    var netCls=net>0?'net-pos':net<0?'net-neg':'';
+    var netStr=net!==0?(net>0?'+':'')+fmt(net):'--';
     return '<tr style="'+(sel?'background:var(--accent-light)':'')+'">'+
       '<td class="cb-cell"><input type="checkbox" class="row-cb" '+(sel?'checked':'')+' onchange="toggleSelect('+t.id+',this)"></td>'+
       '<td><span class="badge '+(isIn?'badge-in':'badge-out')+'">'+(isIn?'Issued':'Received')+'</span></td>'+
-      '<td style="white-space:nowrap;font-size:12px;font-weight:500">'+formatDate(t.date)+'</td>'+
+      '<td style="white-space:nowrap;font-weight:500">'+formatDate(t.date)+'</td>'+
       '<td style="color:var(--text2)">'+esc(t.serviceMonth)+'</td>'+
       '<td style="color:var(--text2);white-space:nowrap">'+esc(t.invoice)+'</td>'+
-      '<td class="'+netCls+'" style="white-space:nowrap">'+(net!==0?(net>0?'+':'')+fmt(net):'—')+'</td>'+
-      '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.counterparty)+'</td>'+
+      '<td class="'+netCls+'">'+netStr+'</td>'+
+      '<td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.counterparty)+'</td>'+
       '<td style="color:var(--text2);font-size:10.5px;white-space:nowrap">'+esc(t.category)+'</td>'+
       '<td style="color:var(--text2)">'+esc(t.country)+'</td>'+
       '<td class="'+(t.entrateNet?'amount-in':'')+'">'+fmtN(t.entrateNet)+'</td>'+
@@ -620,9 +610,9 @@ function renderTable(){
       '<td class="'+(t.usciteNet?'amount-out':'')+'">'+fmtN(t.usciteNet)+'</td>'+
       '<td class="'+(t.usciteVat?'amount-out':'')+'">'+fmtN(t.usciteVat)+'</td>'+
       '<td class="'+(t.usciteTotal?'amount-out':'')+'"><b>'+fmtN(t.usciteTotal)+'</b></td>'+
-      '<td style="color:var(--text2);font-size:10.5px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.notes)+'</td>'+
+      '<td style="color:var(--text2);font-size:10.5px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.notes)+'</td>'+
       '<td style="white-space:nowrap">'+
-        (hasFile?'<button class="btn btn-edit" style="font-size:10px;padding:4px 8px" onclick="downloadInvoiceFile(txs.find(function(x){return x.id==='+t.id+'}))" title="Scarica allegato">&#128229;</button>':'')+
+        (hasFile?'<button class="btn btn-edit" style="font-size:10px;padding:4px 7px" onclick="downloadInvoiceFile(txs.find(function(x){return x.id==='+t.id+'}))" title="Scarica">&#128229;</button>':'')+
         '<button class="btn btn-edit" onclick="editTx('+t.id+')" title="Modifica">&#9998;</button>'+
         '<button class="btn btn-danger" onclick="delTx('+t.id+')">&#215;</button>'+
       '</td></tr>';
@@ -631,7 +621,6 @@ function renderTable(){
   var allCb=document.getElementById('cb-all');
   if(allCb)allCb.checked=arr.length>0&&arr.every(function(t){return selectedIds.has(t.id);});
 }
-
 function renderFilteredStats(arr){
   var el=document.getElementById('stats-a');if(!el)return;
   var tIn=arr.reduce(function(s,t){return s+(t.entrateTotal||0);},0);
@@ -653,7 +642,7 @@ function renderStats(id){
 }
 function stat(label,val,color){return '<div class="stat"><div class="stat-label">'+label+'</div><div class="stat-value" style="color:'+color+'">'+val+'</div></div>';}
 
-// ── CATEGORY SUMMARY ──────────────────────────────────────────────────────────
+// CATEGORY SUMMARY
 function renderCat(){
   var arr=getFilteredSummaryTxs();
   var allCats=Array.from(new Set(arr.map(function(t){return t.category||'Other';}))).sort();
@@ -678,42 +667,40 @@ function renderCat(){
   var bo=document.getElementById('cat-tbody-out');if(bo)bo.innerHTML=rows(mapOut,allCats);
 }
 
-// ── TAX CALCULATIONS (normative aggiornate) ───────────────────────────────────
+// TAX CALCULATIONS
 function maltaTaxSingle(c){
   if(c<=9100)return 0;if(c<=14500)return(c-9100)*.15;
   if(c<=19500)return 810+(c-14500)*.25;if(c<=60000)return 2060+(c-19500)*.25;
   return 12235+(c-60000)*.35;
 }
-// Malta SSC Class 2 (self-employed) — contributo fisso settimanale 2026 (stimato)
-// Fonte: LN 452/2024 + incremento annuale ~2%
-function maltaSSC2026(annualIncome){
-  if(annualIncome<910)return 0;          // esente
-  if(annualIncome<=21000)return 23.30*52; // ~€1,212/anno (categoria D)
-  return 57.30*52;                        // ~€2,980/anno (categoria C)
+function maltaSSC2026(ci){
+  if(ci<910)return 0;
+  if(ci<=21000)return 23.30*52;
+  return 57.30*52;
 }
 function calcMaltaSE(gRev,dExp){
   var ci=Math.max(0,gRev-dExp),tax=maltaTaxSingle(ci),ssc=maltaSSC2026(ci);
-  return {label:'Malta Self-Employed',eff:ci>0?(tax+ssc)/ci*100:0,net:ci-tax-ssc,total:tax+ssc,
+  return {label:'Malta Self-Employed',eff:ci>0?(tax+ssc)/ci*100:0,net:ci-tax-ssc,total:tax+ssc,ci:ci,
     rows:[['Gross Revenue (net VAT)',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
       ['Reddito Imponibile',fmt(ci),'var(--orange)'],['IRPEF (single rates 2026)',fmt(tax),''],
-      ['SSC Class 2 — fisso settimanale',ci<910?'Esente':ci<=21000?'€23.30/sett (~€1.212/a)':'€57.30/sett (~€2.980/a)',''],
+      ['SSC Class 2 (fisso settimanale)',ci<910?'Esente':ci<=21000?'23.30/sett':'57.30/sett',''],
       ['SSC annuale',fmt(ssc),''],['Totale Tasse+SSC',fmt(tax+ssc),'var(--orange)'],
       ['Aliquota Effettiva',ci>0?((tax+ssc)/ci*100).toFixed(1)+'%':'0%',''],
       ['Netto',fmt(ci-tax-ssc),'var(--green)']]};
 }
 function calcMaltaLtd(gRev,dExp){
   var p=Math.max(0,gRev-dExp),ct=p*.35,ref=ct*(6/7),net=ct-ref;
-  return {label:'Malta Ltd',eff:p>0?net/p*100:0,net:p-net,total:net,
+  return {label:'Malta Ltd',eff:p>0?net/p*100:0,net:p-net,total:net,ci:p,
     rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
       ['Utile Aziendale',fmt(p),'var(--orange)'],['Corporate Tax 35%',fmt(ct),''],
       ['Rimborso Azionista 6/7','-'+fmt(ref),'var(--green)'],
-      ['Tax Netta (≈5% su utile)',fmt(net),'var(--orange)'],
+      ['Tax Netta (circa 5%)',fmt(net),'var(--orange)'],
       ['Aliquota Effettiva',p>0?(net/p*100).toFixed(1)+'%':'0%',''],
-      ['Netto dopo tasse',fmt(p-net),'var(--green)']]};
+      ['Netto',fmt(p-net),'var(--green)']]};
 }
 function calcDubaiSE(gRev,dExp){
   var p=Math.max(0,gRev-dExp),thr=93750,tax=Math.max(0,p-thr)*.09;
-  return {label:'Dubai SE (UAE CT)',eff:p>0?tax/p*100:0,net:p-tax,total:tax,
+  return {label:'Dubai SE (UAE CT)',eff:p>0?tax/p*100:0,net:p-tax,total:tax,ci:p,
     rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
       ['Profitto Netto',fmt(p),'var(--orange)'],['Soglia esente CT (AED 375k)',fmt(thr),''],
       ['UAE Corporate Tax 9%',fmt(tax),'var(--orange)'],['Personal Income Tax','0%','var(--green)'],
@@ -722,11 +709,11 @@ function calcDubaiSE(gRev,dExp){
 }
 function calcDubaiFZ(gRev,dExp){
   var p=Math.max(0,gRev-dExp);
-  return {label:'Dubai Ltd Free Zone',eff:0,net:p,total:0,
+  return {label:'Dubai Ltd Free Zone',eff:0,net:p,total:0,ci:p,
     rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
       ['Profitto Netto',fmt(p),'var(--orange)'],['CT Qualifying Free Zone','0%','var(--green)'],
       ['Personal Income Tax','0%','var(--green)'],['Aliquota Effettiva','0%','var(--green)'],
-      ['Costo annuo struttura FZ','~€4.000–€10.000','var(--text2)'],
+      ['Costo struttura FZ (stima)','~4.000-10.000/anno','var(--text2)'],
       ['Netto (ante costo FZ)',fmt(p),'var(--green)']]};
 }
 function calcItalyPIVA(gRev,dExp){
@@ -736,16 +723,16 @@ function calcItalyPIVA(gRev,dExp){
     if(rb<=15000)irpef=rb*.23;else if(rb<=28000)irpef=3450+(rb-15000)*.25;
     else if(rb<=50000)irpef=6700+(rb-28000)*.35;else irpef=14400+(rb-50000)*.43;
     var inps=rb*.2607,irap=rb*.039,tot=irpef+inps+irap;
-    return {label:'IT P.IVA Ordinaria',eff:rb>0?tot/rb*100:0,net:rb-tot,total:tot,
+    return {label:'IT P.IVA Ordinaria',eff:rb>0?tot/rb*100:0,net:rb-tot,total:tot,ci:rb,
       rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
         ['Reddito Netto',fmt(rb),'var(--orange)'],['IRPEF progressiva',fmt(irpef),''],
         ['INPS Gest. Separata 26%',fmt(inps),''],['IRAP 3.9%',fmt(irap),''],
         ['Totale',fmt(tot),'var(--orange)'],['Netto',fmt(rb-tot),'var(--green)']]};
   }
   var coeff=.78,base=gRev*coeff,inps=base*.2607,irpef=(base-inps*.5)*.15,tot=irpef+inps;
-  return {label:'IT P.IVA Forfettaria',eff:gRev>0?tot/gRev*100:0,net:gRev-tot,total:tot,
-    rows:[['Gross Revenue (no deduzioni spese)',fmt(gRev),'var(--green)'],
-      ['Coefficiente 78%',fmt(base),''],['INPS Gest. Separata 26%',fmt(inps),'var(--red)'],
+  return {label:'IT P.IVA Forfettaria',eff:gRev>0?tot/gRev*100:0,net:gRev-tot,total:tot,ci:base,
+    rows:[['Gross Revenue (no deduz. spese)',fmt(gRev),'var(--green)'],
+      ['Coeff. redditivita 78%',fmt(base),''],['INPS Gest. Separata 26%',fmt(inps),'var(--red)'],
       ['Base IRPEF (ded. 50% INPS)',fmt(base-inps*.5),''],['IRPEF Forfettaria 15%',fmt(irpef),'var(--orange)'],
       ['Totale Tasse+Contributi',fmt(tot),'var(--orange)'],
       ['Aliquota su fatturato',gRev>0?(tot/gRev*100).toFixed(1)+'%':'0%',''],
@@ -772,7 +759,7 @@ function renderTax(){
   el.innerHTML=c.rows.map(function(r){return '<div class="tax-row"><span class="tax-label">'+r[0]+'</span><span class="tax-value" style="'+(r[2]?'color:'+r[2]:'')+'">'+r[1]+'</span></div>';}).join('');
 }
 
-// ── SIMULATOR ─────────────────────────────────────────────────────────────────
+// SIMULATOR
 function renderSimulator(){
   var arr=getFilteredSummaryTxs();
   var bIn=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
@@ -785,12 +772,123 @@ function renderSimulator(){
   el.innerHTML='<div class="sim-grid">'+regimes.map(function(rp){
     var c=getCalc(rp[0],gRev,dExp);
     return '<div class="sim-col">'+
-      '<div class="sim-regime" style="background:'+rp[1]+'18;color:'+rp[1]+'">'+c.label+'</div>'+
-      '<div class="sim-row"><span style="color:var(--text2)">Tasse totali</span><b style="color:var(--red)">'+fmt(c.total)+'</b></div>'+
-      '<div class="sim-row"><span style="color:var(--text2)">Aliquota eff.</span><b>'+c.eff.toFixed(1)+'%</b></div>'+
+      '<div class="sim-regime" style="background:'+rp[1].replace(')',',0.12)').replace('var(','rgba(').replace('--accent)','79,70,229,0.12)').replace('--accent2)','8,145,178,0.12)').replace('--orange)','217,119,6,0.12)').replace('--green)','22,163,74,0.12)').replace('--red)','220,38,38,0.12)')+'">'+c.label+'</div>'+
+      '<div class="sim-row"><span style="color:var(--text2)">Tasse</span><b style="color:var(--red)">'+fmt(c.total)+'</b></div>'+
+      '<div class="sim-row"><span style="color:var(--text2)">Aliquota</span><b>'+c.eff.toFixed(1)+'%</b></div>'+
       '<div class="sim-row"><span style="color:var(--text2)">Netto</span><b style="color:var(--green)">'+fmt(c.net)+'</b></div>'+
       '</div>';
   }).join('')+'</div>';
+}
+
+// SMART ADVISORY
+function renderAdvisory(){
+  var panel=document.getElementById('advisory-panel');
+  var content=document.getElementById('advisory-content');
+  if(!panel||!content)return;
+  var arr=getFilteredSummaryTxs();
+  var gRev=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
+  var dExp=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
+  var ci=Math.max(0,gRev-dExp);
+  var tips=[];
+  if(ci===0&&gRev===0){
+    tips.push({type:'ok',title:'Nessun dato nel periodo',body:'Seleziona un periodo con transazioni per ricevere i consigli fiscali.'});
+    showAdv(tips,panel,content);return;
+  }
+  // Malta SE bracket alerts
+  var brackets=[
+    {lim:9100,prevRate:0,nextRate:0.15},
+    {lim:14500,prevRate:0.15,nextRate:0.25},
+    {lim:60000,prevRate:0.25,nextRate:0.35}
+  ];
+  brackets.forEach(function(b){
+    var over=ci-b.lim;
+    if(over>0&&over<=3000){
+      var saving=over*(b.nextRate-b.prevRate);
+      var typeTip=b.lim===60000?'danger':'warn';
+      tips.push({type:typeTip,
+        title:'Sei appena sopra il bracket '+fmt(b.lim)+' EUR',
+        body:'Reddito imponibile: '+fmt(ci)+' EUR, supera '+fmt(b.lim)+' EUR di '+fmt(over)+' EUR. '+
+          'Questo costa '+fmt(saving)+' EUR di tasse extra rispetto a restare sotto la soglia. '+
+          '<b>Consiglio:</b> con '+fmt(over)+' EUR di spese aziendali deducibili rientri sotto '+fmt(b.lim)+' EUR e risparmi '+fmt(saving)+' EUR.'
+      });
+    }
+    if(ci<b.lim&&ci>=b.lim-2000){
+      tips.push({type:'info',
+        title:'Vicino alla soglia '+fmt(b.lim)+' EUR',
+        body:'Sei a '+fmt(b.lim-ci)+' EUR dalla soglia dove scatta il '+Math.round(b.nextRate*100)+'% di aliquota. '+
+          'Puoi ancora fatturare circa '+fmt(b.lim-ci)+' EUR netti prima di entrare nel bracket superiore.'
+      });
+    }
+  });
+  // SSC bracket
+  if(ci>=19000&&ci<21000){
+    tips.push({type:'warn',
+      title:'Vicino al bracket SSC alto (21.000 EUR)',
+      body:'Oltre 21.000 EUR la SSC Class 2 passa da circa 1.212 EUR/anno a circa 2.980 EUR/anno (+1.768 EUR). '+
+        'Sei a '+fmt(21000-ci)+' EUR dalla soglia.'
+    });
+  }
+  if(ci>21000&&ci<24000){
+    tips.push({type:'warn',
+      title:'Nel bracket SSC alto',
+      body:'SSC Class 2 attuale: circa 2.980 EUR/anno. Con '+fmt(ci-21000)+' EUR di spese aggiuntive deducibili '+
+        'rientreresti nel bracket basso (circa 1.212 EUR/anno) e risparmieresti circa 1.768 EUR di SSC.'
+    });
+  }
+  // Low expenses
+  if(gRev>20000&&dExp/gRev<0.10){
+    tips.push({type:'info',
+      title:'Spese deducibili basse ('+Math.round(dExp/gRev*100)+'%)',
+      body:'Le spese aziendali sono solo il '+Math.round(dExp/gRev*100)+'% del fatturato. '+
+        'Ogni 1.000 EUR di spese deducibili riduce le tasse di circa 250-350 EUR. '+
+        'Categorie utili: attrezzatura, software, formazione, home office, viaggi business, consulenze.'
+    });
+  }
+  // Regime comparison
+  if(ci>15000){
+    var se=calcMaltaSE(gRev,dExp);
+    var options=[
+      {name:'Malta Ltd',calc:calcMaltaLtd(gRev,dExp)},
+      {name:'Dubai SE',calc:calcDubaiSE(gRev,dExp)},
+      {name:'Dubai Ltd Free Zone',calc:calcDubaiFZ(gRev,dExp)}
+    ];
+    options.sort(function(a,b){return a.calc.total-b.calc.total;});
+    var best=options[0];
+    var saving=se.total-best.calc.total;
+    if(saving>1000){
+      tips.push({type:'info',
+        title:'Risparmio potenziale con '+best.name+': '+fmt(saving)+' EUR/anno',
+        body:'Con il regime <b>'+best.name+'</b> pagheresti '+fmt(best.calc.total)+' EUR di tasse invece di '+fmt(se.total)+' EUR (Malta SE). '+
+          'Risparmio stimato: <b>'+fmt(saving)+' EUR</b>. Consulta un commercialista per valutare la migrazione.'
+      });
+    }
+  }
+  // Italian forfettario limit
+  if(gRev>=80000&&gRev<=90000){
+    tips.push({type:'warn',
+      title:'Vicino al limite forfettario italiano (85.000 EUR)',
+      body:'Superare 85.000 EUR esclude dal regime forfettario (15%). Sopra questa soglia si applica il regime ordinario '+
+        'con IRPEF progressiva + INPS + IRAP, con carico fiscale molto piu alto.'
+    });
+  }
+  if(tips.length===0){
+    tips.push({type:'ok',
+      title:'Situazione fiscale sotto controllo',
+      body:'Nessuna soglia critica imminente nel periodo selezionato. '+
+        'Continua a monitorare le spese deducibili e usa il simulatore per proiettare scenari futuri.'
+    });
+  }
+  showAdv(tips,panel,content);
+}
+function showAdv(tips,panel,content){
+  var typeMap={danger:'adv-danger',warn:'adv-warn',info:'adv-info',ok:'adv-ok'};
+  var iconMap={danger:'&#9888;',warn:'&#128161;',info:'&#128202;',ok:'&#9989;'};
+  panel.style.display='';
+  content.innerHTML=tips.map(function(t){
+    return '<div class="adv-card '+typeMap[t.type]+'">'+
+      '<div class="adv-icon">'+iconMap[t.type]+'</div>'+
+      '<div><div class="adv-title">'+t.title+'</div><div>'+t.body+'</div></div></div>';
+  }).join('');
 }
 
 
@@ -870,7 +968,7 @@ function num(id){return parseFloat(v(id))||0;}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
 function sum(field){return txs.reduce(function(s,t){return s+(t[field]||0);},0);}
 function fmt(n){return (n||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});}
-function fmtN(n){return n?fmt(n):'—';}
+function fmtN(n){return n?fmt(n):'\u2014';}
 function today(){return new Date().toISOString().split('T')[0];}
 function maltaTax(c){
   if(c<=9100)return 0;
@@ -881,7 +979,7 @@ function maltaTax(c){
 }
 
 
-// ── ZIP BUILDER ───────────────────────────────────────────────────────────────
+// ZIP
 function _buildZIP(arr,label){
   if(!arr.length){alert('Nessuna fattura.');return;}
   var zip=new JSZip();var folder=zip.folder('Fatture_'+label);
@@ -898,12 +996,12 @@ function _buildZIP(arr,label){
   arr.forEach(function(t){
     var stored=localStorage.getItem('inv_file_'+t.id);
     if(stored){try{
-      var f=JSON.parse(stored);var inv=(t.invoice||'fattura').replace(/[\/\\:*?"<>|]/g,'-');
+      var f=JSON.parse(stored);
+      var inv=(t.invoice||'fattura').replace(/[\/\\:*?"<>|]/g,'-');
       var cp=t.counterparty.slice(0,20).replace(/[\/\\:*?"<>|]/g,'-');
-      var ext=f.name.split('.').pop();
       var bin=atob(f.b64);var bytes=new Uint8Array(bin.length);
       for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
-      folder.file(t.date+'_'+inv+'_'+cp+'.'+ext,bytes);
+      folder.file(t.date+'_'+inv+'_'+cp+'.'+f.name.split('.').pop(),bytes);
     }catch(e){missing.push(t.invoice||t.counterparty);}}
     else missing.push(t.invoice||t.counterparty);
   });
@@ -921,129 +1019,7 @@ function exportZIP(){
   _buildZIP(arr,q==='all'?'Anno':q);
 }
 
-
-// ── SMART ADVISORY ────────────────────────────────────────────────────────────
-function renderAdvisory(){
-  var panel=document.getElementById('advisory-panel');
-  var content=document.getElementById('advisory-content');
-  if(!panel||!content)return;
-  var arr=getFilteredSummaryTxs();
-  var gRev=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
-  var dExp=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
-  var ci=Math.max(0,gRev-dExp);
-  var tips=[];
-
-  if(ci===0&&gRev===0){
-    tips.push({type:'ok',title:'Nessun dato nel periodo',body:"Seleziona un periodo con transazioni per ricevere i consigli fiscali."});
-    show(tips,panel,content);return;
-  }
-
-  // ── Bracket Malta SE ──
-  var bk=[
-    {lim:9100, nextRate:0.15, label:"9.100"},
-    {lim:14500,nextRate:0.25, label:"14.500"},
-    {lim:60000,nextRate:0.35, label:"60.000"}
-  ];
-  bk.forEach(function(b){
-    var over=ci-b.lim;
-    if(over>0&&over<=3000){
-      var saving=over*(b.nextRate-(b.lim===9100?0:b.lim===14500?0.15:0.25));
-      tips.push({type:b.lim===60000?'danger':'warn',
-        title:"Sei appena sopra il bracket "+b.label+"\u20AC",
-        body:"Il tuo reddito imponibile ("+fmt(ci)+"\u20AC) supera "+b.label+"\u20AC di "+fmt(over)+"\u20AC. "+
-             "Questo ti costa "+fmt(saving)+"\u20AC di tasse extra. "+
-             "<b>Consiglio:</b> "+fmt(over)+"\u20AC di spese aziendali deducibili ti farebbero risparmiare "+fmt(saving)+"\u20AC."
-      });
-    }
-    if(ci<b.lim&&ci>=b.lim-2000){
-      tips.push({type:'info',
-        title:"Vicino alla soglia "+b.label+"\u20AC",
-        body:"Sei a "+fmt(b.lim-ci)+"\u20AC dalla soglia "+b.label+"\u20AC. "+
-             "Puoi ancora fatturare circa "+fmt(b.lim-ci)+"\u20AC netti prima di entrare nell'aliquota "+Math.round(b.nextRate*100)+"%."
-      });
-    }
-  });
-
-  // ── SSC bracket ──
-  if(ci>=19000&&ci<21000){
-    tips.push({type:'warn',
-      title:"Vicino al bracket SSC alto (21.000\u20AC)",
-      body:"Oltre 21.000\u20AC di reddito la SSC Class 2 passa da ~1.212\u20AC/anno a ~2.980\u20AC/anno (+1.768\u20AC). "+
-           "Sei a "+fmt(21000-ci)+"\u20AC dalla soglia."
-    });
-  }
-  if(ci>21000&&ci<24000){
-    tips.push({type:'warn',
-      title:"Sei nel bracket SSC alto",
-      body:"Hai superato 21.000\u20AC di reddito: SSC Class 2 ~2.980\u20AC/anno invece di ~1.212\u20AC/anno. "+
-           "Con "+fmt(ci-21000)+"\u20AC di spese aggiuntive deducibili rientreresti nel bracket basso e risparmieresti ~1.768\u20AC di SSC."
-    });
-  }
-
-  // ── Spese basse ──
-  if(gRev>20000&&dExp/gRev<0.10){
-    tips.push({type:'info',
-      title:"Spese deducibili basse ("+Math.round(dExp/gRev*100)+"%)",
-      body:"Le spese aziendali sono solo il "+Math.round(dExp/gRev*100)+"% del fatturato. "+
-           "Ogni 1.000\u20AC di spese deducibili aggiuntive riduce le tasse di ~250\u20AC-350\u20AC. "+
-           "Categorie utili: attrezzatura, software, formazione, home office, viaggi business, consulenze."
-    });
-  }
-
-  // ── Confronto regimi ──
-  if(ci>15000){
-    var se=calcMaltaSE(gRev,dExp);
-    var ltd=calcMaltaLtd(gRev,dExp);
-    var dse=calcDubaiSE(gRev,dExp);
-    var dfz=calcDubaiFZ(gRev,dExp);
-    var options=[
-      {name:"Malta Ltd",total:ltd.total},
-      {name:"Dubai SE",total:dse.total},
-      {name:"Dubai Ltd Free Zone",total:dfz.total}
-    ];
-    var best=options.sort(function(a,b){return a.total-b.total;})[0];
-    var saving=se.total-best.total;
-    if(saving>1000){
-      tips.push({type:'info',
-        title:"Risparmio potenziale con "+best.name+": "+fmt(saving)+"\u20AC/anno",
-        body:"Con il regime <b>"+best.name+"</b> pagheresti "+fmt(best.total)+"\u20AC di tasse invece di "+fmt(se.total)+"\u20AC (Malta SE attuale). "+
-             "Un risparmio stimato di <b>"+fmt(saving)+"\u20AC</b>. Consulta un commercialista per valutare la migrazione."
-      });
-    }
-  }
-
-  // ── Limite forfettario IT ──
-  if(gRev>=80000&&gRev<90000){
-    tips.push({type:'warn',
-      title:"Vicino al limite forfettario italiano (85.000\u20AC)",
-      body:"Superare 85.000\u20AC esclude dal regime forfettario (15%). Sopra questa soglia si applica il regime ordinario "+
-           "(IRPEF progressiva + INPS + IRAP), con un carico fiscale significativamente piu alto."
-    });
-  }
-
-  // ── Ottimale ──
-  if(tips.length===0){
-    tips.push({type:'ok',
-      title:"Situazione fiscale sotto controllo",
-      body:"Nessuna soglia critica imminente nel periodo selezionato. "+
-           "Continua a monitorare le spese deducibili e usa il simulatore per proiettare scenari futuri."
-    });
-  }
-  show(tips,panel,content);
-}
-function show(tips,panel,content){
-  var typeMap={danger:'adv-danger',warn:'adv-warn',info:'adv-info',ok:'adv-ok'};
-  var iconMap={danger:'&#9888;',warn:'&#128161;',info:'&#128202;',ok:'&#9989;'};
-  panel.style.display='';
-  content.innerHTML=tips.map(function(t){
-    return '<div class="adv-card '+typeMap[t.type]+'">'+
-      '<div class="adv-icon">'+iconMap[t.type]+'</div>'+
-      '<div><div class="adv-title">'+t.title+'</div><div>'+t.body+'</div></div>'+
-      '</div>';
-  }).join('');
-}
-
- ─────────────────────────────────────────────────────────────────────
+// INIT
 sb.auth.getSession().then(function(r){
   if(r.data&&r.data.session){currentUser=r.data.session.user;showApp();}
   else{document.getElementById('lock-screen').style.display='flex';document.getElementById('app-content').style.display='none';}
@@ -1056,7 +1032,9 @@ document.addEventListener('DOMContentLoaded',function(){
   updateAmountSections();
   document.addEventListener('keydown',function(e){if(e.key==='Escape')closeEditModal();});
   var dz=document.getElementById('dropzone');
-  if(dz){dz.addEventListener('dragover',function(e){e.preventDefault();dz.classList.add('drag');});
+  if(dz){
+    dz.addEventListener('dragover',function(e){e.preventDefault();dz.classList.add('drag');});
     dz.addEventListener('dragleave',function(){dz.classList.remove('drag');});
-    dz.addEventListener('drop',function(e){e.preventDefault();dz.classList.remove('drag');var f=e.dataTransfer.files[0];if(f)handleFile(f);});}
+    dz.addEventListener('drop',function(e){e.preventDefault();dz.classList.remove('drag');var f=e.dataTransfer.files[0];if(f)handleFile(f);});
+  }
 });
