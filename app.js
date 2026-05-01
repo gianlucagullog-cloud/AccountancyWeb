@@ -1,290 +1,330 @@
-// ══ SUPABASE CONFIG ══════════════════════════════════════════════════════════
+// ══ CONFIG ═══════════════════════════════════════════════════════════════════
 var SUPABASE_URL = 'https://tabobhdntfnedwjrqboc.supabase.co';
 var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhYm9iaGRudGZuZWR3anJxYm9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2MTcyMTUsImV4cCI6MjA5MzE5MzIxNX0.Q7p0cd7aseU08JEwrQ2GHpbYQukbctRJlM1A3Y4FTaA';
-// ═════════════════════════════════════════════════════════════════════════════
-
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-var currentUser = null;
-var txs = [], filter = 'all', dateRef = 'date';
-var editingId = null;
-var settings = { name:'', vat:'', key:'', gclientid:'', gfolderid:'' };
-var filterPeriods = new Set(['all']);
-var filterYear = 'all';
-var filterPeriodsS = new Set(['all']);
-var filterYearS = 'all';
-var currentRegime = 'malta-se';
+
+var currentUser=null, txs=[], filter='all', dateRef='date', editingId=null;
+var settings={name:'',vat:'',key:'',gclientid:'',gfolderid:''};
+var filterPeriods=new Set(['all']), filterYear='all';
+var filterPeriodsS=new Set(['all']), filterYearS='all';
+var currentRegime='malta-se';
+var selectedIds=new Set();
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
-function doLogin() {
-  var email = document.getElementById('lock-email').value.trim();
-  var pwd   = document.getElementById('lock-input').value;
-  var btn   = document.getElementById('lock-btn');
-  if (!email || !pwd) { showLockError('Inserisci email e password.'); return; }
-  btn.disabled = true; btn.textContent = 'Accesso...';
-  sb.auth.signInWithPassword({ email:email, password:pwd }).then(function(r) {
-    btn.disabled = false; btn.textContent = 'Accedi';
-    if (r.error) { showLockError('Email o password errata'); return; }
-    currentUser = r.data.user; showApp();
+function doLogin(){
+  var email=document.getElementById('lock-email').value.trim();
+  var pwd=document.getElementById('lock-input').value;
+  var btn=document.getElementById('lock-btn');
+  if(!email||!pwd){showLockError('Inserisci email e password.');return;}
+  btn.disabled=true;btn.textContent='Accesso...';
+  sb.auth.signInWithPassword({email:email,password:pwd}).then(function(r){
+    btn.disabled=false;btn.textContent='Accedi';
+    if(r.error){showLockError('Email o password errata');return;}
+    currentUser=r.data.user;showApp();
   });
 }
-function doSignUp(e) {
+function doSignUp(e){
   e.preventDefault();
-  var email = document.getElementById('lock-email').value.trim();
-  var pwd   = document.getElementById('lock-input').value;
-  if (!email || !pwd) { showLockError('Inserisci email e password.'); return; }
-  sb.auth.signUp({ email:email, password:pwd }).then(function(r) {
-    if (r.error) { showLockError('Errore: ' + r.error.message); return; }
+  var email=document.getElementById('lock-email').value.trim();
+  var pwd=document.getElementById('lock-input').value;
+  if(!email||!pwd){showLockError('Inserisci email e password.');return;}
+  sb.auth.signUp({email:email,password:pwd}).then(function(r){
+    if(r.error){showLockError('Errore: '+r.error.message);return;}
     showLockError('Account creato! Clicca Accedi.');
   });
 }
-function doLogout() {
-  sb.auth.signOut().then(function() {
-    currentUser = null; txs = [];
-    document.getElementById('app-content').style.display = 'none';
-    document.getElementById('lock-screen').style.display = 'flex';
-    document.getElementById('lock-email').value = '';
-    document.getElementById('lock-input').value = '';
+function doLogout(){
+  sb.auth.signOut().then(function(){
+    currentUser=null;txs=[];
+    document.getElementById('app-content').style.display='none';
+    document.getElementById('lock-screen').style.display='flex';
+    document.getElementById('lock-email').value='';
+    document.getElementById('lock-input').value='';
+    ['user-email-badge','logout-btn','hdr-badge'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
   });
 }
-function showLockError(msg) {
-  var el = document.getElementById('lock-error');
-  el.textContent = msg; el.style.display = '';
-  setTimeout(function(){ el.style.display='none'; }, 5000);
-}
-function showApp() {
-  document.getElementById('lock-screen').style.display = 'none';
-  document.getElementById('app-content').style.display = '';
-  var b = document.getElementById('user-email-badge');
-  if (b && currentUser) b.textContent = currentUser.email;
-  loadSettings().then(function(){ loadInvoices(); });
-  updateAmountSections();
-  showTab('carica');
+function showLockError(msg){var el=document.getElementById('lock-error');el.textContent=msg;el.style.display='';setTimeout(function(){el.style.display='none';},5000);}
+function showApp(){
+  document.getElementById('lock-screen').style.display='none';
+  document.getElementById('app-content').style.display='';
+  var b=document.getElementById('user-email-badge');if(b&&currentUser){b.textContent=currentUser.email;b.style.display='';}
+  var lb=document.getElementById('logout-btn');if(lb)lb.style.display='';
+  var hb=document.getElementById('hdr-badge');if(hb)hb.style.display='';
+  loadSettings().then(function(){loadInvoices();});
+  updateAmountSections();showTab('carica');
 }
 
 // ── DB HELPERS ────────────────────────────────────────────────────────────────
-function txToDb(t) {
-  return { user_id:currentUser.id, date:t.date, service_month:t.serviceMonth,
-    type:t.type, invoice_num:t.invoice, counterparty:t.counterparty, category:t.category,
-    country:t.country, vat_id:t.vatId, address:t.address, description:t.description,
-    entrate_net:t.entrateNet||0, entrate_vat:t.entrateVat||0, entrate_total:t.entrateTotal||0,
-    uscite_net:t.usciteNet||0, uscite_vat:t.usciteVat||0, uscite_total:t.usciteTotal||0, notes:t.notes };
+function txToDb(t){
+  return {user_id:currentUser.id,date:t.date,service_month:t.serviceMonth,type:t.type,
+    invoice_num:t.invoice,counterparty:t.counterparty,category:t.category,country:t.country,
+    vat_id:t.vatId,address:t.address,description:t.description,
+    entrate_net:t.entrateNet||0,entrate_vat:t.entrateVat||0,entrate_total:t.entrateTotal||0,
+    uscite_net:t.usciteNet||0,uscite_vat:t.usciteVat||0,uscite_total:t.usciteTotal||0,notes:t.notes};
 }
-function dbToTx(r) {
-  return { id:r.id, type:r.type, date:r.date, serviceMonth:r.service_month,
-    invoice:r.invoice_num, counterparty:r.counterparty, category:r.category,
-    country:r.country, vatId:r.vat_id, address:r.address, description:r.description,
-    entrateNet:parseFloat(r.entrate_net)||0, entrateVat:parseFloat(r.entrate_vat)||0,
-    entrateTotal:parseFloat(r.entrate_total)||0, usciteNet:parseFloat(r.uscite_net)||0,
-    usciteVat:parseFloat(r.uscite_vat)||0, usciteTotal:parseFloat(r.uscite_total)||0, notes:r.notes };
+function dbToTx(r){
+  return {id:r.id,type:r.type,date:r.date,serviceMonth:r.service_month,invoice:r.invoice_num,
+    counterparty:r.counterparty,category:r.category,country:r.country,vatId:r.vat_id,
+    address:r.address,description:r.description,
+    entrateNet:parseFloat(r.entrate_net)||0,entrateVat:parseFloat(r.entrate_vat)||0,
+    entrateTotal:parseFloat(r.entrate_total)||0,usciteNet:parseFloat(r.uscite_net)||0,
+    usciteVat:parseFloat(r.uscite_vat)||0,usciteTotal:parseFloat(r.uscite_total)||0,
+    notes:r.notes,filePath:r.file_path||null,fileName:r.file_name||null};
+}
+
+// ── FILE STORAGE ──────────────────────────────────────────────────────────────
+function uploadInvoiceFile(file, invoiceId){
+  var ext=file.name.split('.').pop();
+  var path=currentUser.id+'/'+invoiceId+'.'+ext;
+  return sb.storage.from('invoice-files').upload(path,file,{upsert:true}).then(function(r){
+    if(r.error){console.warn('Storage upload failed:',r.error.message);return null;}
+    return sb.from('invoices').update({file_path:path,file_name:file.name}).eq('id',invoiceId).then(function(){return path;});
+  });
+}
+function downloadInvoiceFile(t){
+  if(!t.filePath){alert('Nessun file allegato a questa fattura.');return;}
+  sb.storage.from('invoice-files').createSignedUrl(t.filePath,3600).then(function(r){
+    if(r.error||!r.data){alert('Errore nel recupero del file.');return;}
+    var a=document.createElement('a');a.href=r.data.signedUrl;a.download=t.fileName||'fattura';a.target='_blank';a.click();
+  });
 }
 
 // ── DATA FUNCTIONS ────────────────────────────────────────────────────────────
-function loadInvoices() {
-  return sb.from('invoices').select('*').order('date',{ascending:true}).then(function(r) {
-    if (r.error) { console.error(r.error); return; }
-    txs = (r.data||[]).map(dbToTx);
-    populateYearFilters();
-    renderTable(); renderStats('stats-a'); updateCount();
+function loadInvoices(){
+  return sb.from('invoices').select('*').order('date',{ascending:true}).then(function(r){
+    if(r.error){console.error(r.error);return;}
+    txs=(r.data||[]).map(dbToTx);
+    populateYearFilters();renderTable();renderStats('stats-a');updateCount();
   });
 }
-function saveTransaction() {
-  var t = { type:v('f-type'), date:v('f-date'), serviceMonth:v('f-service-month'),
-    invoice:v('f-invoice'), counterparty:v('f-counterparty'), category:v('f-category'),
-    country:v('f-country'), vatId:v('f-vatid'), address:v('f-address'), description:v('f-description'),
-    entrateNet:num('f-en-net'), entrateVat:num('f-en-vat'), entrateTotal:num('f-en-tot'),
-    usciteNet:num('f-us-net'), usciteVat:num('f-us-vat'), usciteTotal:num('f-us-tot'), notes:v('f-notes') };
-  if (!t.counterparty) { showMsg('Inserisci il Counterparty.','error'); return; }
-  sb.from('invoices').insert(txToDb(t)).select().then(function(r) {
-    if (r.error) { showMsg('Errore: '+r.error.message,'error'); return; }
-    var newId = r.data[0].id;
-    if (driveCurrentFile) {
+function saveTransaction(){
+  var t={type:v('f-type'),date:v('f-date'),serviceMonth:v('f-service-month'),
+    invoice:v('f-invoice'),counterparty:v('f-counterparty'),category:v('f-category'),
+    country:v('f-country'),vatId:v('f-vatid'),address:v('f-address'),description:v('f-description'),
+    entrateNet:num('f-en-net'),entrateVat:num('f-en-vat'),entrateTotal:num('f-en-tot'),
+    usciteNet:num('f-us-net'),usciteVat:num('f-us-vat'),usciteTotal:num('f-us-tot'),notes:v('f-notes')};
+  if(!t.counterparty){showMsg('Inserisci il Counterparty.','error');return;}
+  sb.from('invoices').insert(txToDb(t)).select().then(function(r){
+    if(r.error){showMsg('Errore: '+r.error.message,'error');return;}
+    var newId=r.data[0].id;
+    var uploadPromises=[];
+    if(driveCurrentFile){
       var fc=driveCurrentFile;
-      toB64(fc).then(function(b64){ try{localStorage.setItem('inv_file_'+newId,JSON.stringify({name:fc.name,type:fc.type||'application/octet-stream',b64:b64}));}catch(e){} });
-      if (driveIsReady()) {
-        var fname=t.date+'_'+(t.invoice||'fattura').replace(/[\/\:*?"<>|]/g,'-')+'_'+t.counterparty.slice(0,25).replace(/[\/\:*?"<>|]/g,'-')+'.'+fc.name.split('.').pop();
-        setDriveUploadStatus(true,'Upload Drive...',null);
-        driveUploadFile(fc,fname,function(ok,info){ok?setDriveUploadStatus(true,'Drive OK',true):setDriveUploadStatus(true,'Drive errore: '+info,false);});
+      // Save to Supabase Storage
+      uploadPromises.push(uploadInvoiceFile(fc,newId));
+      // Save locally for ZIP
+      toB64(fc).then(function(b64){try{localStorage.setItem('inv_file_'+newId,JSON.stringify({name:fc.name,type:fc.type||'application/octet-stream',b64:b64}));}catch(e){}});
+      // Google Drive
+      if(driveIsReady()){
+        var fname=t.date+'_'+(t.invoice||'fattura').replace(/[/\\:*?"<>|]/g,'-')+'_'+t.counterparty.slice(0,25).replace(/[/\\:*?"<>|]/g,'-')+'.'+fc.name.split('.').pop();
+        setDriveUploadStatus(true,'Upload...',null);
+        driveUploadFile(fc,fname,function(ok,info){ok?setDriveUploadStatus(true,'Drive OK',true):setDriveUploadStatus(true,'Err: '+info,false);});
       }
     }
-    driveCurrentFile=null; loadInvoices(); showMsg('Transazione salvata!','success');
-    setState('upload'); document.getElementById('file-input').value='';
+    Promise.all(uploadPromises).then(function(){
+      driveCurrentFile=null;loadInvoices();showMsg('Transazione salvata!','success');
+      setState('upload');document.getElementById('file-input').value='';
+    });
   });
 }
-function delTx(id) {
-  if (!confirm('Eliminare?')) return;
-  sb.from('invoices').delete().eq('id',id).then(function(r) {
-    if (r.error) { alert('Errore: '+r.error.message); return; }
-    try{localStorage.removeItem('inv_file_'+id);}catch(e){} loadInvoices();
+function delTx(id){
+  if(!confirm('Eliminare?'))return;
+  var t=txs.find(function(x){return x.id===id;});
+  var p=t&&t.filePath?sb.storage.from('invoice-files').remove([t.filePath]):Promise.resolve();
+  p.then(function(){
+    sb.from('invoices').delete().eq('id',id).then(function(r){
+      if(r.error){alert('Errore: '+r.error.message);return;}
+      try{localStorage.removeItem('inv_file_'+id);}catch(e){}
+      loadInvoices();
+    });
   });
 }
-function saveEdit() {
-  var id=editingId; if(!id) return;
-  var cp=eV('e-counterparty'); if(!cp){alert('Inserisci il Counterparty.');return;}
+function saveEdit(){
+  var id=editingId;if(!id)return;
+  var cp=eV('e-counterparty');if(!cp){alert('Inserisci il Counterparty.');return;}
   var t={id:id,type:eV('e-type'),date:eV('e-date'),serviceMonth:eV('e-service-month'),
     invoice:eV('e-invoice'),counterparty:cp,category:eV('e-category'),country:eV('e-country'),
     vatId:eV('e-vatid'),address:eV('e-address'),description:eV('e-description'),
     entrateNet:eNum('e-en-net'),entrateVat:eNum('e-en-vat'),entrateTotal:eNum('e-en-tot'),
     usciteNet:eNum('e-us-net'),usciteVat:eNum('e-us-vat'),usciteTotal:eNum('e-us-tot'),notes:eV('e-notes')};
-  var row=txToDb(t); delete row.user_id;
-  sb.from('invoices').update(row).eq('id',id).then(function(r) {
+  var row=txToDb(t);delete row.user_id;
+  sb.from('invoices').update(row).eq('id',id).then(function(r){
     if(r.error){alert('Errore: '+r.error.message);return;}
-    closeEditModal(); loadInvoices();
+    closeEditModal();loadInvoices();
     var m=document.getElementById('msg-area');
     if(m){m.innerHTML='<div class="msg msg-success">Fattura aggiornata!</div>';setTimeout(function(){m.innerHTML='';},4000);}
   });
 }
-function clearAll() {
-  if(!confirm('Cancellare TUTTE le transazioni? Irreversibile!')) return;
-  sb.from('invoices').delete().eq('user_id',currentUser.id).then(function(r) {
-    if(r.error){alert('Errore: '+r.error.message);return;}
-    txs=[]; renderTable(); renderStats('stats-a'); updateCount();
+function clearAll(){
+  if(!confirm('Cancellare TUTTE le transazioni?'))return;
+  // Delete all files from storage
+  var paths=txs.filter(function(t){return t.filePath;}).map(function(t){return t.filePath;});
+  var p=paths.length?sb.storage.from('invoice-files').remove(paths):Promise.resolve();
+  p.then(function(){
+    sb.from('invoices').delete().eq('user_id',currentUser.id).then(function(r){
+      if(r.error){alert('Errore: '+r.error.message);return;}
+      txs=[];renderTable();renderStats('stats-a');updateCount();
+    });
   });
+}
+
+// ── SELECTION ─────────────────────────────────────────────────────────────────
+function toggleSelect(id,cb){
+  if(cb.checked)selectedIds.add(id); else selectedIds.delete(id);
+  updateSelBar();
+  var allCb=document.getElementById('cb-all');
+  if(allCb){var vis=getFilteredTxs();allCb.checked=vis.length>0&&vis.every(function(t){return selectedIds.has(t.id);});}
+}
+function toggleSelectAll(cb){
+  var arr=getFilteredTxs();
+  if(cb.checked)arr.forEach(function(t){selectedIds.add(t.id);}); else arr.forEach(function(t){selectedIds.delete(t.id);});
+  document.querySelectorAll('.row-cb').forEach(function(c){c.checked=cb.checked;});
+  updateSelBar();
+}
+function clearSelection(){selectedIds.clear();renderTable();}
+function updateSelBar(){
+  var bar=document.getElementById('sel-bar');var cnt=document.getElementById('sel-count');
+  if(bar){bar.style.display=selectedIds.size>0?'flex':'none';}
+  if(cnt)cnt.textContent=selectedIds.size+' selezionate';
+}
+function deleteSelected(){
+  if(!selectedIds.size)return;
+  if(!confirm('Eliminare '+selectedIds.size+' fatture?'))return;
+  var ids=Array.from(selectedIds);
+  var paths=txs.filter(function(t){return ids.indexOf(t.id)>=0&&t.filePath;}).map(function(t){return t.filePath;});
+  var p=paths.length?sb.storage.from('invoice-files').remove(paths):Promise.resolve();
+  p.then(function(){
+    // Delete in batches
+    var done=0;
+    ids.forEach(function(id){
+      sb.from('invoices').delete().eq('id',id).then(function(){
+        try{localStorage.removeItem('inv_file_'+id);}catch(e){}
+        done++;if(done===ids.length){selectedIds.clear();loadInvoices();}
+      });
+    });
+  });
+}
+function exportSelectedZIP(){
+  var ids=Array.from(selectedIds);
+  if(!ids.length)return;
+  var arr=txs.filter(function(t){return ids.indexOf(t.id)>=0;});
+  _buildZIP(arr,'Selezione');
 }
 
 // ── IMPORT CSV ────────────────────────────────────────────────────────────────
-function importCSV(input) {
-  var file = input.files[0]; if(!file) return;
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    var lines = e.target.result.split('\n').filter(function(l){return l.trim();});
-    if (lines.length < 2) { alert('CSV vuoto o non valido.'); return; }
-    var headers = lines[0].split(',').map(function(h){return h.replace(/"/g,'').trim().toLowerCase();});
-    var rows = [];
-    for (var i=1; i<lines.length; i++) {
-      var cols = lines[i].match(/(".*?"|[^,]+)(?=,|$)/g)||[];
-      cols = cols.map(function(c){return c.replace(/^"|"$/g,'').trim();});
-      var row = {};
-      headers.forEach(function(h,j){row[h]=cols[j]||'';});
-      var t = {
-        user_id:currentUser.id,
-        date: row['date']||row['data']||'',
-        service_month: row['service month']||row['service_month']||'',
-        type: row['type']||row['tipo']||'Received',
-        invoice_num: row['invoice #']||row['invoice_num']||row['fattura #']||'',
-        counterparty: row['counterparty']||row['controparte']||'',
-        category: row['category']||row['categoria']||'Other',
-        country: row['country']||row['paese']||'',
-        vat_id: row['vat / tax id']||row['vat_id']||'',
-        address: row['address']||row['address']||'',
-        description: row['description']||row['descrizione']||'',
-        entrate_net:   parseFloat(row['entrate net']||row['entrate_net']||0)||0,
-        entrate_vat:   parseFloat(row['entrate vat']||row['entrate_vat']||0)||0,
-        entrate_total: parseFloat(row['entrate total']||row['entrate_total']||0)||0,
-        uscite_net:    parseFloat(row['uscite net']||row['uscite_net']||0)||0,
-        uscite_vat:    parseFloat(row['uscite vat']||row['uscite_vat']||0)||0,
-        uscite_total:  parseFloat(row['uscite total']||row['uscite_total']||0)||0,
-        notes: row['notes']||row['note']||''
-      };
-      if (t.date && t.counterparty) rows.push(t);
+function importCSV(input){
+  var file=input.files[0];if(!file)return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var lines=e.target.result.split('\n').filter(function(l){return l.trim();});
+    if(lines.length<2){alert('CSV vuoto.');return;}
+    var headers=lines[0].split(',').map(function(h){return h.replace(/"/g,'').trim().toLowerCase();});
+    var rows=[];
+    for(var i=1;i<lines.length;i++){
+      var cols=lines[i].match(/(".*?"|[^,]+)(?=,|$)/g)||[];
+      cols=cols.map(function(c){return c.replace(/^"|"$/g,'').trim();});
+      var row={};headers.forEach(function(h,j){row[h]=cols[j]||'';});
+      var t={user_id:currentUser.id,date:row['date']||row['data']||'',
+        service_month:row['service month']||row['service_month']||'',
+        type:row['type']||row['tipo']||'Received',invoice_num:row['invoice #']||row['invoice_num']||'',
+        counterparty:row['counterparty']||row['controparte']||'',category:row['category']||row['categoria']||'Other',
+        country:row['country']||'',vat_id:row['vat / tax id']||'',address:row['address']||'',
+        description:row['description']||row['descrizione']||'',
+        entrate_net:parseFloat(row['entrate net']||row['entrate_net']||0)||0,
+        entrate_vat:parseFloat(row['entrate vat']||row['entrate_vat']||0)||0,
+        entrate_total:parseFloat(row['entrate total']||row['entrate_total']||0)||0,
+        uscite_net:parseFloat(row['uscite net']||row['uscite_net']||0)||0,
+        uscite_vat:parseFloat(row['uscite vat']||row['uscite_vat']||0)||0,
+        uscite_total:parseFloat(row['uscite total']||row['uscite_total']||0)||0,
+        notes:row['notes']||row['note']||''};
+      if(t.date&&t.counterparty)rows.push(t);
     }
-    if (!rows.length) { alert('Nessuna riga valida trovata. Controlla che il CSV abbia colonne Date e Counterparty.'); return; }
-    if (!confirm('Importare '+rows.length+' transazioni?')) return;
-    sb.from('invoices').insert(rows).then(function(r) {
-      if (r.error) { alert('Errore import: '+r.error.message); return; }
-      loadInvoices(); showTab('registro');
-      showMsg(rows.length+' transazioni importate!','success');
+    if(!rows.length){alert('Nessuna riga valida.');return;}
+    if(!confirm('Importare '+rows.length+' transazioni?'))return;
+    sb.from('invoices').insert(rows).then(function(r){
+      if(r.error){alert('Errore import: '+r.error.message);return;}
+      loadInvoices();showTab('registro');showMsg(rows.length+' transazioni importate!','success');
     });
   };
-  reader.readAsText(file, 'UTF-8');
-  input.value='';
+  reader.readAsText(file,'UTF-8');input.value='';
 }
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
-function loadSettings() {
-  return sb.from('profile').select('*').maybeSingle().then(function(r) {
-    if(r.data){
-      settings.name=r.data.name||''; settings.vat=r.data.vat_number||'';
-      var sn=document.getElementById('s-name'); if(sn)sn.value=settings.name;
-      var sv=document.getElementById('s-vat');  if(sv)sv.value=settings.vat;
-    }
+function loadSettings(){
+  return sb.from('profile').select('*').maybeSingle().then(function(r){
+    if(r.data){settings.name=r.data.name||'';settings.vat=r.data.vat_number||'';
+      var sn=document.getElementById('s-name');if(sn)sn.value=settings.name;
+      var sv=document.getElementById('s-vat');if(sv)sv.value=settings.vat;}
     settings.key=localStorage.getItem('inv_key')||'';
     settings.gclientid=localStorage.getItem('inv_gcid')||'';
     settings.gfolderid=localStorage.getItem('inv_gfid')||'';
-    var sk=document.getElementById('s-key');       if(sk&&settings.key)sk.value=settings.key;
-    var gi=document.getElementById('s-gclientid'); if(gi&&settings.gclientid)gi.value=settings.gclientid;
-    var gf=document.getElementById('s-gfolderid'); if(gf&&settings.gfolderid)gf.value=settings.gfolderid;
+    var sk=document.getElementById('s-key');if(sk&&settings.key)sk.value=settings.key;
+    var gi=document.getElementById('s-gclientid');if(gi&&settings.gclientid)gi.value=settings.gclientid;
+    var gf=document.getElementById('s-gfolderid');if(gf&&settings.gfolderid)gf.value=settings.gfolderid;
   });
 }
-function saveSettings() {
-  settings.name=v('s-name'); settings.vat=v('s-vat'); settings.key=v('s-key');
-  settings.gclientid=v('s-gclientid'); settings.gfolderid=v('s-gfolderid');
+function saveSettings(){
+  settings.name=v('s-name');settings.vat=v('s-vat');settings.key=v('s-key');
+  settings.gclientid=v('s-gclientid');settings.gfolderid=v('s-gfolderid');
   sb.from('profile').upsert({user_id:currentUser.id,name:settings.name,vat_number:settings.vat},{onConflict:'user_id'});
-  localStorage.setItem('inv_key',settings.key); localStorage.setItem('inv_gcid',settings.gclientid); localStorage.setItem('inv_gfid',settings.gfolderid);
+  localStorage.setItem('inv_key',settings.key);localStorage.setItem('inv_gcid',settings.gclientid);localStorage.setItem('inv_gfid',settings.gfolderid);
 }
 function cfg(k){return settings[k]||'';}
 function updateCount(){var el=document.getElementById('tx-count');if(el)el.textContent=txs.length+' transazioni';}
 
-// ── TAB NAVIGATION ────────────────────────────────────────────────────────────
-function showTab(t) {
-  ['carica','registro','summary','settings'].forEach(function(id) {
+// ── TABS ──────────────────────────────────────────────────────────────────────
+function showTab(t){
+  ['carica','registro','summary','settings'].forEach(function(id){
     document.getElementById('tab-'+id).style.display=id===t?'':'none';
-    var btn=document.getElementById('tab-btn-'+id); if(btn)btn.classList.toggle('active',id===t);
+    var btn=document.getElementById('tab-btn-'+id);if(btn)btn.classList.toggle('active',id===t);
   });
   if(t==='registro'){renderTable();renderStats('stats-a');}
   if(t==='summary'){renderStats('stats-b');renderCat();renderTax();renderSimulator();}
 }
 
-// ── PERIOD FILTER (Registro) ──────────────────────────────────────────────────
-function populateYearFilters() {
-  var years = {};
-  txs.forEach(function(t){ var y=(t.date||'').slice(0,4); if(y) years[y]=1; });
-  var yArr = Object.keys(years).sort();
+// ── PERIOD FILTERS ────────────────────────────────────────────────────────────
+function populateYearFilters(){
+  var years={};txs.forEach(function(t){var y=(t.date||'').slice(0,4);if(y)years[y]=1;});
+  var ya=Object.keys(years).sort();
   ['year-filter','year-filter-s'].forEach(function(id){
-    var el=document.getElementById(id); if(!el) return;
-    var cur=el.value;
-    el.innerHTML='<option value="all">Tutti</option>';
-    yArr.forEach(function(y){el.innerHTML+='<option value="'+y+'">'+y+'</option>';});
-    if(cur) el.value=cur;
+    var el=document.getElementById(id);if(!el)return;
+    var cur=el.value;el.innerHTML='<option value="all">Tutti gli anni</option>';
+    ya.forEach(function(y){el.innerHTML+='<option value="'+y+'">'+y+'</option>';});
+    if(cur&&cur!=='all')el.value=cur;
   });
 }
-function togglePeriod(p, btn) {
-  if (p==='all') {
-    filterPeriods = new Set(['all']);
-  } else {
+function togglePeriod(p,btn){
+  if(p==='all'){filterPeriods=new Set(['all']);}else{
     filterPeriods.delete('all');
-    if (filterPeriods.has(p)) filterPeriods.delete(p);
-    else filterPeriods.add(p);
-    if (filterPeriods.size===0) filterPeriods.add('all');
+    if(filterPeriods.has(p))filterPeriods.delete(p);else filterPeriods.add(p);
+    if(filterPeriods.size===0)filterPeriods.add('all');
   }
-  document.querySelectorAll('#period-pills .period-pill').forEach(function(b){
-    b.classList.toggle('active', filterPeriods.has(b.dataset.p));
-  });
+  document.querySelectorAll('#period-pills .period-pill').forEach(function(b){b.classList.toggle('active',filterPeriods.has(b.dataset.p));});
   renderTable();
 }
-function setFilterYear(y) { filterYear=y; renderTable(); }
-
-function togglePeriodS(p, btn) {
-  if (p==='all') { filterPeriodsS=new Set(['all']); }
-  else {
+function setFilterYear(y){filterYear=y;renderTable();}
+function togglePeriodS(p,btn){
+  if(p==='all'){filterPeriodsS=new Set(['all']);}else{
     filterPeriodsS.delete('all');
-    if(filterPeriodsS.has(p)) filterPeriodsS.delete(p); else filterPeriodsS.add(p);
-    if(filterPeriodsS.size===0) filterPeriodsS.add('all');
+    if(filterPeriodsS.has(p))filterPeriodsS.delete(p);else filterPeriodsS.add(p);
+    if(filterPeriodsS.size===0)filterPeriodsS.add('all');
   }
-  document.querySelectorAll('#period-pills-s .period-pill').forEach(function(b){
-    b.classList.toggle('active', filterPeriodsS.has(b.dataset.p));
-  });
-  renderCat(); renderTax(); renderSimulator(); renderStats('stats-b');
+  document.querySelectorAll('#period-pills-s .period-pill').forEach(function(b){b.classList.toggle('active',filterPeriodsS.has(b.dataset.p));});
+  renderCat();renderTax();renderSimulator();renderStats('stats-b');
 }
-function setFilterYearS(y) { filterYearS=y; renderCat(); renderTax(); renderSimulator(); renderStats('stats-b'); }
-
-function matchesPeriodMulti(t, periods, year) {
-  var d = getRefDate(t);
-  if (year!=='all' && d.slice(0,4)!==year) return false;
-  if (periods.has('all')) return true;
+function setFilterYearS(y){filterYearS=y;renderCat();renderTax();renderSimulator();renderStats('stats-b');}
+function matchesPeriodMulti(t,periods,year){
+  var d=getRefDate(t);
+  if(year!=='all'&&d.slice(0,4)!==year)return false;
+  if(periods.has('all'))return true;
   var m=d.slice(5,7);
-  var qMap={Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
-  for (var p of periods) {
-    if (qMap[p] && qMap[p].indexOf(m)>=0) return true;
-    if (p===m) return true;
-  }
+  var qM={Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
+  for(var p of periods){if(qM[p]&&qM[p].indexOf(m)>=0)return true;if(p===m)return true;}
   return false;
 }
-function getFilteredTxs() {
-  return txs.filter(function(t){ return (filter==='all'||t.type===filter) && matchesPeriodMulti(t,filterPeriods,filterYear); });
-}
-function getFilteredSummaryTxs() {
-  return txs.filter(function(t){ return matchesPeriodMulti(t,filterPeriodsS,filterYearS); });
-}
+function getRefDate(t){return dateRef==='serviceMonth'?(t.serviceMonth||t.date):t.date;}
+function getFilteredTxs(){return txs.filter(function(t){return(filter==='all'||t.type===filter)&&matchesPeriodMulti(t,filterPeriods,filterYear);});}
+function getFilteredSummaryTxs(){return txs.filter(function(t){return matchesPeriodMulti(t,filterPeriodsS,filterYearS);});}
 
 // ── GOOGLE DRIVE ──
 var driveToken=null, driveTokenExpiry=0;
@@ -516,36 +556,33 @@ function setDateRef(ref,btn){
   renderTable();
 }
 
-
 function setTypeFilter(f,btn){
-  filter=f;
-  ['ftype-all','ftype-issued','ftype-received'].forEach(function(id){var el=document.getElementById(id);if(el)el.classList.remove('active');});
-  if(btn)btn.classList.add('active');
-  renderTable();
+  filter=f;['ftype-all','ftype-issued','ftype-received'].forEach(function(id){var el=document.getElementById(id);if(el)el.classList.remove('active');});
+  if(btn)btn.classList.add('active');renderTable();
 }
 function setFilter(f,btn){setTypeFilter(f,btn);}
 function setDateRef(ref,btn){
-  dateRef=ref;
-  var db=document.getElementById('ref-date-btn'); var sb2=document.getElementById('ref-svc-btn');
-  if(db)db.classList.toggle('active',ref==='date'); if(sb2)sb2.classList.toggle('active',ref==='serviceMonth');
+  dateRef=ref;var db=document.getElementById('ref-date-btn');var sb2=document.getElementById('ref-svc-btn');
+  if(db)db.classList.toggle('active',ref==='date');if(sb2)sb2.classList.toggle('active',ref==='serviceMonth');
   renderTable();
 }
-function getRefDate(t){return dateRef==='serviceMonth'?(t.serviceMonth||t.date):t.date;}
 
 function renderTable(){
   var arr=getFilteredTxs();
-  var tbody=document.getElementById('tbody'); var empty=document.getElementById('empty');
-  if(!tbody) return;
+  var tbody=document.getElementById('tbody');var empty=document.getElementById('empty');
+  if(!tbody)return;
   renderFilteredStats(arr);
-  if(!arr.length){tbody.innerHTML='';empty.style.display='';return;}
+  if(!arr.length){tbody.innerHTML='';empty.style.display='';updateSelBar();return;}
   empty.style.display='none';
   tbody.innerHTML=arr.map(function(t){
-    var isIn=t.type==='Issued';
-    return '<tr>'+
+    var isIn=t.type==='Issued';var sel=selectedIds.has(t.id);
+    var hasFile=t.filePath||localStorage.getItem('inv_file_'+t.id);
+    return '<tr style="'+(sel?'background:var(--accent-light)':'')+'">'+
+      '<td class="cb-cell"><input type="checkbox" class="row-cb" '+(sel?'checked':'')+' onchange="toggleSelect('+t.id+',this)"></td>'+
       '<td><span class="badge '+(isIn?'badge-in':'badge-out')+'">'+(isIn?'Issued':'Received')+'</span></td>'+
       '<td>'+esc(t.date)+'</td><td style="color:var(--text2)">'+esc(t.serviceMonth)+'</td>'+
       '<td style="color:var(--text2);white-space:nowrap">'+esc(t.invoice)+'</td>'+
-      '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.counterparty)+'</td>'+
+      '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.counterparty)+'</td>'+
       '<td style="color:var(--text2);font-size:10.5px;white-space:nowrap">'+esc(t.category)+'</td>'+
       '<td style="color:var(--text2)">'+esc(t.country)+'</td>'+
       '<td class="'+(t.entrateNet?'amount-in':'')+'">'+fmtN(t.entrateNet)+'</td>'+
@@ -554,13 +591,18 @@ function renderTable(){
       '<td class="'+(t.usciteNet?'amount-out':'')+'">'+fmtN(t.usciteNet)+'</td>'+
       '<td class="'+(t.usciteVat?'amount-out':'')+'">'+fmtN(t.usciteVat)+'</td>'+
       '<td class="'+(t.usciteTotal?'amount-out':'')+'"><b>'+fmtN(t.usciteTotal)+'</b></td>'+
-      '<td style="color:var(--text2);font-size:10.5px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.notes)+'</td>'+
-      '<td style="white-space:nowrap"><span title="File allegato" style="color:var(--text3);font-size:12px;margin-right:4px">'+(localStorage.getItem('inv_file_'+t.id)?'\u{1F4CE}':'')+'</span>'+
-      '<button class="btn btn-edit" onclick="editTx('+t.id+')" title="Modifica">\u270F</button>'+
-      '<button class="btn btn-danger" onclick="delTx('+t.id+')">\u00D7</button></td>'+
-      '</tr>';
+      '<td style="color:var(--text2);font-size:10.5px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.notes)+'</td>'+
+      '<td style="white-space:nowrap">'+
+        (hasFile?'<button class="btn btn-edit" style="font-size:10px;padding:4px 8px" onclick="downloadInvoiceFile(txs.find(function(x){return x.id==='+t.id+'}))" title="Scarica allegato">&#128229;</button>':'')+
+        '<button class="btn btn-edit" onclick="editTx('+t.id+')" title="Modifica">&#9998;</button>'+
+        '<button class="btn btn-danger" onclick="delTx('+t.id+')">&#215;</button>'+
+      '</td></tr>';
   }).join('');
+  updateSelBar();
+  var allCb=document.getElementById('cb-all');
+  if(allCb)allCb.checked=arr.length>0&&arr.every(function(t){return selectedIds.has(t.id);});
 }
+
 function renderFilteredStats(arr){
   var el=document.getElementById('stats-a');if(!el)return;
   var tIn=arr.reduce(function(s,t){return s+(t.entrateTotal||0);},0);
@@ -582,136 +624,142 @@ function renderStats(id){
 }
 function stat(label,val,color){return '<div class="stat"><div class="stat-label">'+label+'</div><div class="stat-value" style="color:'+color+'">'+val+'</div></div>';}
 
-// ── CATEGORY SUMMARY (split entrate/uscite) ───────────────────────────────────
+// ── CATEGORY SUMMARY ──────────────────────────────────────────────────────────
 function renderCat(){
-  var cats=['Revenue - Consultancy','Revenue - Other','Professional Services - Accountant',
-    'Professional Services - Consultancy','Travel - Flights','Travel - Accommodation',
-    'Travel - Local Transport','Utilities - Internet/Mobile','Utilities - Other',
-    'Equipment - Office','Equipment - Other','Other'];
-  var mapIn={}, mapOut={};
-  cats.forEach(function(c){mapIn[c]={n:0,v:0,t:0};mapOut[c]={n:0,v:0,t:0};});
   var arr=getFilteredSummaryTxs();
+  var allCats=Array.from(new Set(arr.map(function(t){return t.category||'Other';}))).sort();
+  var mapIn={},mapOut={};
+  allCats.forEach(function(c){mapIn[c]={n:0,v:0,t:0};mapOut[c]={n:0,v:0,t:0};});
   arr.forEach(function(t){
     var c=t.category||'Other';
-    if(!mapIn[c])mapIn[c]={n:0,v:0,t:0};
-    if(!mapOut[c])mapOut[c]={n:0,v:0,t:0};
+    if(!mapIn[c])mapIn[c]={n:0,v:0,t:0};if(!mapOut[c])mapOut[c]={n:0,v:0,t:0};
     if(t.type==='Issued'){mapIn[c].n+=t.entrateNet;mapIn[c].v+=t.entrateVat;mapIn[c].t+=t.entrateTotal;}
     else{mapOut[c].n+=t.usciteNet;mapOut[c].v+=t.usciteVat;mapOut[c].t+=t.usciteTotal;}
   });
-  // All categories present in data
-  var allCats=Array.from(new Set(arr.map(function(t){return t.category||'Other';}))).sort();
-  function buildRows(map,allC){
+  function rows(map,cats){
     var tN=0,tV=0,tT=0;
-    var rows=allC.filter(function(c){return map[c]&&map[c].t!==0;}).map(function(c){
+    var r=cats.filter(function(c){return map[c]&&map[c].t!==0;}).map(function(c){
       tN+=map[c].n;tV+=map[c].v;tT+=map[c].t;
       return '<tr><td style="color:var(--text2);font-size:11px">'+c+'</td><td>'+fmt(map[c].n)+'</td><td>'+fmt(map[c].v)+'</td><td>'+fmt(map[c].t)+'</td></tr>';
     }).join('');
-    if(!rows) return '<tr><td colspan="4" style="color:var(--text3);text-align:center;padding:16px">Nessun dato</td></tr>';
-    return rows+'<tr><td>TOTAL</td><td>'+fmt(tN)+'</td><td>'+fmt(tV)+'</td><td>'+fmt(tT)+'</td></tr>';
+    if(!r)return '<tr><td colspan="4" style="color:var(--text3);text-align:center;padding:14px">Nessun dato</td></tr>';
+    return r+'<tr><td><b>TOTAL</b></td><td><b>'+fmt(tN)+'</b></td><td><b>'+fmt(tV)+'</b></td><td><b>'+fmt(tT)+'</b></td></tr>';
   }
-  var bi=document.getElementById('cat-tbody-in');   if(bi) bi.innerHTML=buildRows(mapIn,allCats);
-  var bo=document.getElementById('cat-tbody-out');  if(bo) bo.innerHTML=buildRows(mapOut,allCats);
+  var bi=document.getElementById('cat-tbody-in');if(bi)bi.innerHTML=rows(mapIn,allCats);
+  var bo=document.getElementById('cat-tbody-out');if(bo)bo.innerHTML=rows(mapOut,allCats);
 }
 
-// ── TAX CALCULATIONS ──────────────────────────────────────────────────────────
+// ── TAX CALCULATIONS (normative aggiornate) ───────────────────────────────────
 function maltaTaxSingle(c){
-  if(c<=9100)return 0; if(c<=14500)return(c-9100)*.15;
-  if(c<=19500)return 810+(c-14500)*.25; if(c<=60000)return 2060+(c-19500)*.25;
+  if(c<=9100)return 0;if(c<=14500)return(c-9100)*.15;
+  if(c<=19500)return 810+(c-14500)*.25;if(c<=60000)return 2060+(c-19500)*.25;
   return 12235+(c-60000)*.35;
 }
+// Malta SSC Class 2 (self-employed) — contributo fisso settimanale 2026 (stimato)
+// Fonte: LN 452/2024 + incremento annuale ~2%
+function maltaSSC2026(annualIncome){
+  if(annualIncome<910)return 0;          // esente
+  if(annualIncome<=21000)return 23.30*52; // ~€1,212/anno (categoria D)
+  return 57.30*52;                        // ~€2,980/anno (categoria C)
+}
 function calcMaltaSE(gRev,dExp){
-  var ci=Math.max(0,gRev-dExp), tax=maltaTaxSingle(ci), ssc=Math.min(ci,33984)*.15;
-  return {label:'Malta Self-Employed',ci:ci,tax:tax,ssc:ssc,total:tax+ssc,net:ci-tax-ssc,eff:ci>0?(tax+ssc)/ci*100:0,
-    rows:[['Gross Revenue (net VAT)',fmt(gRev),'var(--green)'],['Spese Deducibili (net VAT)',fmt(dExp),'var(--red)'],
-      ['Reddito Imponibile',fmt(ci),'var(--orange)'],['IRPEF (aliquote single 2026)',fmt(tax),''],
-      ['SSC Class 2 (15%)',fmt(ssc),''],['Totale Tasse',fmt(tax+ssc),'var(--orange)'],
-      ['Aliquota Effettiva',(ci>0?(tax+ssc)/ci*100:0).toFixed(1)+'%',''],['Netto dopo tasse',fmt(ci-tax-ssc),'var(--green)']]};
+  var ci=Math.max(0,gRev-dExp),tax=maltaTaxSingle(ci),ssc=maltaSSC2026(ci);
+  return {label:'Malta Self-Employed',eff:ci>0?(tax+ssc)/ci*100:0,net:ci-tax-ssc,total:tax+ssc,
+    rows:[['Gross Revenue (net VAT)',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+      ['Reddito Imponibile',fmt(ci),'var(--orange)'],['IRPEF (single rates 2026)',fmt(tax),''],
+      ['SSC Class 2 — fisso settimanale',ci<910?'Esente':ci<=21000?'€23.30/sett (~€1.212/a)':'€57.30/sett (~€2.980/a)',''],
+      ['SSC annuale',fmt(ssc),''],['Totale Tasse+SSC',fmt(tax+ssc),'var(--orange)'],
+      ['Aliquota Effettiva',ci>0?((tax+ssc)/ci*100).toFixed(1)+'%':'0%',''],
+      ['Netto',fmt(ci-tax-ssc),'var(--green)']]};
 }
 function calcMaltaLtd(gRev,dExp){
-  var profit=Math.max(0,gRev-dExp), corpTax=profit*.35, refund=corpTax*(6/7), netTax=corpTax-refund;
-  return {label:'Malta Ltd (imputation system)',ci:profit,tax:netTax,ssc:0,total:netTax,net:profit-netTax,eff:profit>0?netTax/profit*100:0,
-    rows:[['Gross Revenue (net VAT)',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
-      ['Utile Aziendale',fmt(profit),'var(--orange)'],['Corporate Tax (35%)',fmt(corpTax),''],
-      ['Rimborso Azionista (6/7)','-'+fmt(refund),'var(--green)'],['Tax Effettiva Netta (≈5%)',fmt(netTax),'var(--orange)'],
-      ['Aliquota Effettiva',(profit>0?netTax/profit*100:0).toFixed(1)+'%',''],['Netto dopo tasse',fmt(profit-netTax),'var(--green)']]};
+  var p=Math.max(0,gRev-dExp),ct=p*.35,ref=ct*(6/7),net=ct-ref;
+  return {label:'Malta Ltd',eff:p>0?net/p*100:0,net:p-net,total:net,
+    rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+      ['Utile Aziendale',fmt(p),'var(--orange)'],['Corporate Tax 35%',fmt(ct),''],
+      ['Rimborso Azionista 6/7','-'+fmt(ref),'var(--green)'],
+      ['Tax Netta (≈5% su utile)',fmt(net),'var(--orange)'],
+      ['Aliquota Effettiva',p>0?(net/p*100).toFixed(1)+'%':'0%',''],
+      ['Netto dopo tasse',fmt(p-net),'var(--green)']]};
 }
 function calcDubaiSE(gRev,dExp){
-  var profit=Math.max(0,gRev-dExp), threshold=93750, taxable=Math.max(0,profit-threshold), tax=taxable*.09;
-  return {label:'Dubai Self-Employed (UAE CT)',ci:profit,tax:tax,ssc:0,total:tax,net:profit-tax,eff:profit>0?tax/profit*100:0,
-    rows:[['Gross Revenue (net VAT)',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
-      ['Profitto Netto',fmt(profit),'var(--orange)'],['Soglia esente (AED 375k)',fmt(threshold),''],
-      ['Imponibile CT 9%',fmt(taxable),''],['UAE Corporate Tax (9%)',fmt(tax),'var(--orange)'],
-      ['No Personal Income Tax','0%','var(--green)'],['Netto dopo tasse',fmt(profit-tax),'var(--green)']]};
+  var p=Math.max(0,gRev-dExp),thr=93750,tax=Math.max(0,p-thr)*.09;
+  return {label:'Dubai SE (UAE CT)',eff:p>0?tax/p*100:0,net:p-tax,total:tax,
+    rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+      ['Profitto Netto',fmt(p),'var(--orange)'],['Soglia esente CT (AED 375k)',fmt(thr),''],
+      ['UAE Corporate Tax 9%',fmt(tax),'var(--orange)'],['Personal Income Tax','0%','var(--green)'],
+      ['Aliquota Effettiva',p>0?(tax/p*100).toFixed(1)+'%':'0%',''],
+      ['Netto',fmt(p-tax),'var(--green)']]};
 }
-function calcDubaiLtdFZ(gRev,dExp){
-  var profit=Math.max(0,gRev-dExp);
-  return {label:'Dubai Ltd Free Zone (0% CT)',ci:profit,tax:0,ssc:0,total:0,net:profit,eff:0,
-    rows:[['Gross Revenue (net VAT)',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
-      ['Profitto Netto',fmt(profit),'var(--orange)'],['CT Free Zone (Qualifying)',fmt(0),'var(--green)'],
-      ['No Personal Income Tax','0%','var(--green)'],['Aliquota Effettiva','0%','var(--green)'],
-      ['Costo annuo struttura FZ','~€3.000-8.000','var(--text2)'],['Netto dopo tasse',fmt(profit),'var(--green)']]};
+function calcDubaiFZ(gRev,dExp){
+  var p=Math.max(0,gRev-dExp);
+  return {label:'Dubai Ltd Free Zone',eff:0,net:p,total:0,
+    rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+      ['Profitto Netto',fmt(p),'var(--orange)'],['CT Qualifying Free Zone','0%','var(--green)'],
+      ['Personal Income Tax','0%','var(--green)'],['Aliquota Effettiva','0%','var(--green)'],
+      ['Costo annuo struttura FZ','~€4.000–€10.000','var(--text2)'],
+      ['Netto (ante costo FZ)',fmt(p),'var(--green)']]};
 }
 function calcItalyPIVA(gRev,dExp){
   if(gRev>85000){
-    var irpef=0; var b=gRev-dExp;
-    if(b<=15000)irpef=b*.23; else if(b<=28000)irpef=3450+(b-15000)*.25;
-    else if(b<=50000)irpef=6700+(b-28000)*.35; else irpef=14400+(b-50000)*.43;
-    var inps=(gRev-dExp)*.2607, irap=(gRev-dExp)*.039;
-    var total=irpef+inps+irap;
-    return {label:'IT P.IVA Ordinaria',ci:gRev-dExp,tax:irpef,ssc:inps+irap,total:total,net:gRev-dExp-total,eff:(gRev-dExp)>0?total/(gRev-dExp)*100:0,
+    var rb=Math.max(0,gRev-dExp);
+    var irpef=0;
+    if(rb<=15000)irpef=rb*.23;else if(rb<=28000)irpef=3450+(rb-15000)*.25;
+    else if(rb<=50000)irpef=6700+(rb-28000)*.35;else irpef=14400+(rb-50000)*.43;
+    var inps=rb*.2607,irap=rb*.039,tot=irpef+inps+irap;
+    return {label:'IT P.IVA Ordinaria',eff:rb>0?tot/rb*100:0,net:rb-tot,total:tot,
       rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
-        ['Reddito Netto',fmt(gRev-dExp),'var(--orange)'],['IRPEF (progressiva)',fmt(irpef),''],
-        ['INPS Gestione Separata (26%)',fmt(inps),''],['IRAP (3.9%)',fmt(irap),''],
-        ['Totale Tasse+Contributi',fmt(total),'var(--orange)'],['Netto dopo tasse',fmt(gRev-dExp-total),'var(--green)']]};
+        ['Reddito Netto',fmt(rb),'var(--orange)'],['IRPEF progressiva',fmt(irpef),''],
+        ['INPS Gest. Separata 26%',fmt(inps),''],['IRAP 3.9%',fmt(irap),''],
+        ['Totale',fmt(tot),'var(--orange)'],['Netto',fmt(rb-tot),'var(--green)']]};
   }
-  var coeff=.78, base=gRev*coeff, inps=base*.2607, irpefBase=base-inps*.5, irpef=irpefBase*.15, total=irpef+inps;
-  return {label:'IT P.IVA Forfettaria (15%)',ci:base,tax:irpef,ssc:inps,total:total,net:gRev-total,eff:gRev>0?total/gRev*100:0,
-    rows:[['Gross Revenue (no deduzione spese)',fmt(gRev),'var(--green)'],['Coefficiente redditività (78%)',fmt(base),''],
-      ['INPS Gestione Separata (26%)',fmt(inps),'var(--red)'],['Base IRPEF (dopo ded. 50% INPS)',fmt(irpefBase),''],
-      ['IRPEF Forfettaria (15%)',fmt(irpef),'var(--orange)'],['Totale Tasse+Contributi',fmt(total),'var(--orange)'],
-      ['Aliquota su fatturato',gRev>0?(total/gRev*100).toFixed(1)+'%':'0%',''],['Netto',fmt(gRev-total),'var(--green)']]};
+  var coeff=.78,base=gRev*coeff,inps=base*.2607,irpef=(base-inps*.5)*.15,tot=irpef+inps;
+  return {label:'IT P.IVA Forfettaria',eff:gRev>0?tot/gRev*100:0,net:gRev-tot,total:tot,
+    rows:[['Gross Revenue (no deduzioni spese)',fmt(gRev),'var(--green)'],
+      ['Coefficiente 78%',fmt(base),''],['INPS Gest. Separata 26%',fmt(inps),'var(--red)'],
+      ['Base IRPEF (ded. 50% INPS)',fmt(base-inps*.5),''],['IRPEF Forfettaria 15%',fmt(irpef),'var(--orange)'],
+      ['Totale Tasse+Contributi',fmt(tot),'var(--orange)'],
+      ['Aliquota su fatturato',gRev>0?(tot/gRev*100).toFixed(1)+'%':'0%',''],
+      ['Netto',fmt(gRev-tot),'var(--green)']]};
 }
-function getRegimeCalc(regime,gRev,dExp){
-  if(regime==='malta-se') return calcMaltaSE(gRev,dExp);
-  if(regime==='malta-ltd') return calcMaltaLtd(gRev,dExp);
-  if(regime==='dubai-se') return calcDubaiSE(gRev,dExp);
-  if(regime==='dubai-ltd') return calcDubaiLtdFZ(gRev,dExp);
+function getCalc(regime,gRev,dExp){
+  if(regime==='malta-se')return calcMaltaSE(gRev,dExp);
+  if(regime==='malta-ltd')return calcMaltaLtd(gRev,dExp);
+  if(regime==='dubai-se')return calcDubaiSE(gRev,dExp);
+  if(regime==='dubai-fz')return calcDubaiFZ(gRev,dExp);
   return calcItalyPIVA(gRev,dExp);
 }
 function setRegime(r,btn){
   currentRegime=r;
   document.querySelectorAll('.regime-tab').forEach(function(b){b.classList.remove('active');});
-  if(btn)btn.classList.add('active');
-  renderTax();
+  if(btn)btn.classList.add('active');renderTax();
 }
 function renderTax(){
   var arr=getFilteredSummaryTxs();
   var gRev=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
   var dExp=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
-  var el=document.getElementById('tax-rows'); if(!el) return;
-  var calc=getRegimeCalc(currentRegime,gRev,dExp);
-  el.innerHTML=calc.rows.map(function(r){return taxRow(r[0],r[1],r[2]);}).join('');
+  var el=document.getElementById('tax-rows');if(!el)return;
+  var c=getCalc(currentRegime,gRev,dExp);
+  el.innerHTML=c.rows.map(function(r){return '<div class="tax-row"><span class="tax-label">'+r[0]+'</span><span class="tax-value" style="'+(r[2]?'color:'+r[2]:'')+'">'+r[1]+'</span></div>';}).join('');
 }
-function taxRow(lbl,val,color){return '<div class="tax-row"><span class="tax-label">'+lbl+'</span><span class="tax-value" style="'+(color?'color:'+color:'')+'">'+val+'</span></div>';}
 
 // ── SIMULATOR ─────────────────────────────────────────────────────────────────
 function renderSimulator(){
   var arr=getFilteredSummaryTxs();
-  var baseIn=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
-  var baseOut=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
-  var extraIn=parseFloat(document.getElementById('sim-extra-in').value)||0;
-  var extraOut=parseFloat(document.getElementById('sim-extra-out').value)||0;
-  var gRev=baseIn+extraIn, dExp=baseOut+extraOut;
-  var regimes=['malta-se','malta-ltd','dubai-se','dubai-ltd','italy-piva'];
-  var colors=['var(--accent)','var(--accent2)','var(--orange)','var(--green)','var(--red)'];
-  var el=document.getElementById('sim-results'); if(!el) return;
-  el.innerHTML='<div class="sim-grid">'+regimes.map(function(r,i){
-    var c=getRegimeCalc(r,gRev,dExp);
+  var bIn=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
+  var bOut=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
+  var eIn=parseFloat(document.getElementById('sim-extra-in').value)||0;
+  var eOut=parseFloat(document.getElementById('sim-extra-out').value)||0;
+  var gRev=bIn+eIn,dExp=bOut+eOut;
+  var regimes=[['malta-se','var(--accent)'],['malta-ltd','var(--accent2)'],['dubai-se','var(--orange)'],['dubai-fz','var(--green)'],['italy-piva','var(--red)']];
+  var el=document.getElementById('sim-results');if(!el)return;
+  el.innerHTML='<div class="sim-grid">'+regimes.map(function(rp){
+    var c=getCalc(rp[0],gRev,dExp);
     return '<div class="sim-col">'+
-      '<div class="sim-regime" style="background:'+colors[i]+'20;color:'+colors[i]+'">'+c.label.split(' ').slice(0,2).join(' ')+'</div>'+
-      '<div class="sim-row"><span style="color:var(--text2)">Totale tasse</span><span style="color:var(--red);font-weight:600">'+fmt(c.total)+'</span></div>'+
-      '<div class="sim-row"><span style="color:var(--text2)">Aliquota eff.</span><span style="font-weight:600">'+c.eff.toFixed(1)+'%</span></div>'+
-      '<div class="sim-row"><span style="color:var(--text2)">Netto</span><span style="color:var(--green);font-weight:600">'+fmt(c.net)+'</span></div>'+
+      '<div class="sim-regime" style="background:'+rp[1]+'18;color:'+rp[1]+'">'+c.label+'</div>'+
+      '<div class="sim-row"><span style="color:var(--text2)">Tasse totali</span><b style="color:var(--red)">'+fmt(c.total)+'</b></div>'+
+      '<div class="sim-row"><span style="color:var(--text2)">Aliquota eff.</span><b>'+c.eff.toFixed(1)+'%</b></div>'+
+      '<div class="sim-row"><span style="color:var(--text2)">Netto</span><b style="color:var(--green)">'+fmt(c.net)+'</b></div>'+
       '</div>';
   }).join('')+'</div>';
 }
@@ -804,8 +852,48 @@ function maltaTax(c){
 }
 
 
+// ── ZIP BUILDER ───────────────────────────────────────────────────────────────
+function _buildZIP(arr,label){
+  if(!arr.length){alert('Nessuna fattura.');return;}
+  var zip=new JSZip();var folder=zip.folder('Fatture_'+label);
+  var wb=XLSX.utils.book_new();
+  var rows=[['Data','Svc Month','Tipo','Fattura #','Controparte','Categoria','Paese','Net EUR','VAT EUR','Tot EUR','Note']];
+  arr.forEach(function(t){rows.push([t.date,t.serviceMonth,t.type,t.invoice,t.counterparty,t.category,t.country,
+    t.type==='Issued'?t.entrateNet:t.usciteNet,t.type==='Issued'?t.entrateVat:t.usciteVat,
+    t.type==='Issued'?t.entrateTotal:t.usciteTotal,t.notes]);});
+  var ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[10,12,10,16,28,28,10,12,12,12,40].map(function(w){return{wch:w};});
+  XLSX.utils.book_append_sheet(wb,ws,'Registro');
+  folder.file('Registro_'+label+'.xlsx',XLSX.write(wb,{bookType:'xlsx',type:'array'}));
+  var missing=[];
+  arr.forEach(function(t){
+    var stored=localStorage.getItem('inv_file_'+t.id);
+    if(stored){try{
+      var f=JSON.parse(stored);var inv=(t.invoice||'fattura').replace(/[\/\\:*?"<>|]/g,'-');
+      var cp=t.counterparty.slice(0,20).replace(/[\/\\:*?"<>|]/g,'-');
+      var ext=f.name.split('.').pop();
+      var bin=atob(f.b64);var bytes=new Uint8Array(bin.length);
+      for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+      folder.file(t.date+'_'+inv+'_'+cp+'.'+ext,bytes);
+    }catch(e){missing.push(t.invoice||t.counterparty);}}
+    else missing.push(t.invoice||t.counterparty);
+  });
+  if(missing.length)folder.file('_FILE_MANCANTI.txt','File non allegati:\n'+missing.join('\n'));
+  zip.generateAsync({type:'blob'}).then(function(blob){
+    var url=URL.createObjectURL(blob);var a=document.createElement('a');
+    a.href=url;a.download='Fatture_'+label+'.zip';a.click();URL.revokeObjectURL(url);
+    showMsg('ZIP generato: '+arr.length+' fatture','success');
+  });
+}
+function exportZIP(){
+  var q=document.getElementById('zip-quarter').value;
+  var qM={Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
+  var arr=txs.filter(function(t){if(q==='all')return true;var m=t.date.slice(5,7);return qM[q].indexOf(m)>=0;});
+  _buildZIP(arr,q==='all'?'Anno':q);
+}
+
 // ── INIT ─────────────────────────────────────────────────────────────────────
-sb.auth.getSession().then(function(r) {
+sb.auth.getSession().then(function(r){
   if(r.data&&r.data.session){currentUser=r.data.session.user;showApp();}
   else{document.getElementById('lock-screen').style.display='flex';document.getElementById('app-content').style.display='none';}
 });
@@ -817,9 +905,7 @@ document.addEventListener('DOMContentLoaded',function(){
   updateAmountSections();
   document.addEventListener('keydown',function(e){if(e.key==='Escape')closeEditModal();});
   var dz=document.getElementById('dropzone');
-  if(dz){
-    dz.addEventListener('dragover',function(e){e.preventDefault();dz.classList.add('drag');});
+  if(dz){dz.addEventListener('dragover',function(e){e.preventDefault();dz.classList.add('drag');});
     dz.addEventListener('dragleave',function(){dz.classList.remove('drag');});
-    dz.addEventListener('drop',function(e){e.preventDefault();dz.classList.remove('drag');var f=e.dataTransfer.files[0];if(f)handleFile(f);});
-  }
+    dz.addEventListener('drop',function(e){e.preventDefault();dz.classList.remove('drag');var f=e.dataTransfer.files[0];if(f)handleFile(f);});}
 });

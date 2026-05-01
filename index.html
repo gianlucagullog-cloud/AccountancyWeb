@@ -464,30 +464,76 @@ tr:hover td{background:var(--surface2)}
 .cat-table td{padding:8px 12px;border-bottom:1px solid var(--border);font-size:12.5px}
 .cat-table tr:last-child td{font-weight:700;border-top:2px solid var(--border);border-bottom:none;color:var(--text)}
 
-.period-pill{padding:4px 11px;border-radius:20px;border:1.5px solid var(--border);background:var(--surface);color:var(--text2);font-family:var(--font);font-size:11px;font-weight:500;cursor:pointer;transition:all .15s;}
-.period-pill.active{border-color:var(--accent);color:var(--accent);background:var(--accent-light);font-weight:600;}
+/* ── RESPONSIVE ── */
+@media(max-width:900px){
+  body{padding:16px 14px}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .form-grid{grid-template-columns:1fr 1fr}
+  .cat-split{grid-template-columns:1fr}
+  .sim-grid{grid-template-columns:repeat(2,1fr)}
+  header{flex-wrap:wrap;gap:10px}
+  .modal-box{padding:20px 16px;width:98vw}
+}
+@media(max-width:600px){
+  body{padding:12px 10px}
+  .stats{grid-template-columns:1fr 1fr;gap:8px}
+  .stat-value{font-size:17px}
+  .form-grid{grid-template-columns:1fr}
+  .form-group.two,.form-group.full{grid-column:1}
+  .amounts-grid{grid-template-columns:1fr}
+  .tabs{overflow-x:auto;width:100%;display:flex}
+  .tab{flex-shrink:0;font-size:11px;padding:6px 12px}
+  header h1{font-size:17px}
+  .filters{gap:6px}
+  .sim-grid{grid-template-columns:1fr}
+  .regime-tabs-wrap{flex-wrap:wrap}
+  .regime-tab{font-size:10px;padding:4px 7px}
+  .table-wrap{border-radius:8px}
+  .form-actions{flex-direction:column}
+  .btn{font-size:12px}
+}
+
+/* ── SELECTION BAR ── */
+.sel-bar{
+  position:sticky;bottom:16px;z-index:100;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  background:var(--accent);color:#fff;
+  border-radius:var(--radius);padding:12px 18px;
+  box-shadow:0 4px 20px rgba(79,70,229,.35);
+  margin-top:12px;
+}
+.sel-bar span{font-size:12px;font-weight:600;flex:1}
+.sel-bar .btn{background:rgba(255,255,255,.2);color:#fff;border:1.5px solid rgba(255,255,255,.4);font-size:11px;padding:6px 14px}
+.sel-bar .btn:hover{background:rgba(255,255,255,.35)}
+.sel-bar .btn-del{background:rgba(220,38,38,.5);border-color:rgba(220,38,38,.6)}
+
+/* ── EXTRAS ── */
+.period-pill{padding:4px 11px;border-radius:20px;border:1.5px solid var(--border);background:var(--surface);color:var(--text2);font-family:var(--font);font-size:11px;font-weight:500;cursor:pointer;transition:all .15s}
+.period-pill.active{border-color:var(--accent);color:var(--accent);background:var(--accent-light);font-weight:600}
 .period-pill:hover{border-color:var(--border2);color:var(--text)}
 .pill-sep{width:1px;height:18px;background:var(--border);flex-shrink:0;align-self:center}
-.regime-tab{padding:5px 9px;border-radius:var(--radius-sm);border:none;background:transparent;color:var(--text2);font-family:var(--font);font-size:10.5px;font-weight:500;cursor:pointer;transition:all .15s;white-space:nowrap;}
+.regime-tab{padding:5px 9px;border-radius:var(--radius-sm);border:none;background:transparent;color:var(--text2);font-family:var(--font);font-size:10.5px;font-weight:500;cursor:pointer;transition:all .15s;white-space:nowrap}
 .regime-tab:hover{color:var(--text)}
-.regime-tab.active{background:var(--surface);color:var(--accent);box-shadow:var(--shadow);font-weight:600;}
-.regime-tabs-wrap{display:flex;gap:2px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:3px;flex-wrap:wrap;}
-.cat-split{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
-.cat-split-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;}
-.sim-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow);margin-top:14px;}
-.sim-panel h3{font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--orange);margin-bottom:4px;}
-.sim-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;}
-.sim-row:last-child{border-bottom:none;}
-.sim-regime{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:2px 7px;border-radius:20px;margin-bottom:8px;display:inline-block;}
-.sim-col{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;min-width:140px;}
-.sim-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:10px;}
+.regime-tab.active{background:var(--surface);color:var(--accent);box-shadow:var(--shadow);font-weight:600}
+.regime-tabs-wrap{display:flex;gap:2px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:3px;flex-wrap:wrap}
+.cat-split{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.cat-split-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.sim-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow);margin-top:14px}
+.sim-panel h3{font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--orange);margin-bottom:4px}
+.sim-col{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px}
+.sim-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:10px}
+.sim-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:11.5px}
+.sim-row:last-child{border-bottom:none}
+.sim-regime{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:2px 7px;border-radius:20px;margin-bottom:8px;display:inline-block}
+.cb-cell{width:32px;padding:11px 8px!important;text-align:center}
+input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--accent)}
 </style>
 </head>
 <body>
 
 <!-- AUTH SCREEN -->
 <div id="lock-screen" style="position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;">
-  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-md);padding:40px 48px;width:340px;text-align:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-md);padding:40px 32px;width:min(340px,94vw);text-align:center;">
     <div style="font-size:36px;margin-bottom:16px">&#128274;</div>
     <div style="font-family:var(--font-display);font-size:18px;font-weight:700;margin-bottom:6px">Invoice Register</div>
     <div style="font-size:12px;color:var(--text2);margin-bottom:24px">Accedi al tuo account</div>
@@ -503,8 +549,8 @@ tr:hover td{background:var(--surface2)}
 
 <header>
   <h1>Invoice Register</h1>
-  <span>AI-powered · Supabase</span>
-  <div style="margin-left:auto;display:flex;align-items:center;gap:10px"><span id="user-email-badge" style="font-size:10.5px;color:var(--text3);background:var(--surface2);border:1px solid var(--border);padding:3px 10px;border-radius:20px"></span><button class="btn btn-secondary" style="font-size:11px;padding:5px 14px" onclick="doLogout()">Logout</button></div>
+  <span style="display:none" id="hdr-badge">AI-powered · Supabase</span>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px"><span id="user-email-badge" style="font-size:10px;color:var(--text3);background:var(--surface2);border:1px solid var(--border);padding:3px 10px;border-radius:20px;display:none"></span><button class="btn btn-secondary" id="logout-btn" style="font-size:11px;padding:5px 12px;display:none" onclick="doLogout()">Logout</button></div>
 </header>
 
 <div class="tabs">
@@ -626,67 +672,49 @@ tr:hover td{background:var(--surface2)}
 <!-- REGISTRO -->
 <div id="tab-registro" style="display:none">
   <div class="stats" id="stats-a"></div>
-  <div class="filters" style="flex-wrap:wrap;gap:10px;row-gap:8px">
+  <div class="filters" style="flex-wrap:wrap;gap:8px;row-gap:8px;align-items:center">
     <div style="display:flex;gap:4px;align-items:center">
       <button class="filter-btn active" id="ftype-all" onclick="setTypeFilter('all',this)">Tutti</button>
       <button class="filter-btn" id="ftype-issued" onclick="setTypeFilter('Issued',this)">Issued</button>
       <button class="filter-btn" id="ftype-received" onclick="setTypeFilter('Received',this)">Received</button>
     </div>
-    <div style="width:1px;height:24px;background:var(--border);flex-shrink:0"></div>
-    <div style="display:flex;align-items:center;gap:6px">
-      <span style="font-size:10.5px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Rif.</span>
-      <div style="display:flex;background:var(--surface2);border:1.5px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
-        <button id="ref-date-btn" class="filter-btn active" style="border-radius:0;border:none;padding:5px 10px;font-size:11px" onclick="setDateRef('date',this)">Data</button>
-        <button id="ref-svc-btn" class="filter-btn" style="border-radius:0;border:none;border-left:1.5px solid var(--border);padding:5px 10px;font-size:11px" onclick="setDateRef('serviceMonth',this)">Svc month</button>
-      </div>
+    <div class="pill-sep" style="height:24px"></div>
+    <select id="year-filter" onchange="setFilterYear(this.value)" style="font-size:12px;padding:5px 8px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--font);cursor:pointer"><option value="all">Tutti gli anni</option></select>
+    <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center" id="period-pills">
+      <button class="period-pill active" data-p="all" onclick="togglePeriod('all',this)">Tutto</button>
+      <div class="pill-sep"></div>
+      <button class="period-pill" data-p="Q1" onclick="togglePeriod('Q1',this)">Q1</button>
+      <button class="period-pill" data-p="Q2" onclick="togglePeriod('Q2',this)">Q2</button>
+      <button class="period-pill" data-p="Q3" onclick="togglePeriod('Q3',this)">Q3</button>
+      <button class="period-pill" data-p="Q4" onclick="togglePeriod('Q4',this)">Q4</button>
+      <div class="pill-sep"></div>
+      <button class="period-pill" data-p="01" onclick="togglePeriod('01',this)">Gen</button>
+      <button class="period-pill" data-p="02" onclick="togglePeriod('02',this)">Feb</button>
+      <button class="period-pill" data-p="03" onclick="togglePeriod('03',this)">Mar</button>
+      <button class="period-pill" data-p="04" onclick="togglePeriod('04',this)">Apr</button>
+      <button class="period-pill" data-p="05" onclick="togglePeriod('05',this)">Mag</button>
+      <button class="period-pill" data-p="06" onclick="togglePeriod('06',this)">Giu</button>
+      <button class="period-pill" data-p="07" onclick="togglePeriod('07',this)">Lug</button>
+      <button class="period-pill" data-p="08" onclick="togglePeriod('08',this)">Ago</button>
+      <button class="period-pill" data-p="09" onclick="togglePeriod('09',this)">Set</button>
+      <button class="period-pill" data-p="10" onclick="togglePeriod('10',this)">Ott</button>
+      <button class="period-pill" data-p="11" onclick="togglePeriod('11',this)">Nov</button>
+      <button class="period-pill" data-p="12" onclick="togglePeriod('12',this)">Dic</button>
     </div>
-    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-      <span style="font-size:10.5px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Anno</span>
-      <select id="year-filter" onchange="setFilterYear(this.value)" style="font-size:12px;padding:5px 8px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--font);cursor:pointer">
-        <option value="all">Tutti</option>
+    <div style="display:flex;align-items:center;gap:4px;margin-left:auto">
+      <select id="year-filter" style="display:none"></select>
+      <button class="btn btn-export" onclick="exportXLSX()">XLSX</button>
+      <button class="btn btn-orange" onclick="exportCSV()">CSV</button>
+      <select id="zip-quarter" style="font-size:11px;padding:5px 8px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--font)">
+        <option value="all">Anno intero</option><option value="Q1">Q1</option><option value="Q2">Q2</option><option value="Q3">Q3</option><option value="Q4">Q4</option>
       </select>
-    </div>
-    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-      <span style="font-size:10.5px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Periodo</span>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center" id="period-pills">
-        <button class="period-pill active" data-p="all" onclick="togglePeriod('all',this)">Tutto</button>
-        <div class="pill-sep"></div>
-        <button class="period-pill" data-p="Q1" onclick="togglePeriod('Q1',this)">Q1</button>
-        <button class="period-pill" data-p="Q2" onclick="togglePeriod('Q2',this)">Q2</button>
-        <button class="period-pill" data-p="Q3" onclick="togglePeriod('Q3',this)">Q3</button>
-        <button class="period-pill" data-p="Q4" onclick="togglePeriod('Q4',this)">Q4</button>
-        <div class="pill-sep"></div>
-        <button class="period-pill" data-p="01" onclick="togglePeriod('01',this)">Gen</button>
-        <button class="period-pill" data-p="02" onclick="togglePeriod('02',this)">Feb</button>
-        <button class="period-pill" data-p="03" onclick="togglePeriod('03',this)">Mar</button>
-        <button class="period-pill" data-p="04" onclick="togglePeriod('04',this)">Apr</button>
-        <button class="period-pill" data-p="05" onclick="togglePeriod('05',this)">Mag</button>
-        <button class="period-pill" data-p="06" onclick="togglePeriod('06',this)">Giu</button>
-        <button class="period-pill" data-p="07" onclick="togglePeriod('07',this)">Lug</button>
-        <button class="period-pill" data-p="08" onclick="togglePeriod('08',this)">Ago</button>
-        <button class="period-pill" data-p="09" onclick="togglePeriod('09',this)">Set</button>
-        <button class="period-pill" data-p="10" onclick="togglePeriod('10',this)">Ott</button>
-        <button class="period-pill" data-p="11" onclick="togglePeriod('11',this)">Nov</button>
-        <button class="period-pill" data-p="12" onclick="togglePeriod('12',this)">Dic</button>
-      </div>
-    </div>
-    <div style="flex:1"></div>
-    <button class="btn btn-export" onclick="exportXLSX()">Esporta XLSX</button>
-    <button class="btn btn-orange" onclick="exportCSV()">CSV</button>
-    <div style="display:flex;align-items:center;gap:6px;margin-left:4px">
-      <select id="zip-quarter" style="font-size:12px;padding:7px 10px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--font);cursor:pointer">
-        <option value="all">Anno intero</option>
-        <option value="Q1">Q1 — Gen/Feb/Mar</option>
-        <option value="Q2">Q2 — Apr/Mag/Giu</option>
-        <option value="Q3">Q3 — Lug/Ago/Set</option>
-        <option value="Q4">Q4 — Ott/Nov/Dic</option>
-      </select>
-      <button class="btn btn-orange" onclick="exportZIP()" style="white-space:nowrap">📦 ZIP Commercialista</button>
+      <button class="btn btn-orange" onclick="exportZIP()" style="white-space:nowrap;font-size:11px">&#128230; ZIP</button>
     </div>
   </div>
   <div class="table-wrap">
     <table>
       <thead><tr>
+        <th class="cb-cell"><input type="checkbox" id="cb-all" onchange="toggleSelectAll(this)"></th>
         <th>Type</th><th>Date</th><th>Svc Month</th><th>Invoice #</th>
         <th>Counterparty</th><th>Category</th><th>Country</th>
         <th>En Net</th><th>En VAT</th><th>En Tot</th>
@@ -696,24 +724,22 @@ tr:hover td{background:var(--surface2)}
       <tbody id="tbody"></tbody>
     </table>
   </div>
-  <div id="empty" style="display:none;text-align:center;padding:50px;color:var(--text2)">
-    <p>Nessuna transazione. Carica la prima fattura.</p>
+  <div id="empty" style="display:none;text-align:center;padding:50px;color:var(--text2)"><p>Nessuna transazione. Carica la prima fattura.</p></div>
+  <div id="sel-bar" class="sel-bar" style="display:none">
+    <span id="sel-count">0 selezionate</span>
+    <button class="btn" onclick="exportSelectedZIP()">&#128230; ZIP selezionate</button>
+    <button class="btn btn-del" onclick="deleteSelected()">&#128465; Elimina selezionate</button>
+    <button class="btn" onclick="clearSelection()">&#10005; Deseleziona</button>
   </div>
 </div>
 
 <!-- SUMMARY -->
 <div id="tab-summary" style="display:none">
   <div class="stats" id="stats-b"></div>
-
-  <!-- Summary filters -->
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;box-shadow:var(--shadow)">
-    <span style="font-size:10.5px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Anno</span>
-    <select id="year-filter-s" onchange="setFilterYearS(this.value)" style="font-size:12px;padding:5px 8px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--font);cursor:pointer">
-      <option value="all">Tutti</option>
-    </select>
-    <div class="pill-sep"></div>
-    <span style="font-size:10.5px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Periodo</span>
-    <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center" id="period-pills-s">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;box-shadow:var(--shadow)">
+    <select id="year-filter-s" onchange="setFilterYearS(this.value)" style="font-size:12px;padding:5px 8px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--font);cursor:pointer"><option value="all">Tutti gli anni</option></select>
+    <div class="pill-sep" style="height:18px"></div>
+    <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center" id="period-pills-s">
       <button class="period-pill active" data-p="all" onclick="togglePeriodS('all',this)">Tutto</button>
       <div class="pill-sep"></div>
       <button class="period-pill" data-p="Q1" onclick="togglePeriodS('Q1',this)">Q1</button>
@@ -735,30 +761,16 @@ tr:hover td{background:var(--surface2)}
       <button class="period-pill" data-p="12" onclick="togglePeriodS('12',this)">Dic</button>
     </div>
   </div>
-
-  <!-- Category Summary split -->
-  <div class="cat-split" style="margin-bottom:16px">
+  <div class="cat-split" style="margin-bottom:14px">
     <div>
-      <p class="cat-split-title" style="color:var(--green)">Entrate per categoria</p>
-      <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
-        <table class="cat-table">
-          <thead><tr><th>Category</th><th>Net</th><th>VAT</th><th>Total</th></tr></thead>
-          <tbody id="cat-tbody-in"></tbody>
-        </table>
-      </div>
+      <p class="cat-split-title" style="color:var(--green)">&#8593; Entrate per categoria</p>
+      <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden"><table class="cat-table"><thead><tr><th>Category</th><th>Net</th><th>VAT</th><th>Total</th></tr></thead><tbody id="cat-tbody-in"></tbody></table></div>
     </div>
     <div>
-      <p class="cat-split-title" style="color:var(--red)">Uscite per categoria</p>
-      <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
-        <table class="cat-table">
-          <thead><tr><th>Category</th><th>Net</th><th>VAT</th><th>Total</th></tr></thead>
-          <tbody id="cat-tbody-out"></tbody>
-        </table>
-      </div>
+      <p class="cat-split-title" style="color:var(--red)">&#8595; Uscite per categoria</p>
+      <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden"><table class="cat-table"><thead><tr><th>Category</th><th>Net</th><th>VAT</th><th>Total</th></tr></thead><tbody id="cat-tbody-out"></tbody></table></div>
     </div>
   </div>
-
-  <!-- Tax panel with regime tabs -->
   <div class="tax-panel" style="margin-bottom:14px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
       <h3 style="margin-bottom:0">Stima Fiscale</h3>
@@ -766,26 +778,19 @@ tr:hover td{background:var(--surface2)}
         <button class="regime-tab active" onclick="setRegime('malta-se',this)">Malta SE</button>
         <button class="regime-tab" onclick="setRegime('malta-ltd',this)">Malta Ltd</button>
         <button class="regime-tab" onclick="setRegime('dubai-se',this)">Dubai SE</button>
-        <button class="regime-tab" onclick="setRegime('dubai-ltd',this)">Dubai Ltd FZ</button>
+        <button class="regime-tab" onclick="setRegime('dubai-fz',this)">Dubai FZ</button>
         <button class="regime-tab" onclick="setRegime('italy-piva',this)">IT P.IVA</button>
       </div>
     </div>
     <div id="tax-rows"></div>
+    <div style="font-size:10px;color:var(--text3);margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">* Malta SSC Class 2: importo fisso settimanale. Aliquote 2026 stimate. Non costituisce consulenza fiscale.</div>
   </div>
-
-  <!-- Simulator -->
   <div class="sim-panel">
     <h3>Simulatore — Proiezione Fiscale</h3>
-    <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Aggiungi un importo ipotetico alle entrate/uscite reali e confronta le tasse per tutti i regimi</p>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
-      <div class="form-group" style="min-width:180px">
-        <label>Entrate aggiuntive (€)</label>
-        <input type="number" id="sim-extra-in" placeholder="0" step="1000" oninput="renderSimulator()" min="0">
-      </div>
-      <div class="form-group" style="min-width:180px">
-        <label>Spese aggiuntive (€)</label>
-        <input type="number" id="sim-extra-out" placeholder="0" step="500" oninput="renderSimulator()" min="0">
-      </div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Aggiungi importi ipotetici e confronta tutti i regimi</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <div class="form-group" style="min-width:160px"><label>Entrate aggiuntive (&#8364;)</label><input type="number" id="sim-extra-in" placeholder="0" step="1000" oninput="renderSimulator()" min="0"></div>
+      <div class="form-group" style="min-width:160px"><label>Spese aggiuntive (&#8364;)</label><input type="number" id="sim-extra-out" placeholder="0" step="500" oninput="renderSimulator()" min="0"></div>
     </div>
     <div id="sim-results"></div>
   </div>
@@ -862,7 +867,7 @@ tr:hover td{background:var(--surface2)}
 
     <hr style="border:none;border-top:1px solid var(--border);margin:20px 0 14px">
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <label class="btn btn-secondary" style="cursor:pointer;font-size:12px">📂 Importa CSV<input type="file" accept=".csv" style="display:none" onchange="importCSV(this)"></label>
+      <label class="btn btn-secondary" style="cursor:pointer;font-size:12px">&#128194; Importa CSV<input type="file" accept=".csv" style="display:none" onchange="importCSV(this)"></label>
       <button class="btn btn-danger" onclick="clearAll()">Cancella tutti i dati</button>
       <span style="color:var(--text2);font-size:10.5px" id="tx-count"></span>
     </div>
