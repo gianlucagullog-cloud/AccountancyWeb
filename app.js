@@ -924,7 +924,7 @@ function exportZIP(){
 
 // ── SMART ADVISORY ────────────────────────────────────────────────────────────
 function renderAdvisory(){
-  var panel=document.getElementById('advisory-panel&#39;);
+  var panel=document.getElementById('advisory-panel');
   var content=document.getElementById('advisory-content');
   if(!panel||!content)return;
   var arr=getFilteredSummaryTxs();
@@ -933,110 +933,107 @@ function renderAdvisory(){
   var ci=Math.max(0,gRev-dExp);
   var tips=[];
 
-  // ── Malta SE: bracket analysis ──
-  var brackets=[
-    {lim:9100,rate:0,next:0.15,label:'€9.100 (0% → 15%)'},
-    {lim:14500,rate:0.15,next:0.25,label:'€14.500 (15% → 25%)'},
-    {lim:19500,rate:0.25,next:0.25,label:'€19.500'},
-    {lim:60000,rate:0.25,next:0.35,label:'€60.000 (25% → 35%)'}
+  if(ci===0&&gRev===0){
+    tips.push({type:'ok',title:'Nessun dato nel periodo',body:"Seleziona un periodo con transazioni per ricevere i consigli fiscali."});
+    show(tips,panel,content);return;
+  }
+
+  // ── Bracket Malta SE ──
+  var bk=[
+    {lim:9100, nextRate:0.15, label:"9.100"},
+    {lim:14500,nextRate:0.25, label:"14.500"},
+    {lim:60000,nextRate:0.35, label:"60.000"}
   ];
-  brackets.forEach(function(b){
-    if(b.lim===19500)return; // same rate above/below, skip
-    var margin=2500;
-    if(ci>b.lim&&ci<=b.lim+margin){
-      var over=ci-b.lim;
-      var extraTax=over*(b.next-b.rate);
-      var expNeeded=over;
-      var saving=extraTax;
+  bk.forEach(function(b){
+    var over=ci-b.lim;
+    if(over>0&&over<=3000){
+      var saving=over*(b.nextRate-(b.lim===9100?0:b.lim===14500?0.15:0.25));
       tips.push({type:b.lim===60000?'danger':'warn',
-        title:'Sei appena sopra il bracket '+b.label,
-        body:'Il tuo reddito imponibile ('+fmt(ci)+'€) supera la soglia di '+fmt(b.lim)+'€ di '+fmt(over)+'€. '+
-          'Questo ti costa '+fmt(extraTax)+'€ extra di tasse rispetto a restare sotto la soglia. '+
-          '<br><b>Azione consigliata:</b> Effettua '+fmt(expNeeded)+'€ di spese aziendali deducibili per rientrare sotto '+fmt(b.lim)+'€ e risparmiare '+fmt(saving)+'€ di tasse.'
+        title:"Sei appena sopra il bracket "+b.label+"\u20AC",
+        body:"Il tuo reddito imponibile ("+fmt(ci)+"\u20AC) supera "+b.label+"\u20AC di "+fmt(over)+"\u20AC. "+
+             "Questo ti costa "+fmt(saving)+"\u20AC di tasse extra. "+
+             "<b>Consiglio:</b> "+fmt(over)+"\u20AC di spese aziendali deducibili ti farebbero risparmiare "+fmt(saving)+"\u20AC."
       });
     }
-    if(ci>=b.lim-2000&&ci<b.lim){
-      var distanza=b.lim-ci;
-      var revAllowed=distanza;
+    if(ci<b.lim&&ci>=b.lim-2000){
       tips.push({type:'info',
-        title:'Vicino alla soglia '+b.label,
-        body:'Sei a '+fmt(distanza)+'€ dal bracket successivo. Puoi ancora fatturare circa '+fmt(revAllowed)+'€ netti prima di salire all&#39;aliquota +Math.round(b.next*100)+'%.'
+        title:"Vicino alla soglia "+b.label+"\u20AC",
+        body:"Sei a "+fmt(b.lim-ci)+"\u20AC dalla soglia "+b.label+"\u20AC. "+
+             "Puoi ancora fatturare circa "+fmt(b.lim-ci)+"\u20AC netti prima di entrare nell'aliquota "+Math.round(b.nextRate*100)+"%."
       });
     }
   });
 
-  // ── Ottimizzazione spese ──
-  if(gRev>0){
-    var expRatio=dExp/gRev;
-    if(expRatio<0.1&&gRev>20000){
-      tips.push({type:'info',
-        title:'Spese deducibili basse',
-        body:'Le tue spese aziendali sono solo il '+Math.round(expRatio*100)+'% del fatturato. '+
-          'Considera di massimizzare le spese deducibili (attrezzatura, software, formazione, home office, viaggi business, consulenze) '+
-          'per ridurre il reddito imponibile. Ogni 1.000€ di spese deducibili aggiuntive riduce le tasse di ~'+fmt(250)+'–'+fmt(350)+'€.'
-      });
-    }
+  // ── SSC bracket ──
+  if(ci>=19000&&ci<21000){
+    tips.push({type:'warn',
+      title:"Vicino al bracket SSC alto (21.000\u20AC)",
+      body:"Oltre 21.000\u20AC di reddito la SSC Class 2 passa da ~1.212\u20AC/anno a ~2.980\u20AC/anno (+1.768\u20AC). "+
+           "Sei a "+fmt(21000-ci)+"\u20AC dalla soglia."
+    });
+  }
+  if(ci>21000&&ci<24000){
+    tips.push({type:'warn',
+      title:"Sei nel bracket SSC alto",
+      body:"Hai superato 21.000\u20AC di reddito: SSC Class 2 ~2.980\u20AC/anno invece di ~1.212\u20AC/anno. "+
+           "Con "+fmt(ci-21000)+"\u20AC di spese aggiuntive deducibili rientreresti nel bracket basso e risparmieresti ~1.768\u20AC di SSC."
+    });
+  }
+
+  // ── Spese basse ──
+  if(gRev>20000&&dExp/gRev<0.10){
+    tips.push({type:'info',
+      title:"Spese deducibili basse ("+Math.round(dExp/gRev*100)+"%)",
+      body:"Le spese aziendali sono solo il "+Math.round(dExp/gRev*100)+"% del fatturato. "+
+           "Ogni 1.000\u20AC di spese deducibili aggiuntive riduce le tasse di ~250\u20AC-350\u20AC. "+
+           "Categorie utili: attrezzatura, software, formazione, home office, viaggi business, consulenze."
+    });
   }
 
   // ── Confronto regimi ──
-  if(ci>0){
+  if(ci>15000){
     var se=calcMaltaSE(gRev,dExp);
     var ltd=calcMaltaLtd(gRev,dExp);
     var dse=calcDubaiSE(gRev,dExp);
-    var minRegime=[
-      {r:'Malta Ltd',t:ltd.total,s:se.total-ltd.total},
-      {r:'Dubai SE',t:dse.total,s:se.total-dse.total},
-      {r:'Dubai FZ',t:0,s:se.total}
-    ].filter(function(x){return x.s>500;}).sort(function(a,b){return b.s-a.s;})[0];
-    if(minRegime){
+    var dfz=calcDubaiFZ(gRev,dExp);
+    var options=[
+      {name:"Malta Ltd",total:ltd.total},
+      {name:"Dubai SE",total:dse.total},
+      {name:"Dubai Ltd Free Zone",total:dfz.total}
+    ];
+    var best=options.sort(function(a,b){return a.total-b.total;})[0];
+    var saving=se.total-best.total;
+    if(saving>1000){
       tips.push({type:'info',
-        title:'Risparmio con '+minRegime.r+': '+fmt(minRegime.s)+'€/anno',
-        body:'Con il regime <b>'+minRegime.r+'</b> pagheresti '+fmt(minRegime.t)+'€ di tasse invece di '+fmt(se.total)+'€ (Malta SE). '+
-          'Un risparmio di <b>'+fmt(minRegime.s)+'€</b>. Consulta un commercialista per valutare la migrazione.'
+        title:"Risparmio potenziale con "+best.name+": "+fmt(saving)+"\u20AC/anno",
+        body:"Con il regime <b>"+best.name+"</b> pagheresti "+fmt(best.total)+"\u20AC di tasse invece di "+fmt(se.total)+"\u20AC (Malta SE attuale). "+
+             "Un risparmio stimato di <b>"+fmt(saving)+"\u20AC</b>. Consulta un commercialista per valutare la migrazione."
       });
     }
   }
 
-  // ── SSC bracket ──
-  var sscLow=21000;
-  if(ci>sscLow-2000&&ci<sscLow){
+  // ── Limite forfettario IT ──
+  if(gRev>=80000&&gRev<90000){
     tips.push({type:'warn',
-      title:'Vicino al bracket SSC Class 2 (€21.000)',
-      body:'Oltre €21.000 di reddito imponibile la SSC Class 2 passa da ~€1.212/a a ~€2.980/a (+€1.768/a). '+
-        'Sei a '+fmt(sscLow-ci)+'€ dalla soglia.'
-    });
-  }
-  if(ci>sscLow&&ci<sscLow+3000){
-    var sscExtra=57.30*52-23.30*52;
-    tips.push({type:'warn',
-      title:'Sei nel bracket SSC alto',
-      body:'Hai superato €21.000 di reddito imponibile: la tua SSC passa a ~€2.980/anno (+€1.768 rispetto al bracket basso). '+
-        'Putresti rientrare nel bracket basso con '+fmt(ci-sscLow)+'€ di spese aggiuntive deducibili, risparmiando '+fmt(sscExtra)+'€ di SSC.'
+      title:"Vicino al limite forfettario italiano (85.000\u20AC)",
+      body:"Superare 85.000\u20AC esclude dal regime forfettario (15%). Sopra questa soglia si applica il regime ordinario "+
+           "(IRPEF progressiva + INPS + IRAP), con un carico fiscale significativamente piu alto."
     });
   }
 
-  // ── Forfettario alert (IT) ──
-  if(gRev>80000&&gRev<90000){
-    tips.push({type:'warn',
-      title:'Attenzione: vicino al limite forfettario italiano (€85k)',
-      body:'Superare €85.000 di fatturato esclude dal regime forfettario (15%). Oltre questa soglia si applica il regime ordinario (IRPEF progressiva + INPS + IRAP), che può comportare un aumento significativo del carico fiscale.'
-    });
-  }
-
-  // ── All good ──
+  // ── Ottimale ──
   if(tips.length===0){
-    if(ci>0){
-      tips.push({type:'ok',
-        title:'Situazione fiscale ottimale',
-        body:'Non ci sono soglie critiche imminenti. Continua a monitorare le spese deducibili e rivaluta a fine anno il regime fiscale più conveniente tramite il simulatore qui sopra.'
-      });
-    } else {
-      tips.push({type:'ok',title:'Nessun dato disponibile',body:'Seleziona un periodo per visualizzare i consigli fiscali.'});
-    }
+    tips.push({type:'ok',
+      title:"Situazione fiscale sotto controllo",
+      body:"Nessuna soglia critica imminente nel periodo selezionato. "+
+           "Continua a monitorare le spese deducibili e usa il simulatore per proiettare scenari futuri."
+    });
   }
-
+  show(tips,panel,content);
+}
+function show(tips,panel,content){
   var typeMap={danger:'adv-danger',warn:'adv-warn',info:'adv-info',ok:'adv-ok'};
-  var iconMap={danger:'⚠️',warn:'💡',info:'📊',ok:'✅'};
+  var iconMap={danger:'&#9888;',warn:'&#128161;',info:'&#128202;',ok:'&#9989;'};
   panel.style.display='';
   content.innerHTML=tips.map(function(t){
     return '<div class="adv-card '+typeMap[t.type]+'">'+
@@ -1046,7 +1043,7 @@ function renderAdvisory(){
   }).join('');
 }
 
-// ── INIT ─────────────────────────────────────────────────────────────────────
+ ─────────────────────────────────────────────────────────────────────
 sb.auth.getSession().then(function(r){
   if(r.data&&r.data.session){currentUser=r.data.session.user;showApp();}
   else{document.getElementById('lock-screen').style.display='flex';document.getElementById('app-content').style.display='none';}
