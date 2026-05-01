@@ -527,6 +527,28 @@ tr:hover td{background:var(--surface2)}
 .sim-regime{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:2px 7px;border-radius:20px;margin-bottom:8px;display:inline-block}
 .cb-cell{width:32px;padding:11px 8px!important;text-align:center}
 input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--accent)}
+
+.th-sort{cursor:pointer;user-select:none;white-space:nowrap}
+.th-sort:hover{color:var(--text);background:var(--surface)}
+.sort-arrow{margin-left:3px;opacity:.4;font-size:9px}
+.th-sort.asc .sort-arrow::after{content:'\25B2';opacity:1}
+.th-sort.desc .sort-arrow::after{content:'\25BC';opacity:1}
+.th-sort.asc,.th-sort.desc{color:var(--accent)}
+.net-pos{color:var(--green);font-weight:600}
+.net-neg{color:var(--red);font-weight:600}
+.adv-card{border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start;font-size:12px;line-height:1.6}
+.adv-icon{font-size:18px;flex-shrink:0;margin-top:1px}
+.adv-warn{background:#fefce8;border:1px solid #fef08a}
+.adv-danger{background:var(--red-light);border:1px solid #fecaca}
+.adv-ok{background:var(--green-light);border:1px solid #bbf7d0}
+.adv-info{background:var(--accent-light);border:1px solid #c7d2fe}
+.adv-title{font-weight:700;margin-bottom:3px;font-size:12.5px}
+.adv-warn .adv-title{color:#854d0e}
+.adv-danger .adv-title{color:var(--red)}
+.adv-ok .adv-title{color:var(--green)}
+.adv-info .adv-title{color:var(--accent)}
+.adv-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);margin-top:14px}
+.adv-section h3{font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--accent2);margin-bottom:12px;display:flex;align-items:center;gap:6px}
 </style>
 </head>
 <body>
@@ -715,10 +737,20 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
     <table>
       <thead><tr>
         <th class="cb-cell"><input type="checkbox" id="cb-all" onchange="toggleSelectAll(this)"></th>
-        <th>Type</th><th>Date</th><th>Svc Month</th><th>Invoice #</th>
-        <th>Counterparty</th><th>Category</th><th>Country</th>
-        <th>En Net</th><th>En VAT</th><th>En Tot</th>
-        <th>Us Net</th><th>Us VAT</th><th>Us Tot</th>
+        <th class="th-sort" id="th-type" onclick="setSort('type')">Type<span class="sort-arrow"></span></th>
+        <th class="th-sort" id="th-date" onclick="setSort('date')" style="min-width:110px">Date<span class="sort-arrow"></span></th>
+        <th>Svc Month</th>
+        <th class="th-sort" id="th-invoice" onclick="setSort('invoice')">Invoice #<span class="sort-arrow"></span></th>
+        <th style="white-space:nowrap;color:var(--accent);font-weight:700">Netto &#177;(&#8364;)</th>
+        <th class="th-sort" id="th-counterparty" onclick="setSort('counterparty')" style="min-width:120px">Counterparty<span class="sort-arrow"></span></th>
+        <th>Category</th>
+        <th class="th-sort" id="th-country" onclick="setSort('country')">Country<span class="sort-arrow"></span></th>
+        <th class="th-sort" id="th-entrateNet" onclick="setSort('entrateNet')">En Net<span class="sort-arrow"></span></th>
+        <th>En VAT</th>
+        <th class="th-sort" id="th-entrateTotal" onclick="setSort('entrateTotal')">En Tot<span class="sort-arrow"></span></th>
+        <th class="th-sort" id="th-usciteNet" onclick="setSort('usciteNet')">Us Net<span class="sort-arrow"></span></th>
+        <th>Us VAT</th>
+        <th class="th-sort" id="th-usciteTotal" onclick="setSort('usciteTotal')">Us Tot<span class="sort-arrow"></span></th>
         <th>Notes</th><th></th>
       </tr></thead>
       <tbody id="tbody"></tbody>
@@ -794,6 +826,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
     </div>
     <div id="sim-results"></div>
   </div>
+  <div class="adv-section" id="advisory-panel" style="display:none"><h3>&#128161; Consigli Fiscali Intelligenti</h3><div id="advisory-content"></div></div>
 </div>
 
 <!-- SETTINGS -->

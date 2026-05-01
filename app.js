@@ -9,6 +9,26 @@ var filterPeriods=new Set(['all']), filterYear='all';
 var filterPeriodsS=new Set(['all']), filterYearS='all';
 var currentRegime='malta-se';
 var selectedIds=new Set();
+var sortField='date', sortDir=1;
+
+
+// ── DATE FORMAT ───────────────────────────────────────────────────────────────
+var MESI=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+function formatDate(d){
+  if(!d)return '';
+  var p=d.split('-');if(p.length<3)return d;
+  return parseInt(p[2])+' '+MESI[parseInt(p[1])-1]+' '+p[0];
+}
+
+// ── SORT ──────────────────────────────────────────────────────────────────────
+function setSort(field){
+  if(sortField===field)sortDir=-sortDir;else{sortField=field;sortDir=1;}
+  document.querySelectorAll('.th-sort').forEach(function(th){
+    th.classList.remove('asc','desc');
+    if(th.id==='th-'+field)th.classList.add(sortDir===1?'asc':'desc');
+  });
+  renderTable();
+}
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 function doLogin(){
@@ -279,7 +299,7 @@ function showTab(t){
     var btn=document.getElementById('tab-btn-'+id);if(btn)btn.classList.toggle('active',id===t);
   });
   if(t==='registro'){renderTable();renderStats('stats-a');}
-  if(t==='summary'){renderStats('stats-b');renderCat();renderTax();renderSimulator();}
+  if(t==='summary'){renderStats('stats-b');renderCat();renderTax();renderSimulator();renderAdvisory();}
 }
 
 // ── PERIOD FILTERS ────────────────────────────────────────────────────────────
@@ -574,14 +594,23 @@ function renderTable(){
   renderFilteredStats(arr);
   if(!arr.length){tbody.innerHTML='';empty.style.display='';updateSelBar();return;}
   empty.style.display='none';
+  // Apply sort
+  arr=arr.slice().sort(function(a,b){
+    var va=a[sortField]||'',vb=b[sortField]||'';
+    if(typeof va==='number'||typeof vb==='number')return((parseFloat(va)||0)-(parseFloat(vb)||0))*sortDir;
+    return String(va).localeCompare(String(vb))*sortDir;
+  });
   tbody.innerHTML=arr.map(function(t){
     var isIn=t.type==='Issued';var sel=selectedIds.has(t.id);
     var hasFile=t.filePath||localStorage.getItem('inv_file_'+t.id);
+    var net=((t.entrateTotal||0)-(t.usciteTotal||0));var netCls=net>0?'net-pos':net<0?'net-neg':'';
     return '<tr style="'+(sel?'background:var(--accent-light)':'')+'">'+
       '<td class="cb-cell"><input type="checkbox" class="row-cb" '+(sel?'checked':'')+' onchange="toggleSelect('+t.id+',this)"></td>'+
       '<td><span class="badge '+(isIn?'badge-in':'badge-out')+'">'+(isIn?'Issued':'Received')+'</span></td>'+
-      '<td>'+esc(t.date)+'</td><td style="color:var(--text2)">'+esc(t.serviceMonth)+'</td>'+
+      '<td style="white-space:nowrap;font-size:12px;font-weight:500">'+formatDate(t.date)+'</td>'+
+      '<td style="color:var(--text2)">'+esc(t.serviceMonth)+'</td>'+
       '<td style="color:var(--text2);white-space:nowrap">'+esc(t.invoice)+'</td>'+
+      '<td class="'+netCls+'" style="white-space:nowrap">'+(net!==0?(net>0?'+':'')+fmt(net):'—')+'</td>'+
       '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.counterparty)+'</td>'+
       '<td style="color:var(--text2);font-size:10.5px;white-space:nowrap">'+esc(t.category)+'</td>'+
       '<td style="color:var(--text2)">'+esc(t.country)+'</td>'+
@@ -890,6 +919,131 @@ function exportZIP(){
   var qM={Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
   var arr=txs.filter(function(t){if(q==='all')return true;var m=t.date.slice(5,7);return qM[q].indexOf(m)>=0;});
   _buildZIP(arr,q==='all'?'Anno':q);
+}
+
+
+// ── SMART ADVISORY ────────────────────────────────────────────────────────────
+function renderAdvisory(){
+  var panel=document.getElementById('advisory-panel');
+  var content=document.getElementById('advisory-content');
+  if(!panel||!content)return;
+  var arr=getFilteredSummaryTxs();
+  var gRev=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
+  var dExp=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
+  var ci=Math.max(0,gRev-dExp);
+  var tips=[];
+
+  // ── Malta SE: bracket analysis ──
+  var brackets=[
+    {lim:9100,rate:0,next:0.15,label:'€9.100 (0% → 15%)'},
+    {lim:14500,rate:0.15,next:0.25,label:'€14.500 (15% → 25%)'},
+    {lim:19500,rate:0.25,next:0.25,label:'€19.500'},
+    {lim:60000,rate:0.25,next:0.35,label:'€60.000 (25% → 35%)'}
+  ];
+  brackets.forEach(function(b){
+    if(b.lim===19500)return; // same rate above/below, skip
+    var margin=2500;
+    if(ci>b.lim&&ci<=b.lim+margin){
+      var over=ci-b.lim;
+      var extraTax=over*(b.next-b.rate);
+      var expNeeded=over;
+      var saving=extraTax;
+      tips.push({type:b.lim===60000?'danger':'warn',
+        title:'Sei appena sopra il bracket '+b.label,
+        body:'Il tuo reddito imponibile ('+fmt(ci)+'€) supera la soglia di '+fmt(b.lim)+'€ di '+fmt(over)+'€. '+
+          'Questo ti costa '+fmt(extraTax)+'€ extra di tasse rispetto a restare sotto la soglia. '+
+          '<br><b>Azione consigliata:</b> Effettua '+fmt(expNeeded)+'€ di spese aziendali deducibili per rientrare sotto '+fmt(b.lim)+'€ e risparmiare '+fmt(saving)+'€ di tasse.'
+      });
+    }
+    if(ci>=b.lim-2000&&ci<b.lim){
+      var distanza=b.lim-ci;
+      var revAllowed=distanza;
+      tips.push({type:'info',
+        title:'Vicino alla soglia '+b.label,
+        body:'Sei a '+fmt(distanza)+'€ dal bracket successivo. Puoi ancora fatturare circa '+fmt(revAllowed)+'€ netti prima di salire all'aliquota '+Math.round(b.next*100)+'%.'
+      });
+    }
+  });
+
+  // ── Ottimizzazione spese ──
+  if(gRev>0){
+    var expRatio=dExp/gRev;
+    if(expRatio<0.1&&gRev>20000){
+      tips.push({type:'info',
+        title:'Spese deducibili basse',
+        body:'Le tue spese aziendali sono solo il '+Math.round(expRatio*100)+'% del fatturato. '+
+          'Considera di massimizzare le spese deducibili (attrezzatura, software, formazione, home office, viaggi business, consulenze) '+
+          'per ridurre il reddito imponibile. Ogni 1.000€ di spese deducibili aggiuntive riduce le tasse di ~'+fmt(250)+'–'+fmt(350)+'€.'
+      });
+    }
+  }
+
+  // ── Confronto regimi ──
+  if(ci>0){
+    var se=calcMaltaSE(gRev,dExp);
+    var ltd=calcMaltaLtd(gRev,dExp);
+    var dse=calcDubaiSE(gRev,dExp);
+    var minRegime=[
+      {r:'Malta Ltd',t:ltd.total,s:se.total-ltd.total},
+      {r:'Dubai SE',t:dse.total,s:se.total-dse.total},
+      {r:'Dubai FZ',t:0,s:se.total}
+    ].filter(function(x){return x.s>500;}).sort(function(a,b){return b.s-a.s;})[0];
+    if(minRegime){
+      tips.push({type:'info',
+        title:'Risparmio con '+minRegime.r+': '+fmt(minRegime.s)+'€/anno',
+        body:'Con il regime <b>'+minRegime.r+'</b> pagheresti '+fmt(minRegime.t)+'€ di tasse invece di '+fmt(se.total)+'€ (Malta SE). '+
+          'Un risparmio di <b>'+fmt(minRegime.s)+'€</b>. Consulta un commercialista per valutare la migrazione.'
+      });
+    }
+  }
+
+  // ── SSC bracket ──
+  var sscLow=21000;
+  if(ci>sscLow-2000&&ci<sscLow){
+    tips.push({type:'warn',
+      title:'Vicino al bracket SSC Class 2 (€21.000)',
+      body:'Oltre €21.000 di reddito imponibile la SSC Class 2 passa da ~€1.212/a a ~€2.980/a (+€1.768/a). '+
+        'Sei a '+fmt(sscLow-ci)+'€ dalla soglia.'
+    });
+  }
+  if(ci>sscLow&&ci<sscLow+3000){
+    var sscExtra=57.30*52-23.30*52;
+    tips.push({type:'warn',
+      title:'Sei nel bracket SSC alto',
+      body:'Hai superato €21.000 di reddito imponibile: la tua SSC passa a ~€2.980/anno (+€1.768 rispetto al bracket basso). '+
+        'Putresti rientrare nel bracket basso con '+fmt(ci-sscLow)+'€ di spese aggiuntive deducibili, risparmiando '+fmt(sscExtra)+'€ di SSC.'
+    });
+  }
+
+  // ── Forfettario alert (IT) ──
+  if(gRev>80000&&gRev<90000){
+    tips.push({type:'warn',
+      title:'Attenzione: vicino al limite forfettario italiano (€85k)',
+      body:'Superare €85.000 di fatturato esclude dal regime forfettario (15%). Oltre questa soglia si applica il regime ordinario (IRPEF progressiva + INPS + IRAP), che può comportare un aumento significativo del carico fiscale.'
+    });
+  }
+
+  // ── All good ──
+  if(tips.length===0){
+    if(ci>0){
+      tips.push({type:'ok',
+        title:'Situazione fiscale ottimale',
+        body:'Non ci sono soglie critiche imminenti. Continua a monitorare le spese deducibili e rivaluta a fine anno il regime fiscale più conveniente tramite il simulatore qui sopra.'
+      });
+    } else {
+      tips.push({type:'ok',title:'Nessun dato disponibile',body:'Seleziona un periodo per visualizzare i consigli fiscali.'});
+    }
+  }
+
+  var typeMap={danger:'adv-danger',warn:'adv-warn',info:'adv-info',ok:'adv-ok'};
+  var iconMap={danger:'⚠️',warn:'💡',info:'📊',ok:'✅'};
+  panel.style.display='';
+  content.innerHTML=tips.map(function(t){
+    return '<div class="adv-card '+typeMap[t.type]+'">'+
+      '<div class="adv-icon">'+iconMap[t.type]+'</div>'+
+      '<div><div class="adv-title">'+t.title+'</div><div>'+t.body+'</div></div>'+
+      '</div>';
+  }).join('');
 }
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
