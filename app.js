@@ -352,13 +352,14 @@ function showTab(t){
   if(isGuestMode&&!canSeeSection(t)){
     showMsg('Sezione non disponibile in modalita ospite.','error');return;
   }
-  ['carica','registro','summary','settings','trading'].forEach(function(id){
+  ['carica','registro','summary','trading','utenti','settings'].forEach(function(id){
     var el=document.getElementById('tab-'+id);if(el)el.style.display=id===t?'':'none';
     var btn=document.getElementById('tab-btn-'+id);if(btn)btn.classList.toggle('active',id===t);
   });
   if(t==='registro'){renderTable();renderStats('stats-a');}
   if(t==='summary'){renderStats('stats-b');renderCat();renderTax();renderSimulator();renderAdvisory();}
   if(t==='trading'){loadPositions();}
+  if(t==='utenti'){loadUtenti();}
 }
 
 // PERIOD FILTERS
@@ -1446,147 +1447,197 @@ var validatedDupIds=new Set(JSON.parse(localStorage.getItem('inv_valid_dups')||'
   });
 });
 
+
 // ============================================================
-// GUEST ACCESS MANAGEMENT
+// UTENTI (USER MANAGEMENT) - Tab dedicato
 // ============================================================
 
-var PERM_DEFAULTS = {
-  sections:{carica:false,registro:true,summary:true,settings:false},
-  actions:{download:true,delete:false,edit:false,export:true,import:false},
-  period_from:null, period_to:null
-};
-
-function canDo(action){
-  if(!isGuestMode)return true;
-  if(action==='section'){return true;} // handled by showTab
-  return guestPermissions.actions&&guestPermissions.actions[action]!==false;
+function openInviteModal(){
+  document.getElementById('invite-email').value='';
+  document.getElementById('inv-period-from').value='';
+  document.getElementById('inv-period-to').value='';
+  // Reset checkboxes to defaults
+  document.querySelectorAll('.inv-sec').forEach(function(cb){
+    cb.checked=['registro','summary'].indexOf(cb.dataset.key)>=0;
+  });
+  document.querySelectorAll('.inv-act').forEach(function(cb){
+    cb.checked=['export','download'].indexOf(cb.dataset.key)>=0;
+  });
+  document.getElementById('invite-modal').style.display='flex';
+  setTimeout(function(){document.getElementById('invite-email').focus();},100);
 }
-function canSeeSection(section){
-  if(!isGuestMode)return true;
-  return guestPermissions.sections&&guestPermissions.sections[section]!==false;
+function closeInviteModal(){
+  document.getElementById('invite-modal').style.display='none';
 }
 
-// Guest section check handled inside main showTab
+async function submitInvite(){
+  var email=(document.getElementById('invite-email').value||'').trim();
+  if(!email){alert('Inserisci la email dell utente.');return;}
 
-// Check if current user is a guest
-async function checkGuestMode(){
-  if(isGuestMode) return; // already checked
-  var {data,error}=await sb.from('guest_access').select('*').eq('guest_user_id',currentUser.id).eq('active',true).maybeSingle();
-  if(data){
-    isGuestMode=true;
-    adminUserId=data.admin_user_id;
-    guestPermissions=data.permissions||PERM_DEFAULTS;
-    // Show guest banner
-    var banner=document.getElementById('guest-banner');
-    if(banner){banner.style.display='';banner.innerHTML='<b>Modalita ospite</b> — Stai visualizzando i dati del tuo cliente in sola lettura. Permessi: '+
-      Object.entries(guestPermissions.actions||{}).filter(function(e){return e[1];}).map(function(e){return e[0];}).join(', ')+'.';}
-    // Hide sections not allowed
-    ['carica','registro','summary','settings'].forEach(function(s){
-      var btn=document.getElementById('tab-btn-'+s);
-      if(btn&&!canSeeSection(s))btn.style.display='none';
-    });
-    // Hide forbidden buttons
-    if(!canDo('delete')){document.querySelectorAll('.btn-danger').forEach(function(b){b.style.display='none';});}
-    if(!canDo('edit')){document.querySelectorAll('.btn-edit').forEach(function(b){b.style.display='none';});}
-  } else {
-    isGuestMode=false;
-    // Show guest management in settings (admin only)
-    var gs=document.getElementById('guest-access-section');
-    if(gs)gs.style.display='';
-    loadGuestList();
+  // Build permissions from checkboxes
+  var sections={};
+  document.querySelectorAll('.inv-sec').forEach(function(cb){sections[cb.dataset.key]=cb.checked;});
+  var actions={};
+  document.querySelectorAll('.inv-act').forEach(function(cb){actions[cb.dataset.key]=cb.checked;});
+  var periodFrom=document.getElementById('inv-period-from').value||null;
+  var periodTo=document.getElementById('inv-period-to').value||null;
+
+  var perms={sections:sections,actions:actions,period_from:periodFrom,period_to:periodTo};
+
+  // Check for existing invite
+  var {data:existing}=await sb.from('guest_access').select('id').eq('admin_user_id',currentUser.id).eq('guest_email',email);
+  if(existing&&existing.length){alert('Utente gia invitato con questa email.');return;}
+
+  var {error}=await sb.from('guest_access').insert({
+    admin_user_id:currentUser.id, guest_email:email, permissions:perms
+  });
+  if(error){alert('Errore: '+error.message);return;}
+
+  closeInviteModal();
+  showMsg('Utente invitato! Si registri con questa email su '+window.location.origin+window.location.pathname,'success');
+  loadUtenti();
+}
+
+async function loadUtenti(){
+  if(isGuestMode)return; // guests can't see user management
+  var {data,error}=await sb.from('guest_access').select('*').eq('admin_user_id',currentUser.id).order('created_at');
+  var el=document.getElementById('utenti-list');
+  if(!el)return;
+  if(error||!data||!data.length){
+    el.innerHTML='<div style="text-align:center;padding:40px;color:var(--text3)"><div style="font-size:32px;margin-bottom:10px">&#128101;</div><p>Nessun utente invitato. Clicca "+ Invita utente" per iniziare.</p></div>';
+    return;
   }
-}
 
-// Load guest list for admin
-async function loadGuestList(){
-  var {data}=await sb.from('guest_access').select('*').eq('admin_user_id',currentUser.id);
-  var el=document.getElementById('guest-list');if(!el||!data)return;
-  if(!data.length){el.innerHTML='<p style="font-size:12px;color:var(--text3)">Nessun ospite invitato.</p>';return;}
+  var secLabels={carica:'Carica fattura',registro:'Registro',summary:'Summary & Tax',trading:'Trading',settings:'Impostazioni'};
+  var actLabels={export:'Esporta',download:'Scarica allegati',edit:'Modifica',delete:'Elimina',import:'Importa CSV'};
+
   el.innerHTML=data.map(function(g){
-    var p=g.permissions||PERM_DEFAULTS;
-    var secOpts=['carica','registro','summary','settings'];
-    var actOpts=['download','delete','edit','export','import'];
-    return '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:10px">'+
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'+
-        '<span style="font-weight:600;font-size:13px">'+g.guest_email+'</span>'+
-        '<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:'+(g.active?'var(--green-light)':'var(--surface)')+';color:'+(g.active?'var(--green)':'var(--text3)')+';border:1px solid '+(g.active?'var(--green)':'var(--border)')+'">'+
-          (g.active?'Attivo':'Disattivato')+'</span>'+
-        (g.guest_user_id?'':(
-          '<span style="font-size:10px;color:var(--orange)">In attesa registrazione</span>'
-        ))+
+    var p=g.permissions||{};
+    var secs=p.sections||{};
+    var acts=p.actions||{};
+    var linked=!!g.guest_user_id;
+    var statusColor=g.active?'var(--green)':'var(--text3)';
+    var statusBg=g.active?'var(--green-light)':'var(--surface2)';
+    var statusLabel=!linked?'In attesa registrazione':g.active?'Attivo':'Disattivato';
+
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;margin-bottom:12px;box-shadow:var(--shadow)">'+
+      // Header
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">'+
+        '<div style="font-size:32px;line-height:1">&#128100;</div>'+
+        '<div>'+
+          '<div style="font-weight:700;font-size:14px">'+g.guest_email+'</div>'+
+          '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+
+            (p.period_from||p.period_to?'Periodo: '+(p.period_from||'inizio')+' → '+(p.period_to||'oggi'):'Accesso: tutti i periodi')+
+          '</div>'+
+        '</div>'+
+        '<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;background:'+statusBg+';color:'+statusColor+';border:1px solid '+statusColor+';margin-left:auto">'+statusLabel+'</span>'+
       '</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'+
-        '<div><div style="font-size:10px;font-weight:600;text-transform:uppercase;color:var(--text3);margin-bottom:6px">Sezioni visibili</div>'+
-          secOpts.map(function(s){
-            var on=p.sections&&p.sections[s]!==false;
-            return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;cursor:pointer">'+
-              '<input type="checkbox" '+(on?'checked':'')+' onchange="updateGuestPerm('+g.id+',\'sections\',\''+s+'\',this.checked)" style="accent-color:var(--accent)"> '+s+'</label>';
+
+      // Permissions grid
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'+
+        // Sections
+        '<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px 14px">'+
+          '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);letter-spacing:.5px;margin-bottom:8px">Sezioni</div>'+
+          Object.keys(secLabels).map(function(k){
+            var on=secs[k]!==false&&secs[k]!==undefined?secs[k]:false;
+            if(secs[k]===undefined&&(k==='registro'||k==='summary'))on=true;
+            var gid=g.id;
+            return '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:12px">'+
+              '<span>'+secLabels[k]+'</span>'+
+              '<label style="position:relative;display:inline-block;width:34px;height:18px;cursor:pointer">'+
+                '<input type="checkbox" '+(on?'checked':'')+' style="opacity:0;width:0;height:0" '+
+                  'data-gid="'+gid+'" data-sec="sections" data-key="'+k+'" onchange="handlePermChange(this)">'+
+                '<span style="position:absolute;inset:0;border-radius:9px;background:'+(on?'var(--accent)':'var(--border)')+';transition:.2s">'+
+                  '<span style="position:absolute;width:14px;height:14px;border-radius:50%;background:#fff;top:2px;left:'+(on?'18px':'2px')+';transition:.2s"></span>'+
+                '</span>'+
+              '</label>'+
+            '</div>';
           }).join('')+
         '</div>'+
-        '<div><div style="font-size:10px;font-weight:600;text-transform:uppercase;color:var(--text3);margin-bottom:6px">Azioni consentite</div>'+
-          actOpts.map(function(a){
-            var on=p.actions&&p.actions[a]!==false;
-            return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;cursor:pointer">'+
-              '<input type="checkbox" '+(on?'checked':'')+' onchange="updateGuestPerm('+g.id+',\'actions\',\''+a+'\',this.checked)" style="accent-color:var(--accent)"> '+a+'</label>';
+        // Actions
+        '<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px 14px">'+
+          '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);letter-spacing:.5px;margin-bottom:8px">Azioni</div>'+
+          Object.keys(actLabels).map(function(k){
+            var on=acts[k]!==undefined?acts[k]:['export','download'].indexOf(k)>=0;
+            var gid=g.id;
+            return '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:12px">'+
+              '<span>'+actLabels[k]+'</span>'+
+              '<label style="position:relative;display:inline-block;width:34px;height:18px;cursor:pointer">'+
+                '<input type="checkbox" '+(on?'checked':'')+' style="opacity:0;width:0;height:0" '+
+                  'data-gid="'+gid+'" data-sec="actions" data-key="'+k+'" onchange="handlePermChange(this)">'+
+                '<span style="position:absolute;inset:0;border-radius:9px;background:'+(on?'var(--accent)':'var(--border)')+';transition:.2s">'+
+                  '<span style="position:absolute;width:14px;height:14px;border-radius:50%;background:#fff;top:2px;left:'+(on?'18px':'2px')+';transition:.2s"></span>'+
+                '</span>'+
+              '</label>'+
+            '</div>';
           }).join('')+
         '</div>'+
       '</div>'+
-      '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
-        '<button class="btn btn-secondary" style="font-size:11px" onclick="toggleGuestActive('+g.id+','+(!g.active)+')">'+(g.active?'Disattiva':'Riattiva')+' accesso</button>'+
-        '<button class="btn btn-danger" style="font-size:11px" onclick="removeGuest('+g.id+')">Rimuovi</button>'+
+
+      // Period limit
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;background:var(--surface2);border-radius:var(--radius-sm)">'+
+        '<span style="font-size:11px;color:var(--text2);font-weight:600;min-width:60px">Periodo:</span>'+
+        '<input type="date" value="'+(p.period_from||'')+ '" style="font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);color:var(--text)" '+
+          'data-gid="'+g.id+'" data-field="period_from" onchange="handlePeriodChange(this)" placeholder="Inizio">'+
+        '<span style="color:var(--text3)">→</span>'+
+        '<input type="date" value="'+(p.period_to||'')+ '" style="font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);color:var(--text)" '+
+          'data-gid="'+g.id+'" data-field="period_to" onchange="handlePeriodChange(this)" placeholder="Fine">'+
+        '<span style="font-size:10px;color:var(--text3)">(vuoto = tutti)</span>'+
+      '</div>'+
+
+      // Actions
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        '<button class="btn '+(g.active?'btn-secondary':'btn-primary')+'" style="font-size:11px" '+
+          'onclick="toggleUtenteActive('+g.id+','+(g.active?'false':'true')+')">'+(g.active?'Disattiva accesso':'Riattiva accesso')+'</button>'+
+        (!linked?'<span style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px">Condividi il link del sito con questo utente</span>':'')+
+        '<button class="btn btn-danger" style="font-size:11px;margin-left:auto" onclick="removeUtente('+g.id+')">Rimuovi</button>'+
       '</div>'+
     '</div>';
   }).join('');
 }
 
-async function inviteGuest(){
-  var email=(document.getElementById('guest-email')||{}).value;
-  if(!email){alert('Inserisci email ospite.');return;}
-  // Check if guest user exists
-  var {data:guestUser}=await sb.from('guest_access').select('id').eq('admin_user_id',currentUser.id).eq('guest_email',email);
-  if(guestUser&&guestUser.length){alert('Ospite gia invitato con questa email.');return;}
-  // Insert invite
-  var {error}=await sb.from('guest_access').insert({
-    admin_user_id:currentUser.id,
-    guest_email:email,
-    permissions:PERM_DEFAULTS
-  });
-  if(error){alert('Errore: '+error.message);return;}
-  document.getElementById('guest-email').value='';
-  showMsg('Ospite invitato! L\'utente deve registrarsi con questa email su '+window.location.href,'success');
-  loadGuestList();
+function handlePermChange(cb){
+  var id=parseInt(cb.dataset.gid);
+  var section=cb.dataset.sec;
+  var key=cb.dataset.key;
+  updateUtentePerm(id,section,key,cb.checked);
 }
-
-async function updateGuestPerm(id,section,key,val){
+async function updateUtentePerm(id,section,key,val){
   var {data}=await sb.from('guest_access').select('permissions').eq('id',id).single();
-  var p=data.permissions||PERM_DEFAULTS;
+  if(!data)return;
+  var p=data.permissions||{};
   if(!p[section])p[section]={};
   p[section][key]=val;
   await sb.from('guest_access').update({permissions:p}).eq('id',id);
+  // Re-render to update toggle visuals
+  loadUtenti();
 }
 
-async function toggleGuestActive(id,active){
+function handlePeriodChange(el){
+  updateUtentePeriod(parseInt(el.dataset.gid), el.dataset.field, el.value);
+}
+async function updateUtentePeriod(id,field,val){
+  var {data}=await sb.from('guest_access').select('permissions').eq('id',id).single();
+  if(!data)return;
+  var p=data.permissions||{};
+  p[field]=val||null;
+  await sb.from('guest_access').update({permissions:p}).eq('id',id);
+}
+
+async function toggleUtenteActive(id,active){
   await sb.from('guest_access').update({active:active}).eq('id',id);
-  loadGuestList();
+  loadUtenti();
 }
 
-async function removeGuest(id){
-  if(!confirm('Rimuovere questo ospite?'))return;
+async function removeUtente(id){
+  if(!confirm('Rimuovere questo utente? Perdera immediatamente l accesso.'))return;
   await sb.from('guest_access').delete().eq('id',id);
-  loadGuestList();
+  loadUtenti();
 }
 
-// Link guest user when they log in (match email)
-async function linkGuestIfNeeded(){
-  if(!currentUser)return;
-  var email=currentUser.email;
-  var {data}=await sb.from('guest_access').select('id,guest_user_id').eq('guest_email',email).is('guest_user_id',null);
-  if(data&&data.length){
-    await sb.from('guest_access').update({guest_user_id:currentUser.id}).eq('guest_email',email).is('guest_user_id',null);
-  }
-}
-
-// Guest init handled inside main showApp
+// Keep backward compatibility aliases
+async function inviteGuest(){ submitInvite(); }
+async function loadGuestList(){ loadUtenti(); }
 
 
 // ============================================================
