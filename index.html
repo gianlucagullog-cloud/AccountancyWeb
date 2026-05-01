@@ -466,31 +466,17 @@ tr:hover td{background:var(--surface2)}
 </head>
 <body>
 
-<!-- AUTH SCREEN (Supabase) -->
-<div id="lock-screen" style="
-  position:fixed;inset:0;background:var(--bg);z-index:9999;
-  display:flex;align-items:center;justify-content:center;
-">
-  <div style="
-    background:var(--surface);border:1px solid var(--border);
-    border-radius:var(--radius);box-shadow:var(--shadow-md);
-    padding:40px 48px;width:340px;text-align:center;
-  ">
+<!-- AUTH SCREEN -->
+<div id="lock-screen" style="position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-md);padding:40px 48px;width:340px;text-align:center;">
     <div style="font-size:36px;margin-bottom:16px">&#128274;</div>
     <div style="font-family:var(--font-display);font-size:18px;font-weight:700;margin-bottom:6px">Invoice Register</div>
     <div style="font-size:12px;color:var(--text2);margin-bottom:24px">Accedi al tuo account</div>
-    <input type="email" id="lock-email" placeholder="Email"
-      style="width:100%;margin-bottom:10px;font-size:14px;padding:11px 14px;"
-      onkeydown="if(event.key==='Enter')document.getElementById('lock-input').focus()"
-      autofocus>
-    <input type="password" id="lock-input" placeholder="Password"
-      style="width:100%;margin-bottom:12px;font-size:15px;padding:11px 14px;letter-spacing:2px"
-      onkeydown="if(event.key==='Enter')doLogin()">
+    <input type="email" id="lock-email" placeholder="Email" style="width:100%;margin-bottom:10px;font-size:14px;padding:11px 14px;" onkeydown="if(event.key==='Enter')document.getElementById('lock-input').focus()" autofocus>
+    <input type="password" id="lock-input" placeholder="Password" style="width:100%;margin-bottom:12px;font-size:15px;padding:11px 14px;letter-spacing:2px" onkeydown="if(event.key==='Enter')doLogin()">
     <div id="lock-error" style="display:none;color:var(--red);font-size:11.5px;margin-bottom:10px">Email o password errata</div>
     <button id="lock-btn" class="btn btn-primary" style="width:100%;font-size:14px;padding:11px" onclick="doLogin()">Accedi</button>
-    <div style="margin-top:14px;font-size:10.5px;color:var(--text3)">
-      Prima volta? <a href="#" style="color:var(--accent)" onclick="doSignUp(event)">Crea account</a>
-    </div>
+    <div style="margin-top:14px;font-size:10.5px;color:var(--text3)">Prima volta? <a href="#" style="color:var(--accent)" onclick="doSignUp(event)">Crea account</a></div>
   </div>
 </div>
 
@@ -499,10 +485,7 @@ tr:hover td{background:var(--surface2)}
 <header>
   <h1>Invoice Register</h1>
   <span>AI-powered · Supabase</span>
-  <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
-    <span id="user-email-badge" style="font-size:10.5px;color:var(--text3);background:var(--surface2);border:1px solid var(--border);padding:3px 10px;border-radius:20px"></span>
-    <button class="btn btn-secondary" style="font-size:11px;padding:5px 14px" onclick="doLogout()">Logout</button>
-  </div>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:10px"><span id="user-email-badge" style="font-size:10.5px;color:var(--text3);background:var(--surface2);border:1px solid var(--border);padding:3px 10px;border-radius:20px"></span><button class="btn btn-secondary" style="font-size:11px;padding:5px 14px" onclick="doLogout()">Logout</button></div>
 </header>
 
 <div class="tabs">
@@ -886,236 +869,207 @@ tr:hover td{background:var(--surface2)}
 </div>
 
 <script>
-// ── SUPABASE CONFIG — sostituisci con i tuoi valori ──────────────────────────
-var SUPABASE_URL = 'https://https://tabobhdntfnedwjrqboc.supabase.co';  // ← Project URL da Settings → API
+// ══ SUPABASE CONFIG — modifica questi due valori ══════════════════════════════
+var SUPABASE_URL = 'https://tabobhdntfnedwjrqboc.supabase.co';
 var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhYm9iaGRudGZuZWR3anJxYm9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2MTcyMTUsImV4cCI6MjA5MzE5MzIxNX0.Q7p0cd7aseU08JEwrQ2GHpbYQukbctRJlM1A3Y4FTaA
-';                      // ← anon public key da Settings → API
-// ─────────────────────────────────────────────────────────────────────────────
+';
+// ═════════════════════════════════════════════════════════════════════════════
 
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 var currentUser = null;
 var txs = [], filter = 'all', dateRef = 'date';
 var editingId = null;
-var settings = { name: '', vat: '', key: '', gclientid: '', gfolderid: '' };
+var settings = { name:'', vat:'', key:'', gclientid:'', gfolderid:'' };
 
-// ── AUTH ──────────────────────────────────────────────────────────────────────
-async function doLogin() {
+function doLogin() {
   var email = document.getElementById('lock-email').value.trim();
   var pwd   = document.getElementById('lock-input').value;
   var btn   = document.getElementById('lock-btn');
   if (!email || !pwd) { showLockError('Inserisci email e password.'); return; }
-  btn.disabled = true; btn.textContent = 'Accesso in corso…';
-  var result = await sb.auth.signInWithPassword({ email: email, password: pwd });
-  btn.disabled = false; btn.textContent = 'Accedi';
-  if (result.error) { showLockError('Email o password errata'); return; }
-  currentUser = result.data.user;
-  await showApp();
+  btn.disabled = true; btn.textContent = 'Accesso...';
+  sb.auth.signInWithPassword({ email:email, password:pwd }).then(function(r) {
+    btn.disabled = false; btn.textContent = 'Accedi';
+    if (r.error) { showLockError('Email o password errata'); return; }
+    currentUser = r.data.user;
+    showApp();
+  });
 }
 
-async function doSignUp(e) {
+function doSignUp(e) {
   e.preventDefault();
   var email = document.getElementById('lock-email').value.trim();
   var pwd   = document.getElementById('lock-input').value;
   if (!email || !pwd) { showLockError('Inserisci email e password.'); return; }
-  var result = await sb.auth.signUp({ email: email, password: pwd });
-  if (result.error) { showLockError('Errore: ' + result.error.message); return; }
-  showLockError('✓ Account creato! Ora clicca Accedi.');
+  sb.auth.signUp({ email:email, password:pwd }).then(function(r) {
+    if (r.error) { showLockError('Errore: ' + r.error.message); return; }
+    showLockError('Account creato! Clicca Accedi.');
+  });
 }
 
-async function doLogout() {
-  await sb.auth.signOut();
-  currentUser = null; txs = [];
-  document.getElementById('app-content').style.display = 'none';
-  document.getElementById('lock-screen').style.display = 'flex';
-  document.getElementById('lock-email').value = '';
-  document.getElementById('lock-input').value = '';
+function doLogout() {
+  sb.auth.signOut().then(function() {
+    currentUser = null; txs = [];
+    document.getElementById('app-content').style.display = 'none';
+    document.getElementById('lock-screen').style.display = 'flex';
+    document.getElementById('lock-email').value = '';
+    document.getElementById('lock-input').value = '';
+  });
 }
 
 function showLockError(msg) {
   var el = document.getElementById('lock-error');
   el.textContent = msg; el.style.display = '';
-  setTimeout(function(){ el.style.display = 'none'; }, 5000);
+  setTimeout(function(){ el.style.display='none'; }, 5000);
 }
 
-async function showApp() {
+function showApp() {
   document.getElementById('lock-screen').style.display = 'none';
   document.getElementById('app-content').style.display = '';
-  var badge = document.getElementById('user-email-badge');
-  if (badge && currentUser) badge.textContent = currentUser.email;
-  await loadSettings();
-  await loadInvoices();
+  var b = document.getElementById('user-email-badge');
+  if (b && currentUser) b.textContent = currentUser.email;
+  loadSettings().then(function(){ loadInvoices(); });
   updateAmountSections();
   showTab('carica');
 }
 
-// ── DB HELPERS ────────────────────────────────────────────────────────────────
 function txToDb(t) {
   return {
-    user_id:       currentUser.id,
-    date:          t.date,
-    service_month: t.serviceMonth,
-    type:          t.type,
-    invoice_num:   t.invoice,
-    counterparty:  t.counterparty,
-    category:      t.category,
-    country:       t.country,
-    vat_id:        t.vatId,
-    address:       t.address,
-    description:   t.description,
-    entrate_net:   t.entrateNet   || 0,
-    entrate_vat:   t.entrateVat   || 0,
-    entrate_total: t.entrateTotal || 0,
-    uscite_net:    t.usciteNet    || 0,
-    uscite_vat:    t.usciteVat    || 0,
-    uscite_total:  t.usciteTotal  || 0,
-    notes:         t.notes
+    user_id:t.userId||currentUser.id, date:t.date, service_month:t.serviceMonth,
+    type:t.type, invoice_num:t.invoice, counterparty:t.counterparty,
+    category:t.category, country:t.country, vat_id:t.vatId,
+    address:t.address, description:t.description,
+    entrate_net:t.entrateNet||0, entrate_vat:t.entrateVat||0, entrate_total:t.entrateTotal||0,
+    uscite_net:t.usciteNet||0, uscite_vat:t.usciteVat||0, uscite_total:t.usciteTotal||0,
+    notes:t.notes
   };
 }
 
 function dbToTx(r) {
   return {
-    id:           r.id,
-    type:         r.type,
-    date:         r.date,
-    serviceMonth: r.service_month,
-    invoice:      r.invoice_num,
-    counterparty: r.counterparty,
-    category:     r.category,
-    country:      r.country,
-    vatId:        r.vat_id,
-    address:      r.address,
-    description:  r.description,
-    entrateNet:   parseFloat(r.entrate_net)   || 0,
-    entrateVat:   parseFloat(r.entrate_vat)   || 0,
-    entrateTotal: parseFloat(r.entrate_total) || 0,
-    usciteNet:    parseFloat(r.uscite_net)    || 0,
-    usciteVat:    parseFloat(r.uscite_vat)    || 0,
-    usciteTotal:  parseFloat(r.uscite_total)  || 0,
-    notes:        r.notes
+    id:r.id, type:r.type, date:r.date, serviceMonth:r.service_month,
+    invoice:r.invoice_num, counterparty:r.counterparty, category:r.category,
+    country:r.country, vatId:r.vat_id, address:r.address, description:r.description,
+    entrateNet:parseFloat(r.entrate_net)||0, entrateVat:parseFloat(r.entrate_vat)||0,
+    entrateTotal:parseFloat(r.entrate_total)||0, usciteNet:parseFloat(r.uscite_net)||0,
+    usciteVat:parseFloat(r.uscite_vat)||0, usciteTotal:parseFloat(r.uscite_total)||0,
+    notes:r.notes
   };
 }
 
-async function loadInvoices() {
-  var result = await sb.from('invoices').select('*').order('date', { ascending: true });
-  if (result.error) { console.error('loadInvoices:', result.error); return; }
-  txs = (result.data || []).map(dbToTx);
-  renderTable(); renderStats('stats-a'); updateCount();
+function loadInvoices() {
+  return sb.from('invoices').select('*').order('date',{ascending:true}).then(function(r) {
+    if (r.error) { console.error(r.error); return; }
+    txs = (r.data||[]).map(dbToTx);
+    renderTable(); renderStats('stats-a'); updateCount();
+  });
 }
 
-async function saveTransaction() {
+function saveTransaction() {
   var t = {
-    type:         v('f-type'),   date:        v('f-date'),
-    serviceMonth: v('f-service-month'),       invoice:     v('f-invoice'),
-    counterparty: v('f-counterparty'),        category:    v('f-category'),
-    country:      v('f-country'),             vatId:       v('f-vatid'),
-    address:      v('f-address'),             description: v('f-description'),
-    entrateNet:   num('f-en-net'),  entrateVat:  num('f-en-vat'),  entrateTotal: num('f-en-tot'),
-    usciteNet:    num('f-us-net'),  usciteVat:   num('f-us-vat'),  usciteTotal:  num('f-us-tot'),
-    notes:        v('f-notes')
+    type:v('f-type'), date:v('f-date'), serviceMonth:v('f-service-month'),
+    invoice:v('f-invoice'), counterparty:v('f-counterparty'), category:v('f-category'),
+    country:v('f-country'), vatId:v('f-vatid'), address:v('f-address'),
+    description:v('f-description'),
+    entrateNet:num('f-en-net'), entrateVat:num('f-en-vat'), entrateTotal:num('f-en-tot'),
+    usciteNet:num('f-us-net'), usciteVat:num('f-us-vat'), usciteTotal:num('f-us-tot'),
+    notes:v('f-notes')
   };
-  if (!t.counterparty) { showMsg('Inserisci il Counterparty.', 'error'); return; }
-  var result = await sb.from('invoices').insert(txToDb(t)).select();
-  if (result.error) { showMsg('Errore salvataggio: ' + result.error.message, 'error'); return; }
-  var newId = result.data[0].id;
-  if (driveCurrentFile) {
-    var fileToStore = driveCurrentFile;
-    toB64(fileToStore).then(function(b64) {
-      try { localStorage.setItem('inv_file_' + newId, JSON.stringify({ name: fileToStore.name, type: fileToStore.type || 'application/octet-stream', b64: b64 })); } catch(e) {}
-    });
-    if (driveIsReady()) {
-      var inv = (t.invoice || 'fattura').replace(/[\/\\:*?"<>|]/g, '-');
-      var cp  = t.counterparty.slice(0,30).replace(/[\/\\:*?"<>|]/g, '-');
-      var fname = t.date + '_' + inv + '_' + cp + '.' + driveCurrentFile.name.split('.').pop();
-      setDriveUploadStatus(true, 'Upload su Drive…', null);
-      driveUploadFile(driveCurrentFile, fname, function(ok, info) {
-        if (ok) { setDriveUploadStatus(true, 'Caricata su Drive ✓ ' + fname, true); setTimeout(function(){ setDriveUploadStatus(false); }, 7000); }
-        else    { setDriveUploadStatus(true, 'Upload fallito: ' + info, false); }
+  if (!t.counterparty) { showMsg('Inserisci il Counterparty.','error'); return; }
+  sb.from('invoices').insert(txToDb(t)).select().then(function(r) {
+    if (r.error) { showMsg('Errore: '+r.error.message,'error'); return; }
+    var newId = r.data[0].id;
+    if (driveCurrentFile) {
+      var fc = driveCurrentFile;
+      toB64(fc).then(function(b64) {
+        try { localStorage.setItem('inv_file_'+newId, JSON.stringify({name:fc.name,type:fc.type||'application/octet-stream',b64:b64})); } catch(e) {}
       });
-    } else { setDriveUploadStatus(false); }
-  }
-  driveCurrentFile = null;
-  await loadInvoices();
-  showMsg('Transazione salvata!', 'success');
-  setState('upload');
-  document.getElementById('file-input').value = '';
+      if (driveIsReady()) {
+        var fname = t.date+'_'+(t.invoice||'fattura').replace(/[/\\:*?"<>|]/g,'-')+'_'+t.counterparty.slice(0,25).replace(/[/\\:*?"<>|]/g,'-')+'.'+fc.name.split('.').pop();
+        setDriveUploadStatus(true,'Upload Drive...',null);
+        driveUploadFile(fc,fname,function(ok,info){ ok?setDriveUploadStatus(true,'Drive OK '+fname,true):setDriveUploadStatus(true,'Drive errore: '+info,false); });
+      }
+    }
+    driveCurrentFile = null;
+    loadInvoices();
+    showMsg('Transazione salvata!','success');
+    setState('upload');
+    document.getElementById('file-input').value='';
+  });
 }
 
-async function delTx(id) {
+function delTx(id) {
   if (!confirm('Eliminare questa fattura?')) return;
-  var result = await sb.from('invoices').delete().eq('id', id);
-  if (result.error) { alert('Errore: ' + result.error.message); return; }
-  try { localStorage.removeItem('inv_file_' + id); } catch(e) {}
-  await loadInvoices();
+  sb.from('invoices').delete().eq('id',id).then(function(r) {
+    if (r.error) { alert('Errore: '+r.error.message); return; }
+    try { localStorage.removeItem('inv_file_'+id); } catch(e) {}
+    loadInvoices();
+  });
 }
 
-async function saveEdit() {
+function saveEdit() {
   var id = editingId; if (!id) return;
-  var cp = eV('e-counterparty');
-  if (!cp) { alert('Inserisci il Counterparty.'); return; }
+  var cp = eV('e-counterparty'); if (!cp) { alert('Inserisci il Counterparty.'); return; }
   var t = {
-    id: id, type: eV('e-type'), date: eV('e-date'), serviceMonth: eV('e-service-month'),
-    invoice: eV('e-invoice'), counterparty: cp, category: eV('e-category'),
-    country: eV('e-country'), vatId: eV('e-vatid'), address: eV('e-address'),
-    description: eV('e-description'),
-    entrateNet: eNum('e-en-net'), entrateVat: eNum('e-en-vat'), entrateTotal: eNum('e-en-tot'),
-    usciteNet:  eNum('e-us-net'), usciteVat:  eNum('e-us-vat'), usciteTotal:  eNum('e-us-tot'),
-    notes: eV('e-notes')
+    id:id, type:eV('e-type'), date:eV('e-date'), serviceMonth:eV('e-service-month'),
+    invoice:eV('e-invoice'), counterparty:cp, category:eV('e-category'),
+    country:eV('e-country'), vatId:eV('e-vatid'), address:eV('e-address'),
+    description:eV('e-description'),
+    entrateNet:eNum('e-en-net'), entrateVat:eNum('e-en-vat'), entrateTotal:eNum('e-en-tot'),
+    usciteNet:eNum('e-us-net'), usciteVat:eNum('e-us-vat'), usciteTotal:eNum('e-us-tot'),
+    notes:eV('e-notes')
   };
   var row = txToDb(t); delete row.user_id;
-  var result = await sb.from('invoices').update(row).eq('id', id);
-  if (result.error) { alert('Errore: ' + result.error.message); return; }
-  closeEditModal(); await loadInvoices();
-  var msg = document.getElementById('msg-area');
-  if (msg) { msg.innerHTML = '<div class="msg msg-success">✓ Fattura aggiornata!</div>'; setTimeout(function(){ msg.innerHTML=''; }, 4000); }
+  sb.from('invoices').update(row).eq('id',id).then(function(r) {
+    if (r.error) { alert('Errore: '+r.error.message); return; }
+    closeEditModal(); loadInvoices();
+    var m=document.getElementById('msg-area');
+    if(m){m.innerHTML='<div class="msg msg-success">Fattura aggiornata!</div>';setTimeout(function(){m.innerHTML='';},4000);}
+  });
 }
 
-async function clearAll() {
-  if (!confirm('Cancellare TUTTE le transazioni? Azione irreversibile!')) return;
-  var result = await sb.from('invoices').delete().eq('user_id', currentUser.id);
-  if (result.error) { alert('Errore: ' + result.error.message); return; }
-  txs = []; renderTable(); renderStats('stats-a'); updateCount();
+function clearAll() {
+  if (!confirm('Cancellare TUTTE le transazioni? Irreversibile!')) return;
+  sb.from('invoices').delete().eq('user_id',currentUser.id).then(function(r) {
+    if (r.error) { alert('Errore: '+r.error.message); return; }
+    txs=[]; renderTable(); renderStats('stats-a'); updateCount();
+  });
 }
 
-// ── SETTINGS ──────────────────────────────────────────────────────────────────
-async function loadSettings() {
-  var result = await sb.from('profile').select('*').maybeSingle();
-  if (result.data) {
-    settings.name = result.data.name || '';
-    settings.vat  = result.data.vat_number || '';
-    var sn = document.getElementById('s-name'); if (sn) sn.value = settings.name;
-    var sv = document.getElementById('s-vat');  if (sv) sv.value = settings.vat;
-  }
-  settings.key       = localStorage.getItem('inv_key')  || '';
-  settings.gclientid = localStorage.getItem('inv_gcid') || '';
-  settings.gfolderid = localStorage.getItem('inv_gfid') || '';
-  var sk = document.getElementById('s-key');       if (sk && settings.key)       sk.value = settings.key;
-  var gi = document.getElementById('s-gclientid'); if (gi && settings.gclientid) gi.value = settings.gclientid;
-  var gf = document.getElementById('s-gfolderid'); if (gf && settings.gfolderid) gf.value = settings.gfolderid;
+function loadSettings() {
+  return sb.from('profile').select('*').maybeSingle().then(function(r) {
+    if (r.data) {
+      settings.name = r.data.name||''; settings.vat = r.data.vat_number||'';
+      var sn=document.getElementById('s-name'); if(sn) sn.value=settings.name;
+      var sv=document.getElementById('s-vat');  if(sv) sv.value=settings.vat;
+    }
+    settings.key=localStorage.getItem('inv_key')||'';
+    settings.gclientid=localStorage.getItem('inv_gcid')||'';
+    settings.gfolderid=localStorage.getItem('inv_gfid')||'';
+    var sk=document.getElementById('s-key');       if(sk&&settings.key) sk.value=settings.key;
+    var gi=document.getElementById('s-gclientid'); if(gi&&settings.gclientid) gi.value=settings.gclientid;
+    var gf=document.getElementById('s-gfolderid'); if(gf&&settings.gfolderid) gf.value=settings.gfolderid;
+  });
 }
 
-async function saveSettings() {
-  settings.name       = v('s-name');
-  settings.vat        = v('s-vat');
-  settings.key        = v('s-key');
-  settings.gclientid  = v('s-gclientid');
-  settings.gfolderid  = v('s-gfolderid');
-  await sb.from('profile').upsert({ user_id: currentUser.id, name: settings.name, vat_number: settings.vat }, { onConflict: 'user_id' });
-  localStorage.setItem('inv_key',  settings.key);
-  localStorage.setItem('inv_gcid', settings.gclientid);
-  localStorage.setItem('inv_gfid', settings.gfolderid);
+function saveSettings() {
+  settings.name=v('s-name'); settings.vat=v('s-vat');
+  settings.key=v('s-key'); settings.gclientid=v('s-gclientid'); settings.gfolderid=v('s-gfolderid');
+  sb.from('profile').upsert({user_id:currentUser.id,name:settings.name,vat_number:settings.vat},{onConflict:'user_id'});
+  localStorage.setItem('inv_key',settings.key);
+  localStorage.setItem('inv_gcid',settings.gclientid);
+  localStorage.setItem('inv_gfid',settings.gfolderid);
 }
 
-function cfg(k) { return settings[k] || ''; }
-function updateCount() { var el = document.getElementById('tx-count'); if (el) el.textContent = txs.length + ' transazioni'; }
+function cfg(k) { return settings[k]||''; }
+function updateCount() { var el=document.getElementById('tx-count'); if(el) el.textContent=txs.length+' transazioni'; }
 
 function showTab(t) {
   ['carica','registro','summary','settings'].forEach(function(id) {
-    document.getElementById('tab-' + id).style.display = id === t ? '' : 'none';
-    var btn = document.getElementById('tab-btn-' + id);
-    if (btn) btn.classList.toggle('active', id === t);
+    document.getElementById('tab-'+id).style.display=id===t?'':'none';
+    var btn=document.getElementById('tab-btn-'+id); if(btn) btn.classList.toggle('active',id===t);
   });
-  if (t === 'registro') { renderTable(); renderStats('stats-a'); }
-  if (t === 'summary')  { renderStats('stats-b'); renderCat(); renderTax(); }
+  if(t==='registro'){renderTable();renderStats('stats-a');}
+  if(t==='summary'){renderStats('stats-b');renderCat();renderTax();}
 }
 
 // ── GOOGLE DRIVE ──
@@ -1277,12 +1231,7 @@ function calcU(){var n=num('f-us-net'),vt=num('f-us-vat');if(n||vt)set('f-us-tot
 function openManualForm(){driveCurrentFile=null;fillForm({});setState('form');}
 
 function toB64(file) {
-  return new Promise(function(res, rej) {
-    var r = new FileReader();
-    r.onload = function(){ res(r.result.split(',')[1]); };
-    r.onerror = rej;
-    r.readAsDataURL(file);
-  });
+  return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(r.result.split(',')[1]);};r.onerror=rej;r.readAsDataURL(file);});
 }
 
 function editTx(id){
@@ -1559,27 +1508,25 @@ function maltaTax(c){
 }
 
 
-// ── INIT ──────────────────────────────────────────────────────────────────────
-(async function() {
-  var sess = await sb.auth.getSession();
-  if (sess.data && sess.data.session) {
-    currentUser = sess.data.session.user;
-    await showApp();
+// ── INIT ─────────────────────────────────────────────────────────────────────
+sb.auth.getSession().then(function(r) {
+  if (r.data && r.data.session) {
+    currentUser = r.data.session.user;
+    showApp();
   } else {
     document.getElementById('lock-screen').style.display = 'flex';
     document.getElementById('app-content').style.display = 'none';
   }
-  sb.auth.onAuthStateChange(async function(event, session) {
-    if (event === 'SIGNED_IN' && session) { currentUser = session.user; }
-    if (event === 'SIGNED_OUT') { currentUser = null; }
-  });
-})();
-
-document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeEditModal(); });
-var dz = document.getElementById('dropzone');
-dz.addEventListener('dragover',  function(e){ e.preventDefault(); dz.classList.add('drag'); });
-dz.addEventListener('dragleave', function(){ dz.classList.remove('drag'); });
-dz.addEventListener('drop',      function(e){ e.preventDefault(); dz.classList.remove('drag'); var f=e.dataTransfer.files[0]; if(f) handleFile(f); });
+});
+sb.auth.onAuthStateChange(function(event, session) {
+  if (event==='SIGNED_IN' && session) currentUser = session.user;
+  if (event==='SIGNED_OUT') currentUser = null;
+});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeEditModal();});
+var dz=document.getElementById('dropzone');
+dz.addEventListener('dragover',function(e){e.preventDefault();dz.classList.add('drag');});
+dz.addEventListener('dragleave',function(){dz.classList.remove('drag');});
+dz.addEventListener('drop',function(e){e.preventDefault();dz.classList.remove('drag');var f=e.dataTransfer.files[0];if(f)handleFile(f);});
 </script>
 </div><!-- /app-content -->
 </body>
