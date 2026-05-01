@@ -15,6 +15,7 @@ var isGuestMode=false;
 var guestPermissions={};
 var adminUserId=null;
 window.appStarted=false;
+var validatedDupIds=new Set(JSON.parse(localStorage.getItem('inv_valid_dups')||'[]'));
 var catEntrateExpanded=true;
 var catUsciteExpanded=true;
 
@@ -68,6 +69,7 @@ function doLogout(){
     document.getElementById('lock-input').value='';
     ['user-email-badge','logout-btn','hdr-badge'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     window.appStarted=false;
+var validatedDupIds=new Set(JSON.parse(localStorage.getItem('inv_valid_dups')||'[]'));
   });
 }
 function showLockError(msg){var el=document.getElementById('lock-error');el.textContent=msg;el.style.display='';setTimeout(function(){el.style.display='none';},5000);}
@@ -212,6 +214,8 @@ function findDuplicates(arr){
   for(var i=0;i<arr.length;i++){
     for(var j=i+1;j<arr.length;j++){
       var a=arr[i],b=arr[j];
+      // Skip if either is validated
+      if(validatedDupIds.has(a.id)||validatedDupIds.has(b.id)) continue;
       // Same invoice number (non-empty)
       if(a.invoice&&b.invoice&&a.invoice.trim()===b.invoice.trim()){
         dups.add(a.id);dups.add(b.id);
@@ -225,6 +229,17 @@ function findDuplicates(arr){
     }
   }
   return dups;
+}
+function validateDuplicate(id){
+  validatedDupIds.add(id);
+  try{localStorage.setItem('inv_valid_dups',JSON.stringify(Array.from(validatedDupIds)));}catch(e){}
+  renderTable();
+}
+function validateAllDuplicates(){
+  var dups=findDuplicates(txs);
+  dups.forEach(function(id){validatedDupIds.add(id);});
+  try{localStorage.setItem('inv_valid_dups',JSON.stringify(Array.from(validatedDupIds)));}catch(e){}
+  renderTable();
 }
 
 // SELECTION
@@ -788,6 +803,7 @@ function renderTable(){
     var netStr=net!==0?(net>0?'+':'')+fmt(net):'--';
     var isDup=dups.has(t.id);
     var dupBadge=isDup?'<span title="Possibile duplicato" style="color:var(--orange);font-size:10px;margin-right:3px">&#9888;</span>':'';
+    var dupValidateBtn=isDup?'<button class="btn" style="font-size:9px;padding:2px 7px;background:rgba(251,146,60,0.15);color:var(--orange);border-color:var(--orange);white-space:nowrap" onclick="validateDuplicate('+t.id+')" title="Segna come non duplicato">Valida</button>':'';
     var rowBg=isDup?'background:rgba(251,146,60,0.08)':sel?'background:var(--accent-light)':'';
     return '<tr style="'+rowBg+'">'+
       '<td class="cb-cell"><input type="checkbox" class="row-cb" '+(sel?'checked':'')+' onchange="toggleSelect('+t.id+',this)"></td>'+
@@ -807,6 +823,7 @@ function renderTable(){
       '<td class="'+(t.usciteTotal?'amount-out':'')+'"><b>'+fmtN(t.usciteTotal)+'</b></td>'+
       '<td style="color:var(--text2);font-size:10.5px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.notes)+'</td>'+
       '<td style="white-space:nowrap">'+
+        dupValidateBtn+
         (hasFile?'<button class="btn btn-edit" style="font-size:10px;padding:4px 7px" onclick="downloadInvoiceFile(txs.find(function(x){return x.id==='+t.id+'}))" title="Scarica">&#128229;</button>':'')+
         '<button class="btn btn-edit" onclick="editTx('+t.id+')" title="Modifica">&#9998;</button>'+
         '<button class="btn btn-danger" onclick="delTx('+t.id+')">&#215;</button>'+
@@ -818,8 +835,10 @@ function renderTable(){
     if(dupCount>0){
       var warn=document.getElementById('dup-warning');
       if(!warn){warn=document.createElement('div');warn.id='dup-warning';tbody.parentElement.parentElement.insertBefore(warn,tbody.parentElement);}
-      warn.innerHTML='<div style="background:rgba(251,146,60,0.12);border:1px solid var(--orange);border-radius:var(--radius-sm);padding:8px 14px;font-size:12px;color:var(--orange);margin-bottom:8px">'+
-        '&#9888; <b>'+dupCount+' transazioni potrebbero essere duplicate</b> (stesso n. fattura o stesso importo+data). Righe evidenziate in arancione.</div>';
+      warn.innerHTML='<div style="background:rgba(251,146,60,0.12);border:1px solid var(--orange);border-radius:var(--radius-sm);padding:8px 14px;font-size:12px;color:var(--orange);margin-bottom:8px;display:flex;align-items:center;gap:10px">'+
+        '<span>&#9888; <b>'+dupCount+' transazioni potrebbero essere duplicate</b> (stesso n. fattura o stesso importo+data). Righe evidenziate in arancione.</span>'+
+        '<button class="btn" style="font-size:10px;padding:3px 10px;background:rgba(251,146,60,0.2);color:var(--orange);border-color:var(--orange);margin-left:auto;white-space:nowrap" onclick="validateAllDuplicates()">Valida tutte</button>'+
+        '</div>';
     }
   } else {
     var warn=document.getElementById('dup-warning');if(warn)warn.innerHTML='';
@@ -1412,7 +1431,8 @@ document.addEventListener('DOMContentLoaded', function(){
       currentUser = session.user;
       if(!window.appStarted) showApp();
     }
-    if(event==='SIGNED_OUT'){ currentUser=null; window.appStarted=false; }
+    if(event==='SIGNED_OUT'){ currentUser=null; window.appStarted=false;
+var validatedDupIds=new Set(JSON.parse(localStorage.getItem('inv_valid_dups')||'[]')); }
   });
 
   sb.auth.getSession().then(function(r){
