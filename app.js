@@ -1,4 +1,4 @@
-// ══ SUPABASE CONFIG — modifica questi due valori ══════════════════════════════
+// ══ SUPABASE CONFIG ══════════════════════════════════════════════════════════
 var SUPABASE_URL = 'https://tabobhdntfnedwjrqboc.supabase.co';
 var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhYm9iaGRudGZuZWR3anJxYm9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2MTcyMTUsImV4cCI6MjA5MzE5MzIxNX0.Q7p0cd7aseU08JEwrQ2GHpbYQukbctRJlM1A3Y4FTaA';
 // ═════════════════════════════════════════════════════════════════════════════
@@ -8,7 +8,13 @@ var currentUser = null;
 var txs = [], filter = 'all', dateRef = 'date';
 var editingId = null;
 var settings = { name:'', vat:'', key:'', gclientid:'', gfolderid:'' };
+var filterPeriods = new Set(['all']);
+var filterYear = 'all';
+var filterPeriodsS = new Set(['all']);
+var filterYearS = 'all';
+var currentRegime = 'malta-se';
 
+// ── AUTH ──────────────────────────────────────────────────────────────────────
 function doLogin() {
   var email = document.getElementById('lock-email').value.trim();
   var pwd   = document.getElementById('lock-input').value;
@@ -18,11 +24,9 @@ function doLogin() {
   sb.auth.signInWithPassword({ email:email, password:pwd }).then(function(r) {
     btn.disabled = false; btn.textContent = 'Accedi';
     if (r.error) { showLockError('Email o password errata'); return; }
-    currentUser = r.data.user;
-    showApp();
+    currentUser = r.data.user; showApp();
   });
 }
-
 function doSignUp(e) {
   e.preventDefault();
   var email = document.getElementById('lock-email').value.trim();
@@ -33,7 +37,6 @@ function doSignUp(e) {
     showLockError('Account creato! Clicca Accedi.');
   });
 }
-
 function doLogout() {
   sb.auth.signOut().then(function() {
     currentUser = null; txs = [];
@@ -43,13 +46,11 @@ function doLogout() {
     document.getElementById('lock-input').value = '';
   });
 }
-
 function showLockError(msg) {
   var el = document.getElementById('lock-error');
   el.textContent = msg; el.style.display = '';
   setTimeout(function(){ el.style.display='none'; }, 5000);
 }
-
 function showApp() {
   document.getElementById('lock-screen').style.display = 'none';
   document.getElementById('app-content').style.display = '';
@@ -60,144 +61,229 @@ function showApp() {
   showTab('carica');
 }
 
+// ── DB HELPERS ────────────────────────────────────────────────────────────────
 function txToDb(t) {
-  return {
-    user_id:t.userId||currentUser.id, date:t.date, service_month:t.serviceMonth,
-    type:t.type, invoice_num:t.invoice, counterparty:t.counterparty,
-    category:t.category, country:t.country, vat_id:t.vatId,
-    address:t.address, description:t.description,
+  return { user_id:currentUser.id, date:t.date, service_month:t.serviceMonth,
+    type:t.type, invoice_num:t.invoice, counterparty:t.counterparty, category:t.category,
+    country:t.country, vat_id:t.vatId, address:t.address, description:t.description,
     entrate_net:t.entrateNet||0, entrate_vat:t.entrateVat||0, entrate_total:t.entrateTotal||0,
-    uscite_net:t.usciteNet||0, uscite_vat:t.usciteVat||0, uscite_total:t.usciteTotal||0,
-    notes:t.notes
-  };
+    uscite_net:t.usciteNet||0, uscite_vat:t.usciteVat||0, uscite_total:t.usciteTotal||0, notes:t.notes };
 }
-
 function dbToTx(r) {
-  return {
-    id:r.id, type:r.type, date:r.date, serviceMonth:r.service_month,
+  return { id:r.id, type:r.type, date:r.date, serviceMonth:r.service_month,
     invoice:r.invoice_num, counterparty:r.counterparty, category:r.category,
     country:r.country, vatId:r.vat_id, address:r.address, description:r.description,
     entrateNet:parseFloat(r.entrate_net)||0, entrateVat:parseFloat(r.entrate_vat)||0,
     entrateTotal:parseFloat(r.entrate_total)||0, usciteNet:parseFloat(r.uscite_net)||0,
-    usciteVat:parseFloat(r.uscite_vat)||0, usciteTotal:parseFloat(r.uscite_total)||0,
-    notes:r.notes
-  };
+    usciteVat:parseFloat(r.uscite_vat)||0, usciteTotal:parseFloat(r.uscite_total)||0, notes:r.notes };
 }
 
+// ── DATA FUNCTIONS ────────────────────────────────────────────────────────────
 function loadInvoices() {
   return sb.from('invoices').select('*').order('date',{ascending:true}).then(function(r) {
     if (r.error) { console.error(r.error); return; }
     txs = (r.data||[]).map(dbToTx);
+    populateYearFilters();
     renderTable(); renderStats('stats-a'); updateCount();
   });
 }
-
 function saveTransaction() {
-  var t = {
-    type:v('f-type'), date:v('f-date'), serviceMonth:v('f-service-month'),
+  var t = { type:v('f-type'), date:v('f-date'), serviceMonth:v('f-service-month'),
     invoice:v('f-invoice'), counterparty:v('f-counterparty'), category:v('f-category'),
-    country:v('f-country'), vatId:v('f-vatid'), address:v('f-address'),
-    description:v('f-description'),
+    country:v('f-country'), vatId:v('f-vatid'), address:v('f-address'), description:v('f-description'),
     entrateNet:num('f-en-net'), entrateVat:num('f-en-vat'), entrateTotal:num('f-en-tot'),
-    usciteNet:num('f-us-net'), usciteVat:num('f-us-vat'), usciteTotal:num('f-us-tot'),
-    notes:v('f-notes')
-  };
+    usciteNet:num('f-us-net'), usciteVat:num('f-us-vat'), usciteTotal:num('f-us-tot'), notes:v('f-notes') };
   if (!t.counterparty) { showMsg('Inserisci il Counterparty.','error'); return; }
   sb.from('invoices').insert(txToDb(t)).select().then(function(r) {
     if (r.error) { showMsg('Errore: '+r.error.message,'error'); return; }
     var newId = r.data[0].id;
     if (driveCurrentFile) {
-      var fc = driveCurrentFile;
-      toB64(fc).then(function(b64) {
-        try { localStorage.setItem('inv_file_'+newId, JSON.stringify({name:fc.name,type:fc.type||'application/octet-stream',b64:b64})); } catch(e) {}
-      });
+      var fc=driveCurrentFile;
+      toB64(fc).then(function(b64){ try{localStorage.setItem('inv_file_'+newId,JSON.stringify({name:fc.name,type:fc.type||'application/octet-stream',b64:b64}));}catch(e){} });
       if (driveIsReady()) {
-        var fname = t.date+'_'+(t.invoice||'fattura').replace(/[/\\:*?"<>|]/g,'-')+'_'+t.counterparty.slice(0,25).replace(/[/\\:*?"<>|]/g,'-')+'.'+fc.name.split('.').pop();
+        var fname=t.date+'_'+(t.invoice||'fattura').replace(/[\/\:*?"<>|]/g,'-')+'_'+t.counterparty.slice(0,25).replace(/[\/\:*?"<>|]/g,'-')+'.'+fc.name.split('.').pop();
         setDriveUploadStatus(true,'Upload Drive...',null);
-        driveUploadFile(fc,fname,function(ok,info){ ok?setDriveUploadStatus(true,'Drive OK '+fname,true):setDriveUploadStatus(true,'Drive errore: '+info,false); });
+        driveUploadFile(fc,fname,function(ok,info){ok?setDriveUploadStatus(true,'Drive OK',true):setDriveUploadStatus(true,'Drive errore: '+info,false);});
       }
     }
-    driveCurrentFile = null;
-    loadInvoices();
-    showMsg('Transazione salvata!','success');
-    setState('upload');
-    document.getElementById('file-input').value='';
+    driveCurrentFile=null; loadInvoices(); showMsg('Transazione salvata!','success');
+    setState('upload'); document.getElementById('file-input').value='';
   });
 }
-
 function delTx(id) {
-  if (!confirm('Eliminare questa fattura?')) return;
+  if (!confirm('Eliminare?')) return;
   sb.from('invoices').delete().eq('id',id).then(function(r) {
     if (r.error) { alert('Errore: '+r.error.message); return; }
-    try { localStorage.removeItem('inv_file_'+id); } catch(e) {}
-    loadInvoices();
+    try{localStorage.removeItem('inv_file_'+id);}catch(e){} loadInvoices();
   });
 }
-
 function saveEdit() {
-  var id = editingId; if (!id) return;
-  var cp = eV('e-counterparty'); if (!cp) { alert('Inserisci il Counterparty.'); return; }
-  var t = {
-    id:id, type:eV('e-type'), date:eV('e-date'), serviceMonth:eV('e-service-month'),
-    invoice:eV('e-invoice'), counterparty:cp, category:eV('e-category'),
-    country:eV('e-country'), vatId:eV('e-vatid'), address:eV('e-address'),
-    description:eV('e-description'),
-    entrateNet:eNum('e-en-net'), entrateVat:eNum('e-en-vat'), entrateTotal:eNum('e-en-tot'),
-    usciteNet:eNum('e-us-net'), usciteVat:eNum('e-us-vat'), usciteTotal:eNum('e-us-tot'),
-    notes:eV('e-notes')
-  };
-  var row = txToDb(t); delete row.user_id;
+  var id=editingId; if(!id) return;
+  var cp=eV('e-counterparty'); if(!cp){alert('Inserisci il Counterparty.');return;}
+  var t={id:id,type:eV('e-type'),date:eV('e-date'),serviceMonth:eV('e-service-month'),
+    invoice:eV('e-invoice'),counterparty:cp,category:eV('e-category'),country:eV('e-country'),
+    vatId:eV('e-vatid'),address:eV('e-address'),description:eV('e-description'),
+    entrateNet:eNum('e-en-net'),entrateVat:eNum('e-en-vat'),entrateTotal:eNum('e-en-tot'),
+    usciteNet:eNum('e-us-net'),usciteVat:eNum('e-us-vat'),usciteTotal:eNum('e-us-tot'),notes:eV('e-notes')};
+  var row=txToDb(t); delete row.user_id;
   sb.from('invoices').update(row).eq('id',id).then(function(r) {
-    if (r.error) { alert('Errore: '+r.error.message); return; }
+    if(r.error){alert('Errore: '+r.error.message);return;}
     closeEditModal(); loadInvoices();
     var m=document.getElementById('msg-area');
     if(m){m.innerHTML='<div class="msg msg-success">Fattura aggiornata!</div>';setTimeout(function(){m.innerHTML='';},4000);}
   });
 }
-
 function clearAll() {
-  if (!confirm('Cancellare TUTTE le transazioni? Irreversibile!')) return;
+  if(!confirm('Cancellare TUTTE le transazioni? Irreversibile!')) return;
   sb.from('invoices').delete().eq('user_id',currentUser.id).then(function(r) {
-    if (r.error) { alert('Errore: '+r.error.message); return; }
+    if(r.error){alert('Errore: '+r.error.message);return;}
     txs=[]; renderTable(); renderStats('stats-a'); updateCount();
   });
 }
 
+// ── IMPORT CSV ────────────────────────────────────────────────────────────────
+function importCSV(input) {
+  var file = input.files[0]; if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var lines = e.target.result.split('\n').filter(function(l){return l.trim();});
+    if (lines.length < 2) { alert('CSV vuoto o non valido.'); return; }
+    var headers = lines[0].split(',').map(function(h){return h.replace(/"/g,'').trim().toLowerCase();});
+    var rows = [];
+    for (var i=1; i<lines.length; i++) {
+      var cols = lines[i].match(/(".*?"|[^,]+)(?=,|$)/g)||[];
+      cols = cols.map(function(c){return c.replace(/^"|"$/g,'').trim();});
+      var row = {};
+      headers.forEach(function(h,j){row[h]=cols[j]||'';});
+      var t = {
+        user_id:currentUser.id,
+        date: row['date']||row['data']||'',
+        service_month: row['service month']||row['service_month']||'',
+        type: row['type']||row['tipo']||'Received',
+        invoice_num: row['invoice #']||row['invoice_num']||row['fattura #']||'',
+        counterparty: row['counterparty']||row['controparte']||'',
+        category: row['category']||row['categoria']||'Other',
+        country: row['country']||row['paese']||'',
+        vat_id: row['vat / tax id']||row['vat_id']||'',
+        address: row['address']||row['address']||'',
+        description: row['description']||row['descrizione']||'',
+        entrate_net:   parseFloat(row['entrate net']||row['entrate_net']||0)||0,
+        entrate_vat:   parseFloat(row['entrate vat']||row['entrate_vat']||0)||0,
+        entrate_total: parseFloat(row['entrate total']||row['entrate_total']||0)||0,
+        uscite_net:    parseFloat(row['uscite net']||row['uscite_net']||0)||0,
+        uscite_vat:    parseFloat(row['uscite vat']||row['uscite_vat']||0)||0,
+        uscite_total:  parseFloat(row['uscite total']||row['uscite_total']||0)||0,
+        notes: row['notes']||row['note']||''
+      };
+      if (t.date && t.counterparty) rows.push(t);
+    }
+    if (!rows.length) { alert('Nessuna riga valida trovata. Controlla che il CSV abbia colonne Date e Counterparty.'); return; }
+    if (!confirm('Importare '+rows.length+' transazioni?')) return;
+    sb.from('invoices').insert(rows).then(function(r) {
+      if (r.error) { alert('Errore import: '+r.error.message); return; }
+      loadInvoices(); showTab('registro');
+      showMsg(rows.length+' transazioni importate!','success');
+    });
+  };
+  reader.readAsText(file, 'UTF-8');
+  input.value='';
+}
+
+// ── SETTINGS ──────────────────────────────────────────────────────────────────
 function loadSettings() {
   return sb.from('profile').select('*').maybeSingle().then(function(r) {
-    if (r.data) {
-      settings.name = r.data.name||''; settings.vat = r.data.vat_number||'';
-      var sn=document.getElementById('s-name'); if(sn) sn.value=settings.name;
-      var sv=document.getElementById('s-vat');  if(sv) sv.value=settings.vat;
+    if(r.data){
+      settings.name=r.data.name||''; settings.vat=r.data.vat_number||'';
+      var sn=document.getElementById('s-name'); if(sn)sn.value=settings.name;
+      var sv=document.getElementById('s-vat');  if(sv)sv.value=settings.vat;
     }
     settings.key=localStorage.getItem('inv_key')||'';
     settings.gclientid=localStorage.getItem('inv_gcid')||'';
     settings.gfolderid=localStorage.getItem('inv_gfid')||'';
-    var sk=document.getElementById('s-key');       if(sk&&settings.key) sk.value=settings.key;
-    var gi=document.getElementById('s-gclientid'); if(gi&&settings.gclientid) gi.value=settings.gclientid;
-    var gf=document.getElementById('s-gfolderid'); if(gf&&settings.gfolderid) gf.value=settings.gfolderid;
+    var sk=document.getElementById('s-key');       if(sk&&settings.key)sk.value=settings.key;
+    var gi=document.getElementById('s-gclientid'); if(gi&&settings.gclientid)gi.value=settings.gclientid;
+    var gf=document.getElementById('s-gfolderid'); if(gf&&settings.gfolderid)gf.value=settings.gfolderid;
   });
 }
-
 function saveSettings() {
-  settings.name=v('s-name'); settings.vat=v('s-vat');
-  settings.key=v('s-key'); settings.gclientid=v('s-gclientid'); settings.gfolderid=v('s-gfolderid');
+  settings.name=v('s-name'); settings.vat=v('s-vat'); settings.key=v('s-key');
+  settings.gclientid=v('s-gclientid'); settings.gfolderid=v('s-gfolderid');
   sb.from('profile').upsert({user_id:currentUser.id,name:settings.name,vat_number:settings.vat},{onConflict:'user_id'});
-  localStorage.setItem('inv_key',settings.key);
-  localStorage.setItem('inv_gcid',settings.gclientid);
-  localStorage.setItem('inv_gfid',settings.gfolderid);
+  localStorage.setItem('inv_key',settings.key); localStorage.setItem('inv_gcid',settings.gclientid); localStorage.setItem('inv_gfid',settings.gfolderid);
 }
+function cfg(k){return settings[k]||'';}
+function updateCount(){var el=document.getElementById('tx-count');if(el)el.textContent=txs.length+' transazioni';}
 
-function cfg(k) { return settings[k]||''; }
-function updateCount() { var el=document.getElementById('tx-count'); if(el) el.textContent=txs.length+' transazioni'; }
-
+// ── TAB NAVIGATION ────────────────────────────────────────────────────────────
 function showTab(t) {
   ['carica','registro','summary','settings'].forEach(function(id) {
     document.getElementById('tab-'+id).style.display=id===t?'':'none';
-    var btn=document.getElementById('tab-btn-'+id); if(btn) btn.classList.toggle('active',id===t);
+    var btn=document.getElementById('tab-btn-'+id); if(btn)btn.classList.toggle('active',id===t);
   });
   if(t==='registro'){renderTable();renderStats('stats-a');}
-  if(t==='summary'){renderStats('stats-b');renderCat();renderTax();}
+  if(t==='summary'){renderStats('stats-b');renderCat();renderTax();renderSimulator();}
+}
+
+// ── PERIOD FILTER (Registro) ──────────────────────────────────────────────────
+function populateYearFilters() {
+  var years = {};
+  txs.forEach(function(t){ var y=(t.date||'').slice(0,4); if(y) years[y]=1; });
+  var yArr = Object.keys(years).sort();
+  ['year-filter','year-filter-s'].forEach(function(id){
+    var el=document.getElementById(id); if(!el) return;
+    var cur=el.value;
+    el.innerHTML='<option value="all">Tutti</option>';
+    yArr.forEach(function(y){el.innerHTML+='<option value="'+y+'">'+y+'</option>';});
+    if(cur) el.value=cur;
+  });
+}
+function togglePeriod(p, btn) {
+  if (p==='all') {
+    filterPeriods = new Set(['all']);
+  } else {
+    filterPeriods.delete('all');
+    if (filterPeriods.has(p)) filterPeriods.delete(p);
+    else filterPeriods.add(p);
+    if (filterPeriods.size===0) filterPeriods.add('all');
+  }
+  document.querySelectorAll('#period-pills .period-pill').forEach(function(b){
+    b.classList.toggle('active', filterPeriods.has(b.dataset.p));
+  });
+  renderTable();
+}
+function setFilterYear(y) { filterYear=y; renderTable(); }
+
+function togglePeriodS(p, btn) {
+  if (p==='all') { filterPeriodsS=new Set(['all']); }
+  else {
+    filterPeriodsS.delete('all');
+    if(filterPeriodsS.has(p)) filterPeriodsS.delete(p); else filterPeriodsS.add(p);
+    if(filterPeriodsS.size===0) filterPeriodsS.add('all');
+  }
+  document.querySelectorAll('#period-pills-s .period-pill').forEach(function(b){
+    b.classList.toggle('active', filterPeriodsS.has(b.dataset.p));
+  });
+  renderCat(); renderTax(); renderSimulator(); renderStats('stats-b');
+}
+function setFilterYearS(y) { filterYearS=y; renderCat(); renderTax(); renderSimulator(); renderStats('stats-b'); }
+
+function matchesPeriodMulti(t, periods, year) {
+  var d = getRefDate(t);
+  if (year!=='all' && d.slice(0,4)!==year) return false;
+  if (periods.has('all')) return true;
+  var m=d.slice(5,7);
+  var qMap={Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
+  for (var p of periods) {
+    if (qMap[p] && qMap[p].indexOf(m)>=0) return true;
+    if (p===m) return true;
+  }
+  return false;
+}
+function getFilteredTxs() {
+  return txs.filter(function(t){ return (filter==='all'||t.type===filter) && matchesPeriodMulti(t,filterPeriods,filterYear); });
+}
+function getFilteredSummaryTxs() {
+  return txs.filter(function(t){ return matchesPeriodMulti(t,filterPeriodsS,filterYearS); });
 }
 
 // ── GOOGLE DRIVE ──
@@ -358,9 +444,7 @@ function calcU(){var n=num('f-us-net'),vt=num('f-us-vat');if(n||vt)set('f-us-tot
 
 function openManualForm(){driveCurrentFile=null;fillForm({});setState('form');}
 
-function toB64(file) {
-  return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(r.result.split(',')[1]);};r.onerror=rej;r.readAsDataURL(file);});
-}
+function toB64(file){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(r.result.split(',')[1]);};r.onerror=rej;r.readAsDataURL(file);});}
 
 function editTx(id){
   var t=txs.find(function(x){return x.id===id;});
@@ -432,27 +516,25 @@ function setDateRef(ref,btn){
   renderTable();
 }
 
-function getRefDate(t){
-  return dateRef==='serviceMonth'?(t.serviceMonth||t.date):t.date;
-}
 
-function matchesPeriod(t,period){
-  if(period==='all') return true;
-  var d=getRefDate(t);
-  var m=d.slice(5,7);
-  var qMap={Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
-  if(qMap[period]) return qMap[period].indexOf(m)>=0;
-  return m===period;
+function setTypeFilter(f,btn){
+  filter=f;
+  ['ftype-all','ftype-issued','ftype-received'].forEach(function(id){var el=document.getElementById(id);if(el)el.classList.remove('active');});
+  if(btn)btn.classList.add('active');
+  renderTable();
 }
+function setFilter(f,btn){setTypeFilter(f,btn);}
+function setDateRef(ref,btn){
+  dateRef=ref;
+  var db=document.getElementById('ref-date-btn'); var sb2=document.getElementById('ref-svc-btn');
+  if(db)db.classList.toggle('active',ref==='date'); if(sb2)sb2.classList.toggle('active',ref==='serviceMonth');
+  renderTable();
+}
+function getRefDate(t){return dateRef==='serviceMonth'?(t.serviceMonth||t.date):t.date;}
 
 function renderTable(){
-  var pf=document.getElementById('period-filter');
-  var period=pf?pf.value:'all';
-  var arr=txs.filter(function(t){
-    return (filter==='all'||t.type===filter) && matchesPeriod(t,period);
-  });
-  var tbody=document.getElementById('tbody');
-  var empty=document.getElementById('empty');
+  var arr=getFilteredTxs();
+  var tbody=document.getElementById('tbody'); var empty=document.getElementById('empty');
   if(!tbody) return;
   renderFilteredStats(arr);
   if(!arr.length){tbody.innerHTML='';empty.style.display='';return;}
@@ -461,8 +543,7 @@ function renderTable(){
     var isIn=t.type==='Issued';
     return '<tr>'+
       '<td><span class="badge '+(isIn?'badge-in':'badge-out')+'">'+(isIn?'Issued':'Received')+'</span></td>'+
-      '<td>'+esc(t.date)+'</td>'+
-      '<td style="color:var(--text2)">'+esc(t.serviceMonth)+'</td>'+
+      '<td>'+esc(t.date)+'</td><td style="color:var(--text2)">'+esc(t.serviceMonth)+'</td>'+
       '<td style="color:var(--text2);white-space:nowrap">'+esc(t.invoice)+'</td>'+
       '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.counterparty)+'</td>'+
       '<td style="color:var(--text2);font-size:10.5px;white-space:nowrap">'+esc(t.category)+'</td>'+
@@ -474,80 +555,167 @@ function renderTable(){
       '<td class="'+(t.usciteVat?'amount-out':'')+'">'+fmtN(t.usciteVat)+'</td>'+
       '<td class="'+(t.usciteTotal?'amount-out':'')+'"><b>'+fmtN(t.usciteTotal)+'</b></td>'+
       '<td style="color:var(--text2);font-size:10.5px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.notes)+'</td>'+
-      '<td style="white-space:nowrap"><span title="File allegato" style="color:var(--text3);font-size:12px;margin-right:4px">'+(localStorage.getItem('inv_file_'+t.id)?'📎':'')+'</span><button class="btn btn-edit" onclick="editTx('+t.id+')" title="Modifica">✏</button><button class="btn btn-danger" onclick="delTx('+t.id+')">✕</button></td>'+
+      '<td style="white-space:nowrap"><span title="File allegato" style="color:var(--text3);font-size:12px;margin-right:4px">'+(localStorage.getItem('inv_file_'+t.id)?'\u{1F4CE}':'')+'</span>'+
+      '<button class="btn btn-edit" onclick="editTx('+t.id+')" title="Modifica">\u270F</button>'+
+      '<button class="btn btn-danger" onclick="delTx('+t.id+')">\u00D7</button></td>'+
       '</tr>';
   }).join('');
 }
-
 function renderFilteredStats(arr){
   var el=document.getElementById('stats-a');if(!el)return;
   var tIn=arr.reduce(function(s,t){return s+(t.entrateTotal||0);},0);
   var tOut=arr.reduce(function(s,t){return s+(t.usciteTotal||0);},0);
   var nIn=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
   var nOut=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
-  el.innerHTML=
-    stat('Entrate Totali',fmt(tIn),'var(--green)')+
-    stat('Uscite Totali',fmt(tOut),'var(--red)')+
-    stat('Saldo Netto',fmt(nIn-nOut),nIn>=nOut?'var(--green)':'var(--red)')+
-    stat('N Fatture',arr.length,'var(--accent)');
+  el.innerHTML=stat('Entrate Totali',fmt(tIn),'var(--green)')+stat('Uscite Totali',fmt(tOut),'var(--red)')+
+    stat('Saldo Netto',fmt(nIn-nOut),nIn>=nOut?'var(--green)':'var(--red)')+stat('N Fatture',arr.length,'var(--accent)');
 }
-
 function renderStats(id){
-  var el=document.getElementById(id);if(!el) return;
-  var tIn=sum('entrateTotal'),tOut=sum('usciteTotal'),nIn=sum('entrateNet'),nOut=sum('usciteNet');
-  el.innerHTML=
-    stat('Entrate Totali',fmt(tIn),'var(--green)')+
-    stat('Uscite Totali',fmt(tOut),'var(--red)')+
-    stat('Saldo Netto',fmt(nIn-nOut),nIn>=nOut?'var(--green)':'var(--red)')+
-    stat('N Fatture',txs.length,'var(--accent)');
+  var el=document.getElementById(id);if(!el)return;
+  var arr=id==='stats-b'?getFilteredSummaryTxs():txs;
+  var tIn=arr.reduce(function(s,t){return s+(t.entrateTotal||0);},0);
+  var tOut=arr.reduce(function(s,t){return s+(t.usciteTotal||0);},0);
+  var nIn=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
+  var nOut=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
+  el.innerHTML=stat('Entrate Totali',fmt(tIn),'var(--green)')+stat('Uscite Totali',fmt(tOut),'var(--red)')+
+    stat('Saldo Netto',fmt(nIn-nOut),nIn>=nOut?'var(--green)':'var(--red)')+stat('N Fatture',arr.length,'var(--accent)');
 }
-function stat(label,val,color){
-  return '<div class="stat"><div class="stat-label">'+label+'</div><div class="stat-value" style="color:'+color+'">'+val+'</div></div>';
-}
+function stat(label,val,color){return '<div class="stat"><div class="stat-label">'+label+'</div><div class="stat-value" style="color:'+color+'">'+val+'</div></div>';}
 
+// ── CATEGORY SUMMARY (split entrate/uscite) ───────────────────────────────────
 function renderCat(){
-  var cats=['Revenue - Consultancy','Revenue - Other','Professional Services - Accountant','Professional Services - Consultancy','Travel - Flights','Travel - Accommodation','Travel - Local Transport','Utilities - Internet/Mobile','Utilities - Other','Equipment - Office','Equipment - Other','Other'];
-  var map={};cats.forEach(function(c){map[c]={n:0,v:0,t:0};});
-  txs.forEach(function(t){
-    var c=t.category||'Other';if(!map[c])map[c]={n:0,v:0,t:0};
-    if(t.type==='Issued'){map[c].n+=t.entrateNet;map[c].v+=t.entrateVat;map[c].t+=t.entrateTotal;}
-    else{map[c].n+=t.usciteNet;map[c].v+=t.usciteVat;map[c].t+=t.usciteTotal;}
+  var cats=['Revenue - Consultancy','Revenue - Other','Professional Services - Accountant',
+    'Professional Services - Consultancy','Travel - Flights','Travel - Accommodation',
+    'Travel - Local Transport','Utilities - Internet/Mobile','Utilities - Other',
+    'Equipment - Office','Equipment - Other','Other'];
+  var mapIn={}, mapOut={};
+  cats.forEach(function(c){mapIn[c]={n:0,v:0,t:0};mapOut[c]={n:0,v:0,t:0};});
+  var arr=getFilteredSummaryTxs();
+  arr.forEach(function(t){
+    var c=t.category||'Other';
+    if(!mapIn[c])mapIn[c]={n:0,v:0,t:0};
+    if(!mapOut[c])mapOut[c]={n:0,v:0,t:0};
+    if(t.type==='Issued'){mapIn[c].n+=t.entrateNet;mapIn[c].v+=t.entrateVat;mapIn[c].t+=t.entrateTotal;}
+    else{mapOut[c].n+=t.usciteNet;mapOut[c].v+=t.usciteVat;mapOut[c].t+=t.usciteTotal;}
   });
-  var tbody=document.getElementById('cat-tbody');if(!tbody) return;
-  var tN=0,tV=0,tT=0;
-  var rows=cats.filter(function(c){return map[c]&&map[c].t!==0;}).map(function(c){
-    tN+=map[c].n;tV+=map[c].v;tT+=map[c].t;
-    return '<tr><td style="color:var(--text2);font-size:11px">'+c+'</td><td>'+fmt(map[c].n)+'</td><td>'+fmt(map[c].v)+'</td><td>'+fmt(map[c].t)+'</td></tr>';
-  }).join('');
-  tbody.innerHTML=rows+'<tr><td>TOTAL</td><td>'+fmt(tN)+'</td><td>'+fmt(tV)+'</td><td>'+fmt(tT)+'</td></tr>';
+  // All categories present in data
+  var allCats=Array.from(new Set(arr.map(function(t){return t.category||'Other';}))).sort();
+  function buildRows(map,allC){
+    var tN=0,tV=0,tT=0;
+    var rows=allC.filter(function(c){return map[c]&&map[c].t!==0;}).map(function(c){
+      tN+=map[c].n;tV+=map[c].v;tT+=map[c].t;
+      return '<tr><td style="color:var(--text2);font-size:11px">'+c+'</td><td>'+fmt(map[c].n)+'</td><td>'+fmt(map[c].v)+'</td><td>'+fmt(map[c].t)+'</td></tr>';
+    }).join('');
+    if(!rows) return '<tr><td colspan="4" style="color:var(--text3);text-align:center;padding:16px">Nessun dato</td></tr>';
+    return rows+'<tr><td>TOTAL</td><td>'+fmt(tN)+'</td><td>'+fmt(tV)+'</td><td>'+fmt(tT)+'</td></tr>';
+  }
+  var bi=document.getElementById('cat-tbody-in');   if(bi) bi.innerHTML=buildRows(mapIn,allCats);
+  var bo=document.getElementById('cat-tbody-out');  if(bo) bo.innerHTML=buildRows(mapOut,allCats);
 }
 
+// ── TAX CALCULATIONS ──────────────────────────────────────────────────────────
+function maltaTaxSingle(c){
+  if(c<=9100)return 0; if(c<=14500)return(c-9100)*.15;
+  if(c<=19500)return 810+(c-14500)*.25; if(c<=60000)return 2060+(c-19500)*.25;
+  return 12235+(c-60000)*.35;
+}
+function calcMaltaSE(gRev,dExp){
+  var ci=Math.max(0,gRev-dExp), tax=maltaTaxSingle(ci), ssc=Math.min(ci,33984)*.15;
+  return {label:'Malta Self-Employed',ci:ci,tax:tax,ssc:ssc,total:tax+ssc,net:ci-tax-ssc,eff:ci>0?(tax+ssc)/ci*100:0,
+    rows:[['Gross Revenue (net VAT)',fmt(gRev),'var(--green)'],['Spese Deducibili (net VAT)',fmt(dExp),'var(--red)'],
+      ['Reddito Imponibile',fmt(ci),'var(--orange)'],['IRPEF (aliquote single 2026)',fmt(tax),''],
+      ['SSC Class 2 (15%)',fmt(ssc),''],['Totale Tasse',fmt(tax+ssc),'var(--orange)'],
+      ['Aliquota Effettiva',(ci>0?(tax+ssc)/ci*100:0).toFixed(1)+'%',''],['Netto dopo tasse',fmt(ci-tax-ssc),'var(--green)']]};
+}
+function calcMaltaLtd(gRev,dExp){
+  var profit=Math.max(0,gRev-dExp), corpTax=profit*.35, refund=corpTax*(6/7), netTax=corpTax-refund;
+  return {label:'Malta Ltd (imputation system)',ci:profit,tax:netTax,ssc:0,total:netTax,net:profit-netTax,eff:profit>0?netTax/profit*100:0,
+    rows:[['Gross Revenue (net VAT)',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+      ['Utile Aziendale',fmt(profit),'var(--orange)'],['Corporate Tax (35%)',fmt(corpTax),''],
+      ['Rimborso Azionista (6/7)','-'+fmt(refund),'var(--green)'],['Tax Effettiva Netta (≈5%)',fmt(netTax),'var(--orange)'],
+      ['Aliquota Effettiva',(profit>0?netTax/profit*100:0).toFixed(1)+'%',''],['Netto dopo tasse',fmt(profit-netTax),'var(--green)']]};
+}
+function calcDubaiSE(gRev,dExp){
+  var profit=Math.max(0,gRev-dExp), threshold=93750, taxable=Math.max(0,profit-threshold), tax=taxable*.09;
+  return {label:'Dubai Self-Employed (UAE CT)',ci:profit,tax:tax,ssc:0,total:tax,net:profit-tax,eff:profit>0?tax/profit*100:0,
+    rows:[['Gross Revenue (net VAT)',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+      ['Profitto Netto',fmt(profit),'var(--orange)'],['Soglia esente (AED 375k)',fmt(threshold),''],
+      ['Imponibile CT 9%',fmt(taxable),''],['UAE Corporate Tax (9%)',fmt(tax),'var(--orange)'],
+      ['No Personal Income Tax','0%','var(--green)'],['Netto dopo tasse',fmt(profit-tax),'var(--green)']]};
+}
+function calcDubaiLtdFZ(gRev,dExp){
+  var profit=Math.max(0,gRev-dExp);
+  return {label:'Dubai Ltd Free Zone (0% CT)',ci:profit,tax:0,ssc:0,total:0,net:profit,eff:0,
+    rows:[['Gross Revenue (net VAT)',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+      ['Profitto Netto',fmt(profit),'var(--orange)'],['CT Free Zone (Qualifying)',fmt(0),'var(--green)'],
+      ['No Personal Income Tax','0%','var(--green)'],['Aliquota Effettiva','0%','var(--green)'],
+      ['Costo annuo struttura FZ','~€3.000-8.000','var(--text2)'],['Netto dopo tasse',fmt(profit),'var(--green)']]};
+}
+function calcItalyPIVA(gRev,dExp){
+  if(gRev>85000){
+    var irpef=0; var b=gRev-dExp;
+    if(b<=15000)irpef=b*.23; else if(b<=28000)irpef=3450+(b-15000)*.25;
+    else if(b<=50000)irpef=6700+(b-28000)*.35; else irpef=14400+(b-50000)*.43;
+    var inps=(gRev-dExp)*.2607, irap=(gRev-dExp)*.039;
+    var total=irpef+inps+irap;
+    return {label:'IT P.IVA Ordinaria',ci:gRev-dExp,tax:irpef,ssc:inps+irap,total:total,net:gRev-dExp-total,eff:(gRev-dExp)>0?total/(gRev-dExp)*100:0,
+      rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+        ['Reddito Netto',fmt(gRev-dExp),'var(--orange)'],['IRPEF (progressiva)',fmt(irpef),''],
+        ['INPS Gestione Separata (26%)',fmt(inps),''],['IRAP (3.9%)',fmt(irap),''],
+        ['Totale Tasse+Contributi',fmt(total),'var(--orange)'],['Netto dopo tasse',fmt(gRev-dExp-total),'var(--green)']]};
+  }
+  var coeff=.78, base=gRev*coeff, inps=base*.2607, irpefBase=base-inps*.5, irpef=irpefBase*.15, total=irpef+inps;
+  return {label:'IT P.IVA Forfettaria (15%)',ci:base,tax:irpef,ssc:inps,total:total,net:gRev-total,eff:gRev>0?total/gRev*100:0,
+    rows:[['Gross Revenue (no deduzione spese)',fmt(gRev),'var(--green)'],['Coefficiente redditività (78%)',fmt(base),''],
+      ['INPS Gestione Separata (26%)',fmt(inps),'var(--red)'],['Base IRPEF (dopo ded. 50% INPS)',fmt(irpefBase),''],
+      ['IRPEF Forfettaria (15%)',fmt(irpef),'var(--orange)'],['Totale Tasse+Contributi',fmt(total),'var(--orange)'],
+      ['Aliquota su fatturato',gRev>0?(total/gRev*100).toFixed(1)+'%':'0%',''],['Netto',fmt(gRev-total),'var(--green)']]};
+}
+function getRegimeCalc(regime,gRev,dExp){
+  if(regime==='malta-se') return calcMaltaSE(gRev,dExp);
+  if(regime==='malta-ltd') return calcMaltaLtd(gRev,dExp);
+  if(regime==='dubai-se') return calcDubaiSE(gRev,dExp);
+  if(regime==='dubai-ltd') return calcDubaiLtdFZ(gRev,dExp);
+  return calcItalyPIVA(gRev,dExp);
+}
+function setRegime(r,btn){
+  currentRegime=r;
+  document.querySelectorAll('.regime-tab').forEach(function(b){b.classList.remove('active');});
+  if(btn)btn.classList.add('active');
+  renderTax();
+}
 function renderTax(){
-  var gRev=sum('entrateNet'), dExp=sum('usciteNet');
-  var ch=Math.max(0,gRev-dExp);
-  var tax=maltaTax(ch), ssc=Math.min(ch,33984)*0.15;
-  var eff=ch>0?tax/ch*100:0;
-  var el=document.getElementById('tax-rows');if(!el) return;
-  el.innerHTML=
-    taxRow('Gross Revenue (Net of VAT)',fmt(gRev),'var(--green)')+
-    taxRow('Deductible Expenses (Net of VAT)',fmt(dExp),'var(--red)')+
-    taxRow('Chargeable Income',fmt(ch),'var(--orange)')+
-    taxRow('Income Tax (Single rates 2026)',fmt(tax),'')+
-    taxRow('Effective Tax Rate',eff.toFixed(1)+'%','')+
-    taxRow('Class 2 SSC (15%)',fmt(ssc),'')+
-    taxRow('Total Tax + SSC',fmt(tax+ssc),'var(--orange)')+
-    taxRow('Net After Tax & SSC',fmt(ch-tax-ssc),'var(--green)');
+  var arr=getFilteredSummaryTxs();
+  var gRev=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
+  var dExp=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
+  var el=document.getElementById('tax-rows'); if(!el) return;
+  var calc=getRegimeCalc(currentRegime,gRev,dExp);
+  el.innerHTML=calc.rows.map(function(r){return taxRow(r[0],r[1],r[2]);}).join('');
 }
-function taxRow(lbl,val,color){
-  return '<div class="tax-row"><span class="tax-label">'+lbl+'</span><span class="tax-value" style="'+(color?'color:'+color:'')+'">'+val+'</span></div>';
+function taxRow(lbl,val,color){return '<div class="tax-row"><span class="tax-label">'+lbl+'</span><span class="tax-value" style="'+(color?'color:'+color:'')+'">'+val+'</span></div>';}
+
+// ── SIMULATOR ─────────────────────────────────────────────────────────────────
+function renderSimulator(){
+  var arr=getFilteredSummaryTxs();
+  var baseIn=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
+  var baseOut=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
+  var extraIn=parseFloat(document.getElementById('sim-extra-in').value)||0;
+  var extraOut=parseFloat(document.getElementById('sim-extra-out').value)||0;
+  var gRev=baseIn+extraIn, dExp=baseOut+extraOut;
+  var regimes=['malta-se','malta-ltd','dubai-se','dubai-ltd','italy-piva'];
+  var colors=['var(--accent)','var(--accent2)','var(--orange)','var(--green)','var(--red)'];
+  var el=document.getElementById('sim-results'); if(!el) return;
+  el.innerHTML='<div class="sim-grid">'+regimes.map(function(r,i){
+    var c=getRegimeCalc(r,gRev,dExp);
+    return '<div class="sim-col">'+
+      '<div class="sim-regime" style="background:'+colors[i]+'20;color:'+colors[i]+'">'+c.label.split(' ').slice(0,2).join(' ')+'</div>'+
+      '<div class="sim-row"><span style="color:var(--text2)">Totale tasse</span><span style="color:var(--red);font-weight:600">'+fmt(c.total)+'</span></div>'+
+      '<div class="sim-row"><span style="color:var(--text2)">Aliquota eff.</span><span style="font-weight:600">'+c.eff.toFixed(1)+'%</span></div>'+
+      '<div class="sim-row"><span style="color:var(--text2)">Netto</span><span style="color:var(--green);font-weight:600">'+fmt(c.net)+'</span></div>'+
+      '</div>';
+  }).join('')+'</div>';
 }
-function maltaTax(c){
-  if(c<=9100) return 0;
-  if(c<=14500) return (c-9100)*0.15;
-  if(c<=19500) return 810+(c-14500)*0.25;
-  if(c<=60000) return 2060+(c-19500)*0.25;
-  return 12235+(c-60000)*0.35;
-}
+
 
 function exportXLSX(){
   if(!txs.length){alert('Nessuna transazione.');return;}
@@ -638,20 +806,20 @@ function maltaTax(c){
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
 sb.auth.getSession().then(function(r) {
-  if (r.data && r.data.session) {
-    currentUser = r.data.session.user;
-    showApp();
-  } else {
-    document.getElementById('lock-screen').style.display = 'flex';
-    document.getElementById('app-content').style.display = 'none';
+  if(r.data&&r.data.session){currentUser=r.data.session.user;showApp();}
+  else{document.getElementById('lock-screen').style.display='flex';document.getElementById('app-content').style.display='none';}
+});
+sb.auth.onAuthStateChange(function(event,session){
+  if(event==='SIGNED_IN'&&session)currentUser=session.user;
+  if(event==='SIGNED_OUT')currentUser=null;
+});
+document.addEventListener('DOMContentLoaded',function(){
+  updateAmountSections();
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeEditModal();});
+  var dz=document.getElementById('dropzone');
+  if(dz){
+    dz.addEventListener('dragover',function(e){e.preventDefault();dz.classList.add('drag');});
+    dz.addEventListener('dragleave',function(){dz.classList.remove('drag');});
+    dz.addEventListener('drop',function(e){e.preventDefault();dz.classList.remove('drag');var f=e.dataTransfer.files[0];if(f)handleFile(f);});
   }
 });
-sb.auth.onAuthStateChange(function(event, session) {
-  if (event==='SIGNED_IN' && session) currentUser = session.user;
-  if (event==='SIGNED_OUT') currentUser = null;
-});
-document.addEventListener('keydown',function(e){if(e.key==='Escape')closeEditModal();});
-var dz=document.getElementById('dropzone');
-dz.addEventListener('dragover',function(e){e.preventDefault();dz.classList.add('drag');});
-dz.addEventListener('dragleave',function(){dz.classList.remove('drag');});
-dz.addEventListener('drop',function(e){e.preventDefault();dz.classList.remove('drag');var f=e.dataTransfer.files[0];if(f)handleFile(f);});
