@@ -67,14 +67,27 @@ function doLogout(){
   });
 }
 function showLockError(msg){var el=document.getElementById('lock-error');el.textContent=msg;el.style.display='';setTimeout(function(){el.style.display='none';},5000);}
-function showApp(){
+async function showApp(){
   document.getElementById('lock-screen').style.display='none';
   document.getElementById('app-content').style.display='';
   var b=document.getElementById('user-email-badge');if(b&&currentUser){b.textContent=currentUser.email;b.style.display='';}
   var lb=document.getElementById('logout-btn');if(lb)lb.style.display='';
   var hb=document.getElementById('hdr-badge');if(hb)hb.style.display='';
-  loadSettings().then(function(){loadInvoices();});
-  updateAmountSections();showTab('carica');
+  // Link guest if needed + check guest mode
+  await linkGuestIfNeeded();
+  await checkGuestMode();
+  if(isGuestMode&&adminUserId){
+    // Load admin invoices for guest
+    await loadSettings();
+    var r=await sb.from('invoices').select('*').eq('user_id',adminUserId).order('date',{ascending:true});
+    txs=(r.data||[]).map(dbToTx);
+    populateYearFilters();renderTable();renderStats('stats-a');updateCount();
+  } else {
+    await loadSettings();
+    await loadInvoices();
+  }
+  updateAmountSections();
+  showTab('carica');
 }
 
 // DB HELPERS
@@ -311,12 +324,17 @@ function updateCount(){var el=document.getElementById('tx-count');if(el)el.textC
 
 // TABS
 function showTab(t){
-  ['carica','registro','summary','settings'].forEach(function(id){
-    document.getElementById('tab-'+id).style.display=id===t?'':'none';
+  // Guest permission check
+  if(isGuestMode&&!canSeeSection(t)){
+    showMsg('Sezione non disponibile in modalita ospite.','error');return;
+  }
+  ['carica','registro','summary','settings','trading'].forEach(function(id){
+    var el=document.getElementById('tab-'+id);if(el)el.style.display=id===t?'':'none';
     var btn=document.getElementById('tab-btn-'+id);if(btn)btn.classList.toggle('active',id===t);
   });
   if(t==='registro'){renderTable();renderStats('stats-a');}
   if(t==='summary'){renderStats('stats-b');renderCat();renderTax();renderSimulator();renderAdvisory();}
+  if(t==='trading'){loadPositions();}
 }
 
 // PERIOD FILTERS
@@ -1408,14 +1426,7 @@ function canSeeSection(section){
   return guestPermissions.sections&&guestPermissions.sections[section]!==false;
 }
 
-// Override showTab for guest
-var _origShowTab=showTab;
-function showTab(t){
-  if(isGuestMode&&!canSeeSection(t)){
-    showMsg('Sezione non disponibile in modalita ospite.','error');return;
-  }
-  _origShowTab(t);
-}
+// Guest section check handled inside main showTab
 
 // Check if current user is a guest
 async function checkGuestMode(){
@@ -1534,19 +1545,7 @@ async function linkGuestIfNeeded(){
   }
 }
 
-// Override showApp to check guest mode
-var _origShowApp=showApp;
-async function showApp(){
-  _origShowApp();
-  await linkGuestIfNeeded();
-  await checkGuestMode();
-  // If guest, load admin's data
-  if(isGuestMode&&adminUserId){
-    var {data}=await sb.from('invoices').select('*').eq('user_id',adminUserId).order('date',{ascending:true});
-    txs=(data||[]).map(dbToTx);
-    populateYearFilters();renderTable();renderStats('stats-a');updateCount();
-  }
-}
+// Guest init handled inside main showApp
 
 
 // ============================================================
@@ -1557,12 +1556,7 @@ var positions = [];       // loaded from DB
 var priceCache = {};      // {ticker: {price, change, changePct, high52, low52, ts}}
 var txType = 'buy';
 
-// ── TABS: extend showTab ──────────────────────────────────────────────────────
-var _origShowTab2 = showTab;
-showTab = function(t){
-  _origShowTab2(t);
-  if(t==='trading'){ loadPositions(); }
-};
+// Trading tab handled in main showTab
 
 // ── DB: positions ─────────────────────────────────────────────────────────────
 async function loadPositions(){
