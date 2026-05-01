@@ -64,24 +64,30 @@ function doLogout(){
     document.getElementById('lock-email').value='';
     document.getElementById('lock-input').value='';
     ['user-email-badge','logout-btn','hdr-badge'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    appStarted=false; // allow re-login
   });
 }
 function showLockError(msg){var el=document.getElementById('lock-error');el.textContent=msg;el.style.display='';setTimeout(function(){el.style.display='none';},5000);}
 async function showApp(){
+  if(appStarted) return; // prevent recursive/multiple calls
+  appStarted=true;
   document.getElementById('lock-screen').style.display='none';
   document.getElementById('app-content').style.display='';
   var b=document.getElementById('user-email-badge');if(b&&currentUser){b.textContent=currentUser.email;b.style.display='';}
   var lb=document.getElementById('logout-btn');if(lb)lb.style.display='';
   var hb=document.getElementById('hdr-badge');if(hb)hb.style.display='';
-  // Link guest if needed + check guest mode
-  await linkGuestIfNeeded();
-  await checkGuestMode();
+  // Check guest access (only if migration2 was run)
+  try{
+    await linkGuestIfNeeded();
+    await checkGuestMode();
+  } catch(e){ console.log('Guest check skipped (table may not exist yet):', e.message); }
   if(isGuestMode&&adminUserId){
-    // Load admin invoices for guest
-    await loadSettings();
-    var r=await sb.from('invoices').select('*').eq('user_id',adminUserId).order('date',{ascending:true});
-    txs=(r.data||[]).map(dbToTx);
-    populateYearFilters();renderTable();renderStats('stats-a');updateCount();
+    try{
+      await loadSettings();
+      var r=await sb.from('invoices').select('*').eq('user_id',adminUserId).order('date',{ascending:true});
+      txs=(r.data||[]).map(dbToTx);
+      populateYearFilters();renderTable();renderStats('stats-a');updateCount();
+    }catch(e){console.error('Guest data load error:',e);}
   } else {
     await loadSettings();
     await loadInvoices();
@@ -1392,8 +1398,12 @@ sb.auth.getSession().then(function(r){
   else{document.getElementById('lock-screen').style.display='flex';document.getElementById('app-content').style.display='none';}
 });
 sb.auth.onAuthStateChange(function(event,session){
-  if(event==='SIGNED_IN'&&session)currentUser=session.user;
-  if(event==='SIGNED_OUT')currentUser=null;
+  if(event==='SIGNED_IN'&&session){
+    currentUser=session.user;
+    // Only call showApp if not already started (first login)
+    if(!appStarted) showApp();
+  }
+  if(event==='SIGNED_OUT'){currentUser=null;appStarted=false;}
 });
 document.addEventListener('DOMContentLoaded',function(){
   updateAmountSections();
@@ -1430,6 +1440,7 @@ function canSeeSection(section){
 
 // Check if current user is a guest
 async function checkGuestMode(){
+  if(isGuestMode) return; // already checked
   var {data,error}=await sb.from('guest_access').select('*').eq('guest_user_id',currentUser.id).eq('active',true).maybeSingle();
   if(data){
     isGuestMode=true;
