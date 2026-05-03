@@ -1500,6 +1500,92 @@ function drawSparkline(closes, width, height, color){
   return '<svg width="'+width+'" height="'+height+'"><polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5"/></svg>';
 }
 
+
+// ── ISIN TO TICKER CONVERSION ─────────────────────────────────────────────────
+// Uses OpenFIGI API (free, no key needed) to convert ISIN → Yahoo Finance ticker
+
+var isinCache = JSON.parse(localStorage.getItem('isin_cache') || '{}');
+
+async function isinToTicker(isin){
+  // Return if already cached
+  if(isinCache[isin]) return isinCache[isin];
+
+  // Manual map for common ISINs (instant, no API call needed)
+  var manual = {
+    'US0378331005':'AAPL',   'US88160R1014':'TSLA',   'US5949181045':'MSFT',
+    'US0231351067':'AMZN',   'US30303M1027':'META',   'US02079K3059':'GOOGL',
+    'US0846707026':'BRK-B',  'US92826C8394':'V',      'US57636Q1040':'MA',
+    'US1912161007':'KO',     'US4592001014':'IBM',     'US67066G1040':'NVDA',
+    'US70450Y1038':'PYPL',   'US0090661010':'ABNB',   'US4370761029':'HD',
+    'US4781601046':'JNJ',    'US91324P1021':'UNH',     'US7170811035':'PFE',
+    'US7475251036':'QCOM',   'US5128071082':'LLY',     'US1491231015':'CSCO',
+    'NL0010273215':'ASML.AS','GB0005405286':'BP.L',    'FR0000131104':'BNP.PA',
+    'DE0005140008':'DBK.DE', 'CH0012221716':'ABB.SW',  'GB00B10RZP78':'ULVR.L',
+    'IE00B4BNMY34':'IWDA.AS','IE00B5BMR087':'CSPX.L',  'IE00B3WJKG14':'EUNL.DE',
+    'LU0274208692':'VUSA.DE','IE00B3RBWM25':'VWRL.AS', 'IE00B52MJY50':'IUSA.DE',
+    'US9229087690':'VTI',    'US9219097683':'VT',      'US4642874329':'IVV',
+    'US4642872265':'IJH',    'US46432F8419':'EEM'
+  };
+  if(manual[isin]) {
+    isinCache[isin] = manual[isin];
+    saveIsinCache();
+    return manual[isin];
+  }
+
+  // Try OpenFIGI API
+  try{
+    var resp = await fetch('https://api.openfigi.com/v3/mapping', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify([{idType: 'ID_ISIN', idValue: isin, exchCode: 'US'}])
+    });
+    if(resp.ok){
+      var data = await resp.json();
+      if(data[0] && data[0].data && data[0].data[0]){
+        var ticker = data[0].data[0].ticker;
+        if(ticker){ isinCache[isin]=ticker; saveIsinCache(); return ticker; }
+      }
+    }
+    // Retry without exchange filter (for non-US)
+    resp = await fetch('https://api.openfigi.com/v3/mapping', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify([{idType: 'ID_ISIN', idValue: isin}])
+    });
+    if(resp.ok){
+      var data2 = await resp.json();
+      if(data2[0] && data2[0].data){
+        // Pick first result that has a ticker
+        for(var i=0; i<data2[0].data.length; i++){
+          var t = data2[0].data[i].ticker;
+          var exch = data2[0].data[i].exchCode || '';
+          if(t){
+            // Build Yahoo Finance format: ticker.EXCHANGE for non-US
+            var exchMap = {'LN':'L','NA':'AS','GR':'DE','FP':'PA','SW':'SW','IM':'MI'};
+            var suffix = exchMap[exch] ? '.'+exchMap[exch] : '';
+            var yahooTicker = t + suffix;
+            isinCache[isin] = yahooTicker;
+            saveIsinCache();
+            return yahooTicker;
+          }
+        }
+      }
+    }
+  } catch(e){ console.warn('OpenFIGI failed for', isin, e.message); }
+
+  // Fallback: use ISIN as-is (will fail price lookup but at least stores data)
+  console.warn('Could not convert ISIN:', isin);
+  return null;
+}
+
+function saveIsinCache(){
+  try{ localStorage.setItem('isin_cache', JSON.stringify(isinCache)); } catch(e){}
+}
+
+function isISIN(str){
+  return /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(str.trim());
+}
+
 // INIT — tutto dentro DOMContentLoaded per garantire che le variabili siano pronte
 document.addEventListener('DOMContentLoaded', function(){
   updateAmountSections();
@@ -1768,11 +1854,40 @@ var PERIOD_INTERVALS = {'1d':'5m','5d':'60m','1mo':'1d','3mo':'1d','6mo':'1d','1
 // Trading tab handled in main showTab
 
 // ── DB: positions ─────────────────────────────────────────────────────────────
+async function convertExistingISINs(){
+  // Convert any existing positions that have ISINs as tickers
+  var toConvert = positions.filter(function(p){ return isISIN(p.ticker); });
+  if(!toConvert.length) return;
+  showMsg('Conversione ISIN per ' + toConvert.length + ' titoli...', 'success');
+  for(var i=0; i<toConvert.length; i++){
+    var p = toConvert[i];
+    var converted = await isinToTicker(p.ticker);
+    if(converted && converted !== p.ticker){
+      await sb.from('trading_positions').update({ticker: converted}).eq('id', p.id);
+      console.log('Converted', p.ticker, '->', converted);
+    }
+    await new Promise(function(r){ setTimeout(r, 200); }); // rate limit
+  }
+  // Reload after conversions
+  var uid = isGuestMode ? adminUserId : currentUser.id;
+  var {data} = await sb.from('trading_positions').select('*').eq('user_id', uid).order('created_at');
+  positions = data || [];
+  renderPositions();
+}
+
 async function loadPositions(){
   var uid = isGuestMode ? adminUserId : currentUser.id;
   var {data,error} = await sb.from('trading_positions').select('*').eq('user_id', uid).order('created_at');
   if(error){ console.error(error); return; }
   positions = data || [];
+  // Auto-convert ISINs if any
+  var hasISINs = positions.some(function(p){ return isISIN(p.ticker); });
+  if(hasISINs){
+    await convertExistingISINs();
+    // After conversion, reload from DB
+    var r2 = await sb.from('trading_positions').select('*').eq('user_id', uid).order('created_at');
+    positions = r2.data || [];
+  }
   renderPositions();
   if(positions.length > 0){
     refreshAllPrices().then(function(){ updatePortfolioChart(); });
@@ -2411,37 +2526,62 @@ async function importPortfolioXLS(file){
     var priceParsed = parseAmountAndCurrency(row[cPrice]  || '0');
     var qty   = qtyParsed.value;
     var price = priceParsed.value;
-    // Currency: prefer explicit column, then from price cell, then qty cell, then default
     var detectedCurr = (cCurr ? String(row[cCurr]||'').trim() : null)
       || priceParsed.currency || qtyParsed.currency || 'USD';
     var type  = cType ? String(row[cType]||'stock').toLowerCase() : 'stock';
-    // Normalize type
     if(type.indexOf('etf')>=0) type='etf';
     else if(type.indexOf('bond')>=0||type.indexOf('obblig')>=0) type='bond';
     else if(type.indexOf('crypto')>=0||type.indexOf('crypt')>=0) type='crypto';
     else type='stock';
 
-    toUpsert.push({
-      user_id:       currentUser.id,
-      ticker:        ticker,
-      name:          cName ? String(row[cName]||'').trim() : '',
-      asset_type:    type,
-      quantity:      qty,
+    rawRows.push({
+      rawTicker: rawVal,
+      name:      cName ? String(row[cName]||'').trim() : '',
+      asset_type: type,
+      quantity:   qty,
       avg_buy_price: price,
-      currency:      detectedCurr
+      currency:  detectedCurr
     });
   });
 
-  if(!toUpsert.length){
-    alert('Nessuna riga valida trovata. Controlla che le celle non siano vuote.');
+  if(!rawRows.length){
+    alert('Nessuna riga valida trovata.');
     return;
+  }
+
+  // Convert ISINs to Yahoo Finance tickers
+  showMsg('Conversione ISIN in corso...', 'success');
+  var toUpsert = [];
+  var isinsFailed = [];
+  for(var ri = 0; ri < rawRows.length; ri++){
+    var rr = rawRows[ri];
+    var ticker = rr.rawTicker;
+    if(isISIN(ticker)){
+      var converted = await isinToTicker(ticker);
+      if(converted){
+        ticker = converted;
+      } else {
+        isinsFailed.push(rr.rawTicker + ' (' + (rr.name||'?') + ')');
+        ticker = rr.rawTicker; // keep ISIN as fallback
+      }
+    }
+    toUpsert.push({
+      user_id:       currentUser.id,
+      ticker:        ticker,
+      name:          rr.name,
+      asset_type:    rr.asset_type,
+      quantity:      rr.quantity,
+      avg_buy_price: rr.avg_buy_price,
+      currency:      rr.currency
+    });
   }
 
   var preview = toUpsert.slice(0,5).map(function(r){
     return r.ticker + ' x' + r.quantity + ' @ ' + r.avg_buy_price + ' ' + r.currency;
   }).join('\n');
+  var failNote = isinsFailed.length ? '\n\nISIN non convertiti (importati come ISIN):\n'+isinsFailed.slice(0,5).join('\n') : '';
 
-  if(!confirm('Importare/aggiornare '+toUpsert.length+' posizioni?\n\n'+preview+(toUpsert.length>5?'\n...':''))) return;
+  if(!confirm('Importare/aggiornare '+toUpsert.length+' posizioni?\n\n'+preview+(toUpsert.length>5?'\n...':'')+failNote)) return;
 
   var errors = [];
   var updated = 0, inserted = 0;
