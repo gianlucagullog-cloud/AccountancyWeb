@@ -129,11 +129,44 @@ function uploadInvoiceFile(file,invoiceId){
   });
 }
 function downloadInvoiceFile(t){
-  if(!t.filePath){alert('Nessun file allegato a questa fattura.');return;}
+  if(!t.filePath){
+    // Try localStorage fallback
+    var stored=localStorage.getItem('inv_file_'+t.id);
+    if(stored){try{var f=JSON.parse(stored);var a=document.createElement('a');a.href='data:'+f.type+';base64,'+f.b64;a.download=f.name;a.click();return;}catch(e){}}
+    alert('Nessun file allegato a questa fattura.');return;
+  }
   sb.storage.from('invoice-files').createSignedUrl(t.filePath,3600).then(function(r){
     if(r.error||!r.data){alert('Errore nel recupero del file.');return;}
-    var a=document.createElement('a');a.href=r.data.signedUrl;a.download=t.fileName||'fattura';a.target='_blank';a.click();
+    var a=document.createElement('a');a.href=r.data.signedUrl;a.download=t.fileName||'fattura';a.click();
   });
+}
+function viewInvoiceFile(t){
+  // Try Supabase Storage first
+  if(t&&t.filePath){
+    sb.storage.from('invoice-files').createSignedUrl(t.filePath,3600).then(function(r){
+      if(r.data&&r.data.signedUrl) window.open(r.data.signedUrl,'_blank');
+      else viewFromLocalStorage(t);
+    });
+    return;
+  }
+  viewFromLocalStorage(t);
+}
+function viewFromLocalStorage(t){
+  var stored=localStorage.getItem('inv_file_'+(t&&t.id));
+  if(!stored){alert('Nessun file allegato a questa fattura.');return;}
+  try{
+    var f=JSON.parse(stored);
+    var dataUrl='data:'+f.type+';base64,'+f.b64;
+    // Open in new tab
+    var w=window.open();
+    if(f.type&&f.type.indexOf('pdf')>=0){
+      w.document.write('<iframe src="'+dataUrl+'" style="width:100%;height:100%;border:none"></iframe>');
+    } else if(f.type&&f.type.indexOf('image')>=0){
+      w.document.write('<img src="'+dataUrl+'" style="max-width:100%">');
+    } else {
+      w.location.href=dataUrl;
+    }
+  }catch(e){alert('Errore apertura file.');}
 }
 
 // DATA FUNCTIONS
@@ -324,17 +357,25 @@ function importCSV(input){
 }
 
 // SETTINGS
+var DEFAULT_KEY='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';
+var DEFAULT_GCID='889043142197-tanccu5tm1mpg2bt40lood3rele3dsns.apps.googleusercontent.com';
+var DEFAULT_GFID='1UvOst1smuek8B5uMb0PfKlCtOqci3GHn';
+
 function loadSettings(){
   return sb.from('profile').select('*').maybeSingle().then(function(r){
     if(r.data){settings.name=r.data.name||'';settings.vat=r.data.vat_number||'';
       var sn=document.getElementById('s-name');if(sn)sn.value=settings.name;
       var sv=document.getElementById('s-vat');if(sv)sv.value=settings.vat;}
-    settings.key=localStorage.getItem('inv_key')||'';
-    settings.gclientid=localStorage.getItem('inv_gcid')||'';
-    settings.gfolderid=localStorage.getItem('inv_gfid')||'';
-    var sk=document.getElementById('s-key');if(sk&&settings.key)sk.value=settings.key;
-    var gi=document.getElementById('s-gclientid');if(gi&&settings.gclientid)gi.value=settings.gclientid;
-    var gf=document.getElementById('s-gfolderid');if(gf&&settings.gfolderid)gf.value=settings.gfolderid;
+    // Pre-fill defaults if not already saved
+    if(!localStorage.getItem('inv_key'))localStorage.setItem('inv_key',DEFAULT_KEY);
+    if(!localStorage.getItem('inv_gcid'))localStorage.setItem('inv_gcid',DEFAULT_GCID);
+    if(!localStorage.getItem('inv_gfid'))localStorage.setItem('inv_gfid',DEFAULT_GFID);
+    settings.key=localStorage.getItem('inv_key')||DEFAULT_KEY;
+    settings.gclientid=localStorage.getItem('inv_gcid')||DEFAULT_GCID;
+    settings.gfolderid=localStorage.getItem('inv_gfid')||DEFAULT_GFID;
+    var sk=document.getElementById('s-key');if(sk)sk.value=settings.key;
+    var gi=document.getElementById('s-gclientid');if(gi)gi.value=settings.gclientid;
+    var gf=document.getElementById('s-gfolderid');if(gf)gf.value=settings.gfolderid;
   });
 }
 function saveSettings(){
@@ -343,7 +384,7 @@ function saveSettings(){
   sb.from('profile').upsert({user_id:currentUser.id,name:settings.name,vat_number:settings.vat},{onConflict:'user_id'});
   localStorage.setItem('inv_key',settings.key);localStorage.setItem('inv_gcid',settings.gclientid);localStorage.setItem('inv_gfid',settings.gfolderid);
 }
-function cfg(k){return settings[k]||'';}
+function cfg(k){return settings[k]||(k==='key'?DEFAULT_KEY:k==='gclientid'?DEFAULT_GCID:k==='gfolderid'?DEFAULT_GFID:'');}
 function updateCount(){var el=document.getElementById('tx-count');if(el)el.textContent=txs.length+' transazioni';}
 
 // TABS
@@ -825,7 +866,8 @@ function renderTable(){
       '<td style="color:var(--text2);font-size:10.5px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.notes)+'</td>'+
       '<td style="white-space:nowrap">'+
         dupValidateBtn+
-        (hasFile?'<button class="btn btn-edit" style="font-size:10px;padding:4px 7px" onclick="downloadInvoiceFile(txs.find(function(x){return x.id==='+t.id+'}))" title="Scarica">&#128229;</button>':'')+
+        (hasFile?'<button class="btn btn-edit" style="font-size:10px;padding:4px 7px" onclick="downloadInvoiceFile(txs.find(function(x){return x.id==='+t.id+'}))" title="Scarica allegato">&#128229;</button>'+
+        '<button class="btn btn-secondary" style="font-size:10px;padding:4px 7px" onclick="viewInvoiceFile(txs.find(function(x){return x.id==='+t.id+'}))" title="Visualizza allegato">&#128065;</button>':'')+ 
         '<button class="btn btn-edit" onclick="editTx('+t.id+')" title="Modifica">&#9998;</button>'+
         '<button class="btn btn-danger" onclick="delTx('+t.id+')">&#215;</button>'+
       '</td></tr>';
@@ -1822,9 +1864,21 @@ async function fetchPrice(ticker, range, interval){
   var cached = priceCache[cacheKey];
   if(cached && Date.now()-cached.ts < (range==='1d'?60000:300000)) return cached;
   try{
-    var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?interval='+interval+'&range='+range;
-    var r=await fetch(url);
-    if(!r.ok) throw new Error('HTTP '+r.status);
+    // Try direct first, fallback to CORS proxy
+    var baseUrl='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?interval='+interval+'&range='+range;
+    var r;
+    try{
+      r=await fetch(baseUrl,{headers:{'Accept':'application/json'}});
+      if(!r.ok) throw new Error('direct failed');
+    } catch(corsErr){
+      // Fallback: use allorigins proxy
+      var proxy='https://api.allorigins.win/get?url='+encodeURIComponent(baseUrl);
+      r=await fetch(proxy);
+      if(!r.ok) throw new Error('proxy failed');
+      var wrapped=await r.json();
+      var proxied={ok:true,json:function(){return Promise.resolve(JSON.parse(wrapped.contents));}};
+      r=proxied;
+    }
     var d=await r.json();
     if(!d.result||!d.result[0]) throw new Error('No data');
     var meta=d.result[0].meta;
@@ -2116,17 +2170,30 @@ async function generateRecommendations(){
 
   var prompt='Sei un consulente finanziario esperto. Analizza questo portafoglio e fornisci consigli specifici su QUANDO e PERCHE\' comprare di piu o vendere per ciascuna posizione. Rispondi SOLO con un JSON array, nessun testo fuori dal JSON.\n\nPortafoglio:\n'+JSON.stringify(positionsSummary,null,2)+'\n\nRispondi ESATTAMENTE in questo formato JSON:\n[{"ticker":"AAPL","action":"buy|sell|hold|watch","urgency":"high|medium|low","title":"Titolo breve del consiglio","reason":"Spiegazione dettagliata in italiano (2-4 frasi) con riferimento ai numeri specifici","detail":"Dettaglio tecnico: livelli di prezzo target, percentuali, contesto di mercato","warning":"Eventuali rischi o avvertenze (opzionale, puo essere null)"}]';
 
+  // Check API key
+  var apiKey=cfg('key');
+  if(!apiKey){
+    el.innerHTML='<div style="color:var(--orange);font-size:12px;padding:12px;background:rgba(251,146,60,0.1);border-radius:8px">'+
+      '&#128273; Per i consigli AI inserisci la tua <b>Anthropic API Key</b> in Impostazioni (campo "Anthropic API Key"). '+
+      'Puoi ottenerla su <a href="https://console.anthropic.com" target="_blank" style="color:var(--accent)">console.anthropic.com</a>.</div>';
+    return;
+  }
   try{
     var response=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
       body:JSON.stringify({
         model:'claude-sonnet-4-20250514',
         max_tokens:2000,
         messages:[{role:'user',content:prompt}]
       })
     });
-    var data=await response.json();
+    var data;
+    if(response.json) data=await response.json();
+    else data=response;
+    if(!data.content||!data.content[0]){
+      throw new Error(data.error&&data.error.message?data.error.message:'Risposta API non valida');
+    }
     var text=data.content[0].text;
     // Parse JSON from response
     var jsonMatch=text.match(/\[[\s\S]*\]/);
