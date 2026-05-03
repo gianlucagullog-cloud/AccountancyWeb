@@ -1457,6 +1457,49 @@ function exportZIP(){
   _buildZIP(arr,q==='all'?'Anno':q);
 }
 
+
+// ── MISSING FUNCTIONS RESTORED ───────────────────────────────────────────────
+
+async function refreshAllPrices(){
+  var btn = document.getElementById('refresh-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Aggiornamento...'; }
+  var tickers = Array.from(new Set(positions.map(function(p){ return p.ticker; })));
+  for(var i = 0; i < tickers.length; i++){
+    await fetchPrice(tickers[i], tradingPeriod, tradingPeriodInterval);
+    await new Promise(function(r){ setTimeout(r, 150); });
+  }
+  if(btn){ btn.disabled = false; btn.textContent = '↻ Aggiorna prezzi'; }
+  var upd = document.getElementById('last-update');
+  if(upd) upd.textContent = 'Aggiornato: ' + new Date().toLocaleTimeString('it-IT');
+  renderPositions();
+}
+
+async function linkGuestIfNeeded(){
+  if(!currentUser) return;
+  try{
+    var email = currentUser.email;
+    var r = await sb.from('guest_access').select('id').eq('guest_email', email).is('guest_user_id', null);
+    if(r.data && r.data.length){
+      await sb.from('guest_access').update({guest_user_id: currentUser.id}).eq('guest_email', email).is('guest_user_id', null);
+    }
+  } catch(e){ console.log('linkGuestIfNeeded skipped:', e.message); }
+}
+
+function drawSparkline(closes, width, height, color){
+  if(!closes || closes.length < 2) return '';
+  var valid = closes.filter(function(c){ return c !== null && !isNaN(c); }).slice(-30);
+  if(valid.length < 2) return '';
+  var mn = Math.min.apply(null, valid);
+  var mx = Math.max.apply(null, valid);
+  var rng = mx - mn || 1;
+  var pts = valid.map(function(c, i){
+    var x = (i / (valid.length - 1) * width).toFixed(1);
+    var y = (height - (c - mn) / rng * height).toFixed(1);
+    return x + ',' + y;
+  }).join(' ');
+  return '<svg width="'+width+'" height="'+height+'"><polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5"/></svg>';
+}
+
 // INIT — tutto dentro DOMContentLoaded per garantire che le variabili siano pronte
 document.addEventListener('DOMContentLoaded', function(){
   updateAmountSections();
