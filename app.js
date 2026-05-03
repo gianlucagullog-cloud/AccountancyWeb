@@ -1505,6 +1505,7 @@ function drawSparkline(closes, width, height, color){
 // Uses OpenFIGI API (free, no key needed) to convert ISIN → Yahoo Finance ticker
 
 var isinCache = JSON.parse(localStorage.getItem('isin_cache') || '{}');
+var isinConversionDone = false;
 
 async function isinToTicker(isin){
   // Return if already cached
@@ -1532,40 +1533,29 @@ async function isinToTicker(isin){
     return manual[isin];
   }
 
-  // Try OpenFIGI API
+  // Try OpenFIGI API via CORS proxy
   try{
-    var resp = await fetch('https://api.openfigi.com/v3/mapping', {
+    var figiBody = JSON.stringify([{idType: 'ID_ISIN', idValue: isin}]);
+    var figiUrl  = 'https://api.openfigi.com/v3/mapping';
+    var proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(figiUrl);
+    var resp = await fetch(proxyUrl, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify([{idType: 'ID_ISIN', idValue: isin, exchCode: 'US'}])
+      body: figiBody
     });
     if(resp.ok){
       var data = await resp.json();
-      if(data[0] && data[0].data && data[0].data[0]){
-        var ticker = data[0].data[0].ticker;
-        if(ticker){ isinCache[isin]=ticker; saveIsinCache(); return ticker; }
-      }
-    }
-    // Retry without exchange filter (for non-US)
-    resp = await fetch('https://api.openfigi.com/v3/mapping', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify([{idType: 'ID_ISIN', idValue: isin}])
-    });
-    if(resp.ok){
-      var data2 = await resp.json();
-      if(data2[0] && data2[0].data){
-        // Pick first result that has a ticker
-        for(var i=0; i<data2[0].data.length; i++){
-          var t = data2[0].data[i].ticker;
-          var exch = data2[0].data[i].exchCode || '';
+      if(data[0] && data[0].data && data[0].data.length){
+        var exchMap = {'LN':'L','NA':'AS','GR':'DE','FP':'PA','SW':'SW','IM':'MI','SM':'MC','EB':'BR'};
+        for(var i=0; i<data[0].data.length; i++){
+          var t    = data[0].data[i].ticker;
+          var exch = data[0].data[i].exchCode || '';
           if(t){
-            // Build Yahoo Finance format: ticker.EXCHANGE for non-US
-            var exchMap = {'LN':'L','NA':'AS','GR':'DE','FP':'PA','SW':'SW','IM':'MI'};
             var suffix = exchMap[exch] ? '.'+exchMap[exch] : '';
             var yahooTicker = t + suffix;
             isinCache[isin] = yahooTicker;
             saveIsinCache();
+            console.log('ISIN', isin, '->', yahooTicker, 'via OpenFIGI');
             return yahooTicker;
           }
         }
@@ -1880,11 +1870,11 @@ async function loadPositions(){
   var {data,error} = await sb.from('trading_positions').select('*').eq('user_id', uid).order('created_at');
   if(error){ console.error(error); return; }
   positions = data || [];
-  // Auto-convert ISINs if any
+  // Auto-convert ISINs (only once per session)
   var hasISINs = positions.some(function(p){ return isISIN(p.ticker); });
-  if(hasISINs){
+  if(hasISINs && !isinConversionDone){
+    isinConversionDone = true;
     await convertExistingISINs();
-    // After conversion, reload from DB
     var r2 = await sb.from('trading_positions').select('*').eq('user_id', uid).order('created_at');
     positions = r2.data || [];
   }
@@ -2439,18 +2429,16 @@ async function importPortfolioFile(input){
 }
 
 async function importPortfolioXLS(file){
-  console.log('importPortfolioXLS called, XLSX available:', typeof XLSX !== 'undefined');
-  // Promisified FileReader
+  console.log('importPortfolioXLS called, XLSX:', typeof XLSX);
   var arrayBuf = await new Promise(function(resolve, reject){
     var reader = new FileReader();
     reader.onload  = function(e){ resolve(e.target.result); };
-    reader.onerror = function(e){ reject(new Error('Lettura file fallita')); };
+    reader.onerror = function()  { reject(new Error('Lettura fallita')); };
     reader.readAsArrayBuffer(file);
   });
 
   var rows;
   try{
-    // Try XLSX first
     if(typeof XLSX === 'undefined') throw new Error('Libreria XLSX non caricata');
     var data = new Uint8Array(arrayBuf);
     var ext  = file.name.split('.').pop().toLowerCase();
@@ -2465,28 +2453,25 @@ async function importPortfolioXLS(file){
     ws   = wb.Sheets[wb.SheetNames[0]];
     rows = XLSX.utils.sheet_to_json(ws, {defval:'', raw:false});
   } catch(err){
-    alert('Errore lettura file: '+err.message);
+    alert('Errore lettura file: ' + err.message);
     return;
   }
 
   if(!rows || !rows.length){
-    alert('File vuoto o formato non riconosciuto. Assicurati che la prima riga contenga le intestazioni (es. Ticker, Quantity, Avg Price).');
+    alert('File vuoto. Assicurati che la prima riga abbia le intestazioni.');
     return;
   }
 
-  // Column detection - flexible
+  // Column detection
   var sample = rows[0];
   function col(names){
     var found = null;
     Object.keys(sample).forEach(function(k){
       var kl = k.toLowerCase().trim();
-      names.forEach(function(n){
-        if(!found && kl.indexOf(n.toLowerCase()) >= 0) found = k;
-      });
+      names.forEach(function(n){ if(!found && kl.indexOf(n.toLowerCase())>=0) found=k; });
     });
     return found;
   }
-
   var cTicker = col(['ticker','symbol','isin','codice','titolo','asset','stock','strumento']);
   var cName   = col(['name','nome','description','descrizione','company','issuer','emittente']);
   var cType   = col(['type','tipo','asset type','category','categoria','classe']);
@@ -2494,58 +2479,53 @@ async function importPortfolioXLS(file){
   var cPrice  = col(['avg price','average price','prezzo medio','buy price','costo medio','avg cost','carico','prezzo di carico','prezzo acquisto','prezzo unitario']);
   var cCurr   = col(['currency','valuta','ccy','divisa']);
 
-  console.log('Columns detected:', {cTicker, cName, cType, cQty, cPrice, cCurr});
-  console.log('Sample row:', sample);
+  console.log('Columns:', {cTicker,cName,cType,cQty,cPrice,cCurr}, 'sample:', sample);
 
   if(!cTicker){
-    var available = Object.keys(sample).join(', ');
-    alert('Colonna Ticker/Symbol non trovata.\n\nColonne trovate nel file: '+available+'\n\nAssicurati che ci sia una colonna con nome "Ticker" o "Symbol".');
+    alert('Colonna Ticker/ISIN non trovata.\nColonne presenti: ' + Object.keys(sample).join(', '));
     return;
   }
 
-  var toUpsert = [];
-  rows.forEach(function(row){
-    var ticker = String(row[cTicker]||'').trim().toUpperCase().replace(/[^A-Z0-9.-]/g,'');
-    if(!ticker || ticker.length < 1) return;
-    // Extract numeric value AND currency symbol from the same cell
-    // e.g. "EUR 219.00", "$ 450,50", "219.00 USD", "€150"
-    function parseAmountAndCurrency(raw){
-      var s = String(raw||'0').trim();
-      var currMatch = s.match(/([A-Z]{3}|[$€£¥₹₩])/);
-      var detectedCurr = null;
-      if(currMatch){
-        var sym = currMatch[1];
-        var symMap = {'$':'USD','€':'EUR','£':'GBP','¥':'JPY','₹':'INR','₩':'KRW'};
-        detectedCurr = symMap[sym] || sym;
-      }
-      var num = parseFloat(s.replace(/[^0-9.,\-]/g,'').replace(',','.')) || 0;
-      return {value: num, currency: detectedCurr};
+  // Helper: extract number + currency from a cell like "EUR 219.00" or "$ 450,50"
+  function parseCell(raw){
+    var s = String(raw||'0').trim();
+    var currMatch = s.match(/([A-Z]{3}|[$\u20ac\xa3\xa5])/);
+    var detCurr = null;
+    if(currMatch){
+      var sym = currMatch[1];
+      var symMap = {'$':'USD','\u20ac':'EUR','\xa3':'GBP','\xa5':'JPY'};
+      detCurr = symMap[sym] || sym;
     }
+    var num = parseFloat(s.replace(/[^0-9.,\-]/g,'').replace(',','.')) || 0;
+    return {value:num, currency:detCurr};
+  }
 
-    var qtyParsed   = parseAmountAndCurrency(row[cQty]   || '0');
-    var priceParsed = parseAmountAndCurrency(row[cPrice]  || '0');
-    var qty   = qtyParsed.value;
-    var price = priceParsed.value;
-    var detectedCurr = (cCurr ? String(row[cCurr]||'').trim() : null)
-      || priceParsed.currency || qtyParsed.currency || 'USD';
-    var type  = cType ? String(row[cType]||'stock').toLowerCase() : 'stock';
-    if(type.indexOf('etf')>=0) type='etf';
+  // Build rawRows
+  var rawRows = [];
+  rows.forEach(function(row){
+    var rawVal = String(row[cTicker]||'').trim().toUpperCase();
+    if(!rawVal) return;
+    var qtyP   = parseCell(row[cQty]   || '0');
+    var priceP = parseCell(row[cPrice] || '0');
+    var detCurr = (cCurr ? String(row[cCurr]||'').trim() : null)
+      || priceP.currency || qtyP.currency || 'USD';
+    var type = cType ? String(row[cType]||'stock').toLowerCase() : 'stock';
+    if(type.indexOf('etf')>=0)         type='etf';
     else if(type.indexOf('bond')>=0||type.indexOf('obblig')>=0) type='bond';
-    else if(type.indexOf('crypto')>=0||type.indexOf('crypt')>=0) type='crypto';
-    else type='stock';
-
+    else if(type.indexOf('crypto')>=0) type='crypto';
+    else                               type='stock';
     rawRows.push({
-      rawTicker: rawVal,
-      name:      cName ? String(row[cName]||'').trim() : '',
-      asset_type: type,
-      quantity:   qty,
-      avg_buy_price: price,
-      currency:  detectedCurr
+      rawTicker:     rawVal,
+      name:          cName ? String(row[cName]||'').trim() : '',
+      asset_type:    type,
+      quantity:      qtyP.value,
+      avg_buy_price: priceP.value,
+      currency:      detCurr
     });
   });
 
   if(!rawRows.length){
-    alert('Nessuna riga valida trovata.');
+    alert('Nessuna riga valida trovata. Controlla che le celle non siano vuote.');
     return;
   }
 
@@ -2558,12 +2538,8 @@ async function importPortfolioXLS(file){
     var ticker = rr.rawTicker;
     if(isISIN(ticker)){
       var converted = await isinToTicker(ticker);
-      if(converted){
-        ticker = converted;
-      } else {
-        isinsFailed.push(rr.rawTicker + ' (' + (rr.name||'?') + ')');
-        ticker = rr.rawTicker; // keep ISIN as fallback
-      }
+      if(converted) ticker = converted;
+      else          isinsFailed.push(rr.rawTicker + ' (' + (rr.name||'?') + ')');
     }
     toUpsert.push({
       user_id:       currentUser.id,
@@ -2579,35 +2555,30 @@ async function importPortfolioXLS(file){
   var preview = toUpsert.slice(0,5).map(function(r){
     return r.ticker + ' x' + r.quantity + ' @ ' + r.avg_buy_price + ' ' + r.currency;
   }).join('\n');
-  var failNote = isinsFailed.length ? '\n\nISIN non convertiti (importati come ISIN):\n'+isinsFailed.slice(0,5).join('\n') : '';
+  var failNote = isinsFailed.length
+    ? '\n\nISIN non convertiti:\n' + isinsFailed.slice(0,5).join('\n') : '';
 
-  if(!confirm('Importare/aggiornare '+toUpsert.length+' posizioni?\n\n'+preview+(toUpsert.length>5?'\n...':'')+failNote)) return;
+  if(!confirm('Importare/aggiornare ' + toUpsert.length + ' posizioni?\n\n' + preview +
+    (toUpsert.length>5?'\n...':'') + failNote)) return;
 
-  var errors = [];
-  var updated = 0, inserted = 0;
-  for(var i = 0; i < toUpsert.length; i++){
+  var errors=[], updated=0, inserted=0;
+  for(var i=0; i<toUpsert.length; i++){
     var row = toUpsert[i];
-    var existing = positions.find(function(p){ return p.ticker === row.ticker; });
-    var res;
-    if(existing){
-      res = await sb.from('trading_positions').update({
-        quantity:      row.quantity,
-        avg_buy_price: row.avg_buy_price,
-        name:          row.name || existing.name,
-        asset_type:    row.asset_type || existing.asset_type,
-        currency:      row.currency || existing.currency
-      }).eq('id', existing.id);
-      if(!res.error) updated++;
-    } else {
-      res = await sb.from('trading_positions').insert(row);
-      if(!res.error) inserted++;
-    }
-    if(res.error) errors.push(row.ticker + ': ' + res.error.message);
+    var existing = positions.find(function(p){ return p.ticker===row.ticker; });
+    var res = existing
+      ? await sb.from('trading_positions').update({
+          quantity:row.quantity, avg_buy_price:row.avg_buy_price,
+          name:row.name||existing.name, asset_type:row.asset_type||existing.asset_type,
+          currency:row.currency||existing.currency
+        }).eq('id', existing.id)
+      : await sb.from('trading_positions').insert(row);
+    if(res.error) errors.push(row.ticker+': '+res.error.message);
+    else existing ? updated++ : inserted++;
   }
 
   var msg = inserted + ' nuove, ' + updated + ' aggiornate.';
-  if(errors.length) alert('Import completato con errori.\n'+msg+'\n\nErrori:\n'+errors.slice(0,5).join('\n'));
-  else showMsg('Import riuscito: ' + msg, 'success');
+  if(errors.length) alert('Import con errori.\n'+msg+'\n\n'+errors.slice(0,5).join('\n'));
+  else showMsg('Import riuscito: '+msg, 'success');
   await loadPositions();
 }
 
