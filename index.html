@@ -581,6 +581,18 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
 .price-up{color:var(--green);font-size:11px}
 .price-down{color:var(--red);font-size:11px}
 @media(max-width:600px){.pos-grid{grid-template-columns:1fr}}
+
+/* TRADING TABLE */
+.reg-table th{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);padding:8px 10px;text-align:right;border-bottom:1.5px solid var(--border);white-space:nowrap}
+.reg-table th:nth-child(1),.reg-table th:nth-child(2),.reg-table th:nth-child(3),.reg-table th:nth-child(4){text-align:left}
+.reg-table td{padding:9px 10px;font-size:12px;text-align:right;border-bottom:1px solid var(--border);vertical-align:middle;white-space:nowrap}
+.reg-table td:nth-child(1),.reg-table td:nth-child(2),.reg-table td:nth-child(3),.reg-table td:nth-child(4){text-align:left}
+.reg-table tr:last-child td{border-bottom:none}
+.reg-table tr:hover td{background:var(--surface2)}
+.reg-table tr.pos-selected td{background:rgba(79,70,229,0.06)}
+.ticker-cell{font-weight:700;font-size:13px;color:var(--text)}
+.import-drop{border:2px dashed var(--border);border-radius:var(--radius);padding:20px;text-align:center;font-size:12px;color:var(--text2);margin-bottom:12px;transition:border-color .2s}
+.import-drop.drag-over{border-color:var(--accent);background:var(--accent-light)}
 </style>
 </head>
 <body>
@@ -892,12 +904,18 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
 
 <!-- TRADING -->
 <div id="tab-trading" style="display:none">
-  <div class="stats" id="trading-stats"></div>
+
+  <!-- Stats bar -->
+  <div class="stats" id="trading-stats" style="margin-bottom:12px"></div>
 
   <!-- Toolbar -->
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
     <button class="btn btn-primary" onclick="openAddPosition()" style="font-size:12px">+ Aggiungi</button>
-    <button class="btn btn-secondary" onclick="refreshAllPrices()" id="refresh-btn" style="font-size:12px">&#8635; Prezzi</button>
+    <button class="btn btn-secondary" onclick="refreshAllPrices()" id="refresh-btn" style="font-size:12px">&#8635; Aggiorna prezzi</button>
+    <label class="btn btn-secondary" style="cursor:pointer;font-size:12px">
+      &#128196; Importa XLS/PDF
+      <input type="file" accept=".xlsx,.xls,.pdf,.csv" style="display:none" onchange="importPortfolioFile(this)">
+    </label>
     <span id="last-update" style="font-size:10.5px;color:var(--text3)"></span>
     <div style="flex:1"></div>
     <select id="pos-filter-type" onchange="renderPositions()" style="font-size:12px;padding:5px 8px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--font)">
@@ -911,118 +929,76 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
     </select>
   </div>
 
-  <!-- Period selector + multi-select comparison -->
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;box-shadow:var(--shadow)">
+  <!-- Period pills + compare -->
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px">
     <span style="font-size:11px;color:var(--text2);font-weight:600">Periodo:</span>
     <div style="display:flex;gap:3px;flex-wrap:wrap">
-      <button class="period-pill active" data-range="1d"   onclick="setTradingPeriod('1d',this)">1G</button>
-      <button class="period-pill" data-range="5d"   onclick="setTradingPeriod('5d',this)">1S</button>
-      <button class="period-pill" data-range="1mo"  onclick="setTradingPeriod('1mo',this)">1M</button>
-      <button class="period-pill" data-range="3mo"  onclick="setTradingPeriod('3mo',this)">3M</button>
-      <button class="period-pill" data-range="6mo"  onclick="setTradingPeriod('6mo',this)">6M</button>
-      <button class="period-pill" data-range="1y"   onclick="setTradingPeriod('1y',this)">1A</button>
-      <button class="period-pill" data-range="5y"   onclick="setTradingPeriod('5y',this)">5A</button>
+      <button class="period-pill active" data-range="1d"  onclick="setTradingPeriod('1d',this)">1G</button>
+      <button class="period-pill"        data-range="5d"  onclick="setTradingPeriod('5d',this)">1S</button>
+      <button class="period-pill"        data-range="1mo" onclick="setTradingPeriod('1mo',this)">1M</button>
+      <button class="period-pill"        data-range="3mo" onclick="setTradingPeriod('3mo',this)">3M</button>
+      <button class="period-pill"        data-range="6mo" onclick="setTradingPeriod('6mo',this)">6M</button>
+      <button class="period-pill"        data-range="1y"  onclick="setTradingPeriod('1y',this)">1A</button>
+      <button class="period-pill"        data-range="5y"  onclick="setTradingPeriod('5y',this)">5A</button>
     </div>
-    <div class="pill-sep" style="height:18px"></div>
-    <span style="font-size:11px;color:var(--text2)">Compara: seleziona uno o piu titoli</span>
-    <button class="btn btn-secondary" id="compare-btn" style="font-size:11px;display:none" onclick="openCompareChart()">&#128200; Confronta selezionati</button>
-    <button class="btn btn-secondary" style="font-size:11px" onclick="deselectAllPos()">Deseleziona</button>
+    <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+      <button class="btn btn-secondary" style="font-size:11px" onclick="deselectAllPos()">Deseleziona tutto</button>
+      <button class="btn btn-secondary" id="compare-btn" style="font-size:11px;display:none" onclick="openCompareChart()">&#128200; Confronta selezionati</button>
+    </div>
   </div>
 
-  <!-- Compare chart panel -->
-  <div id="compare-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;margin-bottom:14px;box-shadow:var(--shadow)">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <h3 style="font-size:13px;font-weight:700;margin:0">Confronto Prezzi — <span id="compare-period-label">1 Giorno</span></h3>
-      <button class="btn btn-secondary" style="font-size:11px" onclick="document.getElementById('compare-panel').style.display='none'">&#215; Chiudi</button>
+  <!-- CHART PANEL - always visible at top, updates with selection -->
+  <div id="compare-panel" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;margin-bottom:14px;box-shadow:var(--shadow)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <h3 style="font-size:13px;font-weight:700;margin:0" id="chart-title">&#128200; Andamento Portafoglio — <span id="compare-period-label">1 Giorno</span></h3>
+      <div id="compare-legend" style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px"></div>
     </div>
-    <div id="compare-legend" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;font-size:11px"></div>
-    <svg id="compare-svg" width="100%" height="200" style="display:block"></svg>
-    <div id="compare-stats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-top:12px"></div>
+    <svg id="compare-svg" width="100%" height="180" style="display:block;border-radius:6px"></svg>
+    <div id="compare-stats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-top:12px"></div>
   </div>
 
-  <!-- Portfolio grid -->
-  <div class="pos-grid" id="pos-grid"></div>
-  <div id="pos-empty" style="display:none;text-align:center;padding:50px;color:var(--text2)">
-    <div style="font-size:32px;margin-bottom:12px">&#128200;</div>
-    <p>Nessuna posizione. Clicca "+ Aggiungi posizione" per iniziare.</p>
+  <!-- PORTFOLIO TABLE (horizontal register view) -->
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);margin-bottom:14px">
+    <div class="table-wrap">
+      <table class="reg-table" style="width:100%">
+        <thead>
+          <tr>
+            <th style="width:32px"><input type="checkbox" id="pos-cb-all" onchange="toggleAllPositions(this)"></th>
+            <th>Ticker</th>
+            <th>Nome</th>
+            <th>Tipo</th>
+            <th>Prezzo</th>
+            <th>Var. giorno</th>
+            <th>Var. periodo</th>
+            <th>Qtà</th>
+            <th>P.Medio</th>
+            <th>Valore</th>
+            <th>P&amp;L</th>
+            <th>P&amp;L %</th>
+            <th>Max</th>
+            <th>Min</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="pos-tbody"></tbody>
+      </table>
+    </div>
+    <div id="pos-empty" style="display:none;text-align:center;padding:40px;color:var(--text3)">
+      <div style="font-size:28px;margin-bottom:8px">&#128200;</div>
+      <p>Nessuna posizione. Clicca "+ Aggiungi" o importa un file XLS/PDF.</p>
+    </div>
   </div>
 
   <!-- AI Recommendations -->
-  <div id="ai-rec-panel" style="display:none;margin-top:20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow)">
+  <div id="ai-rec-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
       <h3 style="font-family:var(--font-display);font-weight:700;font-size:14px;margin:0">&#129504; Analisi AI — Consigli su quando comprare o vendere</h3>
       <button class="btn btn-secondary" onclick="generateRecommendations()" style="font-size:11px">Aggiorna analisi</button>
     </div>
     <div id="ai-rec-content"></div>
   </div>
-</div>
 
-<!-- ADD/EDIT POSITION MODAL -->
-<div id="pos-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2000;display:none;align-items:center;justify-content:center">
-  <div class="modal-box" style="max-width:480px;width:94vw">
-    <h3 id="pos-modal-title" style="font-size:15px;margin-bottom:18px">Aggiungi posizione</h3>
-    <input type="hidden" id="pos-edit-id">
-    <div class="form-grid" style="grid-template-columns:1fr 1fr">
-      <div class="form-group full"><label>Ticker Symbol *</label><input id="pos-ticker" placeholder="es. AAPL, BTC-USD, VOO" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"></div>
-      <div class="form-group"><label>Nome</label><input id="pos-name" placeholder="es. Apple Inc."></div>
-      <div class="form-group"><label>Tipo</label>
-        <select id="pos-type">
-          <option value="stock">Stock</option>
-          <option value="etf">ETF</option>
-          <option value="bond">Bond</option>
-          <option value="crypto">Crypto</option>
-          <option value="commodity">Commodity</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Quantita</label><input type="number" id="pos-qty" placeholder="0" step="any" min="0"></div>
-      <div class="form-group"><label>Prezzo medio acquisto</label><input type="number" id="pos-avgprice" placeholder="0.00" step="any" min="0"></div>
-      <div class="form-group"><label>Valuta</label>
-        <select id="pos-currency">
-          <option value="USD">USD</option>
-          <option value="EUR">EUR</option>
-          <option value="GBP">GBP</option>
-          <option value="CHF">CHF</option>
-          <option value="BTC">BTC</option>
-        </select>
-      </div>
-      <div class="form-group full"><label>Note</label><input id="pos-notes" placeholder="Note opzionali"></div>
-    </div>
-    <div class="form-actions">
-      <button class="btn btn-secondary" onclick="closePosModal()">Annulla</button>
-      <button class="btn btn-primary" onclick="savePosition()">Salva</button>
-    </div>
-  </div>
 </div>
-
-<!-- TRANSACTION MODAL -->
-<div id="tx-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2001;align-items:center;justify-content:center">
-  <div class="modal-box" style="max-width:400px;width:94vw">
-    <h3 id="tx-modal-title" style="font-size:15px;margin-bottom:18px">Registra transazione</h3>
-    <input type="hidden" id="tx-pos-id">
-    <div class="form-grid" style="grid-template-columns:1fr 1fr">
-      <div class="form-group full">
-        <label>Tipo</label>
-        <div style="display:flex;gap:8px">
-          <button id="tx-buy-btn" class="btn btn-primary" style="flex:1" onclick="setTxType('buy')">ACQUISTO</button>
-          <button id="tx-sell-btn" class="btn btn-secondary" style="flex:1" onclick="setTxType('sell')">VENDITA</button>
-        </div>
-        <input type="hidden" id="tx-type" value="buy">
-      </div>
-      <div class="form-group"><label>Quantita</label><input type="number" id="tx-qty" placeholder="0" step="any" min="0"></div>
-      <div class="form-group"><label>Prezzo unitario</label><input type="number" id="tx-price" placeholder="0.00" step="any" min="0"></div>
-      <div class="form-group"><label>Data</label><input type="date" id="tx-date"></div>
-      <div class="form-group"><label>Commissioni</label><input type="number" id="tx-fees" placeholder="0.00" step="any" min="0" value="0"></div>
-      <div class="form-group full"><label>Note</label><input id="tx-notes" placeholder=""></div>
-    </div>
-    <div id="tx-summary" style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 14px;font-size:12px;margin-bottom:14px;display:none"></div>
-    <div class="form-actions">
-      <button class="btn btn-secondary" onclick="closeTxModal()">Annulla</button>
-      <button class="btn btn-primary" onclick="saveTransaction2()">Salva transazione</button>
-    </div>
-  </div>
-</div>
-
 <!-- UTENTI -->
 <div id="tab-utenti" style="display:none">
 

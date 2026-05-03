@@ -1731,7 +1731,9 @@ async function loadPositions(){
   if(error){ console.error(error); return; }
   positions = data || [];
   renderPositions();
-  if(positions.length > 0) refreshAllPrices();
+  if(positions.length > 0){
+    refreshAllPrices().then(function(){ updatePortfolioChart(); });
+  }
 }
 
 async function savePosition(){
@@ -1938,8 +1940,9 @@ function togglePosSelect(ticker){
   if(selectedPosTickers.has(ticker)) selectedPosTickers.delete(ticker);
   else selectedPosTickers.add(ticker);
   var btn=document.getElementById('compare-btn');
-  if(btn) btn.style.display=selectedPosTickers.size>1?'':'none';
+  if(btn) btn.style.display=selectedPosTickers.size>0?'':'none';
   renderPositions();
+  updatePortfolioChart();
 }
 function deselectAllPos(){
   selectedPosTickers.clear();
@@ -1948,213 +1951,127 @@ function deselectAllPos(){
   renderPositions();
 }
 
-async function openCompareChart(){
-  if(selectedPosTickers.size<1) return;
-  var panel=document.getElementById('compare-panel');
-  if(panel) panel.style.display='';
-  var lbl=document.getElementById('compare-period-label');
-  if(lbl) lbl.textContent=PERIOD_LABELS[tradingPeriod]||tradingPeriod;
+async function updatePortfolioChart(){
+  // Determine which tickers to show: selected or all
+  var tickers = selectedPosTickers.size > 0
+    ? Array.from(selectedPosTickers)
+    : positions.map(function(p){ return p.ticker; });
 
-  var colors=['#4f46e5','#16a34a','#dc2626','#d97706','#0891b2','#7c3aed','#db2777'];
-  var tickers=Array.from(selectedPosTickers);
-  var allData=[];
+  tickers = tickers.filter(function(t){ return positions.find(function(p){ return p.ticker === t; }); });
+  if(!tickers.length) return;
 
-  // Fetch all data
-  for(var i=0;i<tickers.length;i++){
-    var d=await fetchPrice(tickers[i],tradingPeriod,tradingPeriodInterval);
-    if(d) allData.push({ticker:tickers[i],data:d,color:colors[i%colors.length]});
+  var title = document.getElementById('chart-title');
+  var lbl   = document.getElementById('compare-period-label');
+  if(lbl) lbl.textContent = PERIOD_LABELS[tradingPeriod] || tradingPeriod;
+  if(title) title.innerHTML = '&#128200; ' +
+    (selectedPosTickers.size > 0 ? tickers.join(', ') : 'Portafoglio completo') +
+    ' — <span id="compare-period-label">' + (PERIOD_LABELS[tradingPeriod] || tradingPeriod) + '</span>';
+
+  var colors = ['#4f46e5','#16a34a','#dc2626','#d97706','#0891b2','#7c3aed','#db2777','#059669','#ea580c'];
+
+  // Fetch data for all tickers
+  var allData = [];
+  for(var i = 0; i < tickers.length; i++){
+    var d = priceCache[tickers[i] + '_' + tradingPeriod] || priceCache[tickers[i]];
+    if(d) allData.push({ ticker: tickers[i], data: d, color: colors[i % colors.length] });
   }
+  if(!allData.length) return;
 
-  // Build legend
-  var legend=document.getElementById('compare-legend');
-  if(legend) legend.innerHTML=allData.map(function(a){
-    var chg=a.data.periodChangePct;
-    return '<span style="display:flex;align-items:center;gap:5px">'+
-      '<span style="width:12px;height:3px;background:'+a.color+';display:inline-block;border-radius:2px"></span>'+
-      '<b>'+a.ticker+'</b>'+
-      '<span style="color:'+(chg>=0?'var(--green)':'var(--red)')+'">'+(chg>=0?'+':'')+chg.toFixed(2)+'%</span>'+
-    '</span>';
+  // Legend
+  var legend = document.getElementById('compare-legend');
+  if(legend) legend.innerHTML = allData.map(function(a){
+    var chg = a.data.periodChangePct;
+    return '<span style="display:flex;align-items:center;gap:4px">' +
+      '<span style="width:14px;height:3px;background:' + a.color + ';display:inline-block;border-radius:2px"></span>' +
+      '<b>' + a.ticker + '</b>' +
+      '<span style="color:' + (chg >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</span>' +
+      '</span>';
   }).join('');
 
-  // Draw normalized SVG chart
-  var svg=document.getElementById('compare-svg');
-  if(!svg) return;
-  var W=svg.parentElement.offsetWidth||700, H=200;
-  svg.setAttribute('viewBox','0 0 '+W+' '+H);
-  svg.innerHTML='';
+  // Draw SVG chart (normalized % from start)
+  var svgEl = document.getElementById('compare-svg');
+  if(!svgEl) return;
+  var W = svgEl.parentElement ? svgEl.parentElement.offsetWidth - 40 : 700;
+  var H = 180;
+  svgEl.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svgEl.innerHTML = '';
 
-  // Grid lines
-  [0,25,50,75,100].forEach(function(pct){
-    var y=H-pct/100*(H-20)-10;
-    var line=document.createElementNS('http://www.w3.org/2000/svg','line');
-    line.setAttribute('x1',0);line.setAttribute('x2',W);line.setAttribute('y1',y);line.setAttribute('y2',y);
-    line.setAttribute('stroke','#e5e7eb');line.setAttribute('stroke-width','1');
-    svg.appendChild(line);
+  var allPcts = [];
+  allData.forEach(function(a){
+    var cls = (a.data.closes || []).filter(function(c){ return c !== null && !isNaN(c); });
+    if(cls.length < 2) return;
+    var first = cls[0];
+    cls.forEach(function(c){ allPcts.push((c - first) / first * 100); });
+  });
+
+  var minPct = allPcts.length ? Math.min.apply(null, allPcts) : -5;
+  var maxPct = allPcts.length ? Math.max.apply(null, allPcts) : 5;
+  var rng = (maxPct - minPct) || 10;
+  minPct -= rng * 0.1; maxPct += rng * 0.1; rng = maxPct - minPct;
+
+  // Grid
+  [0, 25, 50, 75, 100].forEach(function(pct){
+    var y = H - (pct / 100) * (H - 20) - 10;
+    var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', 0); line.setAttribute('x2', W);
+    line.setAttribute('y1', y); line.setAttribute('y2', y);
+    line.setAttribute('stroke', '#e5e7eb'); line.setAttribute('stroke-width', '1');
+    svgEl.appendChild(line);
   });
   // Zero line
-  var zeroLine=document.createElementNS('http://www.w3.org/2000/svg','line');
-  zeroLine.setAttribute('x1',0);zeroLine.setAttribute('x2',W);
-  zeroLine.setAttribute('y1',H/2+10);zeroLine.setAttribute('y2',H/2+10);
-  zeroLine.setAttribute('stroke','#9ca3af');zeroLine.setAttribute('stroke-width','1.5');zeroLine.setAttribute('stroke-dasharray','4');
-  svg.appendChild(zeroLine);
+  var zeroY = H - ((-minPct) / rng) * (H - 20) - 10;
+  var zl = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  zl.setAttribute('x1', 0); zl.setAttribute('x2', W);
+  zl.setAttribute('y1', zeroY); zl.setAttribute('y2', zeroY);
+  zl.setAttribute('stroke', '#9ca3af'); zl.setAttribute('stroke-width', '1.5');
+  zl.setAttribute('stroke-dasharray', '4'); svgEl.appendChild(zl);
 
-  // Determine global min/max % for scaling
-  var allPcts=[];
+  // Lines
   allData.forEach(function(a){
-    var cls=a.data.closes.filter(function(c){return c!==null;});
-    if(cls.length<2) return;
-    var first=cls[0];
-    cls.forEach(function(c){allPcts.push((c-first)/first*100);});
-  });
-  var minPct=allPcts.length?Math.min.apply(null,allPcts):-5;
-  var maxPct=allPcts.length?Math.max.apply(null,allPcts):5;
-  var range2=(maxPct-minPct)||10;
-  minPct-=range2*0.1; maxPct+=range2*0.1;
-
-  // Draw lines
-  allData.forEach(function(a){
-    var cls=a.data.closes.filter(function(c){return c!==null;});
-    if(cls.length<2) return;
-    var first=cls[0];
-    var pts=cls.map(function(c,i){
-      var x=i/(cls.length-1)*W;
-      var pct=(c-first)/first*100;
-      var y=H-((pct-minPct)/(maxPct-minPct))*(H-20)-10;
-      return x.toFixed(1)+','+y.toFixed(1);
+    var cls = (a.data.closes || []).filter(function(c){ return c !== null && !isNaN(c); });
+    if(cls.length < 2) return;
+    var first = cls[0];
+    var pts = cls.map(function(c, i){
+      var x = (i / (cls.length - 1)) * W;
+      var pctV = (c - first) / first * 100;
+      var y = H - ((pctV - minPct) / rng) * (H - 20) - 10;
+      return x.toFixed(1) + ',' + y.toFixed(1);
     }).join(' ');
-    var poly=document.createElementNS('http://www.w3.org/2000/svg','polyline');
-    poly.setAttribute('points',pts);poly.setAttribute('fill','none');
-    poly.setAttribute('stroke',a.color);poly.setAttribute('stroke-width','2');
-    poly.setAttribute('stroke-linejoin','round');
-    svg.appendChild(poly);
+    var poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    poly.setAttribute('points', pts); poly.setAttribute('fill', 'none');
+    poly.setAttribute('stroke', a.color); poly.setAttribute('stroke-width', '2');
+    poly.setAttribute('stroke-linejoin', 'round'); svgEl.appendChild(poly);
+    // Dot at end
+    var lastPts = pts.split(' ');
+    var last = lastPts[lastPts.length - 1].split(',');
+    var dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', last[0]); dot.setAttribute('cy', last[1]);
+    dot.setAttribute('r', '3'); dot.setAttribute('fill', a.color); svgEl.appendChild(dot);
   });
 
-  // Stats
-  var statsEl=document.getElementById('compare-stats');
-  if(statsEl) statsEl.innerHTML=allData.map(function(a){
-    var chg=a.data.periodChangePct;
-    var vol=a.data.high&&a.data.low?((a.data.high-a.data.low)/a.data.low*100).toFixed(1)+'%':'N/D';
-    return '<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 12px;border-left:3px solid '+a.color+'">'+
-      '<div style="font-weight:700;margin-bottom:4px">'+a.ticker+'</div>'+
-      '<div style="font-size:11px;color:var(--text2)">Prezzo: <b>'+a.data.price.toFixed(2)+'</b></div>'+
-      '<div style="font-size:11px;color:'+(chg>=0?'var(--green)':'var(--red)')+'">Periodo: '+(chg>=0?'+':'')+chg.toFixed(2)+'%</div>'+
-      '<div style="font-size:11px;color:var(--text2)">Volatilita: '+vol+'</div>'+
+  // Stats grid
+  var statsEl = document.getElementById('compare-stats');
+  if(statsEl) statsEl.innerHTML = allData.map(function(a){
+    var chg = a.data.periodChangePct;
+    var day = a.data.changePct;
+    var pos = positions.find(function(p){ return p.ticker === a.ticker; });
+    var qty = pos ? parseFloat(pos.quantity) || 0 : 0;
+    var avg = pos ? parseFloat(pos.avg_buy_price) || 0 : 0;
+    var val = qty * a.data.price;
+    var pnl = val - qty * avg;
+    return '<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 12px;border-left:3px solid ' + a.color + '">' +
+      '<div style="font-weight:700;margin-bottom:3px">' + a.ticker + '</div>' +
+      '<div style="font-size:11px"><b>' + a.data.price.toFixed(2) + '</b> ' + (a.data.currency || '') + '</div>' +
+      '<div style="font-size:11px;color:' + (chg >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (PERIOD_LABELS[tradingPeriod] || '') + ': ' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</div>' +
+      '<div style="font-size:11px;color:' + (day >= 0 ? 'var(--green)' : 'var(--red)') + '">Oggi: ' + (day >= 0 ? '+' : '') + day.toFixed(2) + '%</div>' +
+      '<div style="font-size:11px;color:' + (pnl >= 0 ? 'var(--green)' : 'var(--red)') + '">P&L: ' + (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '</div>' +
     '</div>';
   }).join('');
 }
 
-async function refreshAllPrices(){
-  var btn=document.getElementById('refresh-btn');
-  if(btn){btn.disabled=true;btn.textContent='Aggiornamento...';}
-  var tickers=positions.map(function(p){return p.ticker;});
-  var unique=[...new Set(tickers)];
-  for(var i=0;i<unique.length;i++){
-    await fetchPrice(unique[i], tradingPeriod, tradingPeriodInterval);
-    // Yield to UI
-    await new Promise(function(r){setTimeout(r,200);});
-  }
-  if(btn){btn.disabled=false;btn.textContent='\u21BB Aggiorna prezzi';}
-  var upd=document.getElementById('last-update');
-  if(upd)upd.textContent='Aggiornato: '+new Date().toLocaleTimeString('it-IT');
-  renderPositions();
-  generateRecommendations();
-}
+// Alias for backward compat
+async function openCompareChart(){ await updatePortfolioChart(); }
 
-// ── SPARKLINE ─────────────────────────────────────────────────────────────────
-function drawSparkline(closes, width, height, color){
-  if(!closes||closes.length<2) return '';
-  var valid=closes.filter(function(c){return c!==null;}).slice(-30);
-  if(valid.length<2) return '';
-  var mn=Math.min.apply(null,valid);
-  var mx=Math.max.apply(null,valid);
-  var range=mx-mn||1;
-  var pts=valid.map(function(c,i){
-    var x=i/(valid.length-1)*width;
-    var y=height-(c-mn)/range*height;
-    return x.toFixed(1)+','+y.toFixed(1);
-  }).join(' ');
-  return '<svg class="sparkline" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+' '+height+'">'+
-    '<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5" stroke-linejoin="round"/>'+
-    '</svg>';
-}
-
-// ── RENDER POSITIONS ──────────────────────────────────────────────────────────
-function renderPositions(){
-  var filterType=document.getElementById('pos-filter-type');
-  var ftype=filterType?filterType.value:'all';
-  var arr=ftype==='all'?positions:positions.filter(function(p){return p.asset_type===ftype;});
-  var grid=document.getElementById('pos-grid');
-  var empty=document.getElementById('pos-empty');
-  var recPanel=document.getElementById('ai-rec-panel');
-  if(!arr.length){
-    if(grid)grid.innerHTML='';if(empty)empty.style.display='';if(recPanel)recPanel.style.display='none';return;
-  }
-  if(empty)empty.style.display='none';if(recPanel)recPanel.style.display='';
-
-  var totalValue=0,totalCost=0;
-  var cards=arr.map(function(p){
-    var data=priceCache[p.ticker+'_'+tradingPeriod]||priceCache[p.ticker];
-    var qty=parseFloat(p.quantity)||0;
-    var avgCost=parseFloat(p.avg_buy_price)||0;
-    var currentPrice=data?data.price:null;
-    var cost=qty*avgCost;
-    var value=currentPrice?qty*currentPrice:cost;
-    var pnl=currentPrice?value-cost:null;
-    var pnlPct=cost>0&&pnl!==null?pnl/cost*100:null;
-    var periodChg=data?data.periodChangePct:null;
-    totalValue+=value; totalCost+=cost;
-    var badgeClass='pos-badge-'+(p.asset_type||'other');
-    var isSelected=selectedPosTickers.has(p.ticker);
-    var priceStr=currentPrice?currentPrice.toFixed(2)+'<small style="font-size:11px;color:var(--text2);margin-left:4px">'+(data&&data.currency||p.currency||'USD')+'</small>':'<span style="color:var(--text3);font-size:13px">N/D</span>';
-    var changeStr=data?'<span class="'+(data.change>=0?'price-up':'price-down')+'">'+
-      (data.change>=0?'+':'')+data.change.toFixed(2)+' ('+data.changePct.toFixed(2)+'%)</span>':'';
-    var periodStr=periodChg!==null?'<span style="font-size:10.5px;padding:2px 6px;border-radius:12px;background:'+(periodChg>=0?'var(--green-light)':'var(--red-light)')+';color:'+(periodChg>=0?'var(--green)':'var(--red)')+'">'+(periodChg>=0?'+':'')+periodChg.toFixed(2)+'% ('+PERIOD_LABELS[tradingPeriod]+')</span>':'';
-    var pnlStr=pnl!==null?'<span class="'+(pnl>=0?'pnl-pos':'pnl-neg')+'">'+
-      (pnl>=0?'+':'')+pnl.toFixed(2)+' ('+pnlPct.toFixed(1)+'%)</span>':'<span style="color:var(--text3)">--</span>';
-    var spark=data?drawSparkline(data.closes,80,28,periodChg>=0?'#16a34a':'#dc2626'):'';
-    return '<div class="pos-card" style="'+(isSelected?'border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)':'')+'">'+ 
-      '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">'+
-        '<div style="display:flex;align-items:center;gap:8px">'+
-          '<input type="checkbox" '+(isSelected?'checked':'')+ ' style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer" data-ticker="'+p.ticker+'" onchange="handlePosSelect(this)">'+
-          '<div>'+
-            '<div style="font-size:16px;font-weight:700;color:var(--text)">'+p.ticker+'</div>'+
-            '<div style="font-size:11.5px;color:var(--text2);margin-top:1px">'+(p.name||'')+'</div>'+
-          '</div>'+
-        '</div>'+
-        '<span class="pos-badge '+badgeClass+'">'+(p.asset_type||'other')+'</span>'+
-      '</div>'+
-      '<div style="margin-bottom:8px">'+
-        '<span class="price-tag">'+priceStr+'</span> '+spark+
-        '<div style="margin-top:3px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'+changeStr+periodStr+'</div>'+
-      '</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11.5px;margin-bottom:10px">'+
-        '<div><div style="color:var(--text3);font-size:10px">QUANTITA</div><b>'+qty.toLocaleString('it-IT',{maximumFractionDigits:6})+'</b></div>'+
-        '<div><div style="color:var(--text3);font-size:10px">PREZZO MEDIO</div><b>'+avgCost.toFixed(2)+'</b></div>'+
-        '<div><div style="color:var(--text3);font-size:10px">VALORE</div><b>'+value.toFixed(2)+'</b></div>'+
-        '<div><div style="color:var(--text3);font-size:10px">P&amp;L</div>'+pnlStr+'</div>'+
-      '</div>'+
-      '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
-        '<button class="btn btn-primary" style="font-size:10.5px;padding:5px 10px" onclick="openTxModal('+p.id+')">+ Transazione</button>'+
-        '<button class="btn btn-secondary" style="font-size:10.5px;padding:5px 10px" onclick="openEditPosition('+p.id+')">&#9998; Modifica</button>'+
-        '<button class="btn btn-danger" style="font-size:10.5px;padding:5px 10px" onclick="deletePosition('+p.id+')">&#215;</button>'+
-      '</div>'+
-    '</div>';
-  }).join('');
-
-  if(grid)grid.innerHTML=cards;
-
-  // Stats bar
-  var totalPnl=totalValue-totalCost;
-  var totalPnlPct=totalCost>0?totalPnl/totalCost*100:0;
-  var statsEl=document.getElementById('trading-stats');
-  if(statsEl){
-    statsEl.innerHTML=
-      stat('Valore Portfolio',totalValue.toFixed(2),'var(--accent)')+
-      stat('Costo Totale',totalCost.toFixed(2),'var(--text2)')+
-      stat('P&L Totale',(totalPnl>=0?'+':'')+totalPnl.toFixed(2)+'  ('+totalPnlPct.toFixed(1)+'%)',totalPnl>=0?'var(--green)':'var(--red)')+
-      stat('Posizioni',positions.length,'var(--accent)');
-  }
-}
 
 // ── AI RECOMMENDATIONS ────────────────────────────────────────────────────────
 async function generateRecommendations(){
@@ -2236,5 +2153,173 @@ async function generateRecommendations(){
   } catch(e){
     el.innerHTML='<div style="color:var(--red);font-size:12px;padding:12px">Errore analisi AI: '+e.message+'. Assicurati che i prezzi siano stati aggiornati.</div>';
   }
+}
+
+
+// ── IMPORT PORTFOLIO FILE (XLS / PDF) ────────────────────────────────────────
+async function importPortfolioFile(input){
+  var file = input.files[0];
+  if(!file){ input.value=''; return; }
+  var ext = file.name.split('.').pop().toLowerCase();
+
+  if(ext === 'pdf'){
+    await importPortfolioPDF(file);
+  } else if(ext === 'xlsx' || ext === 'xls' || ext === 'csv'){
+    await importPortfolioXLS(file);
+  } else {
+    alert('Formato non supportato. Usa XLS, XLSX, CSV o PDF.');
+  }
+  input.value = '';
+}
+
+async function importPortfolioXLS(file){
+  var reader = new FileReader();
+  reader.onload = async function(e){
+    var data = new Uint8Array(e.target.result);
+    var wb, rows;
+    try{
+      wb   = XLSX.read(data, {type:'array'});
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+    } catch(err){ alert('Errore lettura file: '+err.message); return; }
+
+    if(!rows || !rows.length){ alert('File vuoto o formato non riconosciuto.'); return; }
+
+    // Detect columns (case-insensitive, multi-language)
+    var sample = rows[0];
+    var keys = Object.keys(sample).map(function(k){ return k.toLowerCase(); });
+    function col(names){
+      for(var n of names){
+        var k = Object.keys(sample).find(function(k){ return k.toLowerCase().indexOf(n.toLowerCase())>=0; });
+        if(k) return k;
+      }
+      return null;
+    }
+
+    var cTicker = col(['ticker','symbol','isin','codice','titolo','asset','stock']);
+    var cName   = col(['name','nome','description','descrizione','company']);
+    var cType   = col(['type','tipo','asset type','category','categoria']);
+    var cQty    = col(['qty','quantity','quantita','shares','units','pezzi','quota']);
+    var cPrice  = col(['avg price','average price','prezzo medio','buy price','costo medio','avg cost','carico']);
+    var cCurr   = col(['currency','valuta','ccy']);
+
+    if(!cTicker){ alert('Colonna Ticker/Symbol non trovata nel file.'); return; }
+
+    var toUpsert = [];
+    rows.forEach(function(row){
+      var ticker = String(row[cTicker]||'').trim().toUpperCase();
+      if(!ticker) return;
+      var qty   = parseFloat(String(row[cQty]||'').replace(',','.'))  || 0;
+      var price = parseFloat(String(row[cPrice]||'').replace(',','.')) || 0;
+      toUpsert.push({
+        user_id:    currentUser.id,
+        ticker:     ticker,
+        name:       cName   ? String(row[cName]||'') : '',
+        asset_type: cType   ? String(row[cType]||'stock').toLowerCase() : 'stock',
+        quantity:   qty,
+        avg_buy_price: price,
+        currency:   cCurr   ? String(row[cCurr]||'USD') : 'USD'
+      });
+    });
+
+    if(!toUpsert.length){ alert('Nessuna riga valida trovata.'); return; }
+
+    var preview = toUpsert.slice(0,5).map(function(r){ return r.ticker+' x'+r.quantity+' @ '+r.avg_buy_price; }).join('\n');
+    if(!confirm('Importare/aggiornare '+toUpsert.length+' posizioni?\n\n'+preview+(toUpsert.length>5?'\n...':''))){return;}
+
+    // Upsert each position
+    var errors = [];
+    for(var i=0; i<toUpsert.length; i++){
+      var row = toUpsert[i];
+      var existing = positions.find(function(p){ return p.ticker === row.ticker; });
+      var res;
+      if(existing){
+        res = await sb.from('trading_positions').update({
+          quantity: row.quantity, avg_buy_price: row.avg_buy_price,
+          name: row.name||existing.name, asset_type: row.asset_type||existing.asset_type
+        }).eq('id', existing.id);
+      } else {
+        res = await sb.from('trading_positions').insert(row);
+      }
+      if(res.error) errors.push(row.ticker+': '+res.error.message);
+    }
+
+    if(errors.length) alert('Errori:\n'+errors.join('\n'));
+    else showMsg(toUpsert.length+' posizioni importate/aggiornate!','success');
+    await loadPositions();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function importPortfolioPDF(file){
+  // Read PDF as base64 and send to Claude for extraction
+  var b64 = await new Promise(function(res,rej){
+    var r = new FileReader();
+    r.onload = function(){ res(r.result.split(',')[1]); };
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+
+  showMsg('Analisi PDF in corso con AI...','success');
+
+  var apiKey = localStorage.getItem('inv_key') || DEFAULT_KEY;
+  var resp = await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'x-api-key':apiKey,
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true'
+    },
+    body: JSON.stringify({
+      model:'claude-opus-4-5',
+      max_tokens:2000,
+      messages:[{
+        role:'user',
+        content:[
+          {type:'document', source:{type:'base64', media_type:'application/pdf', data:b64}},
+          {type:'text', text:'Estrai da questo documento le posizioni di portafoglio. Rispondi SOLO con JSON array, nessun testo fuori. Formato: [{"ticker":"AAPL","name":"Apple Inc","asset_type":"stock","quantity":10,"avg_buy_price":150.00,"currency":"USD"}]. Se il documento e un rendiconto bancario/broker, estrai tutti i titoli con quantita e prezzo medio o valore unitario. Se manca un campo usa null.'}
+        ]
+      }]
+    })
+  });
+
+  if(!resp.ok){ alert('Errore API: '+resp.status); return; }
+  var data = await resp.json();
+  if(!data.content||!data.content[0]){ alert('Risposta API non valida.'); return; }
+
+  var text = data.content[0].text;
+  var match = text.match(/\[[\s\S]*\]/);
+  if(!match){ alert('Nessun dato estratto dal PDF. Prova con un file XLS.'); return; }
+
+  var parsed;
+  try{ parsed = JSON.parse(match[0]); } catch(e){ alert('Errore parsing risposta AI.'); return; }
+
+  if(!parsed.length){ alert('Nessuna posizione trovata nel PDF.'); return; }
+
+  var preview = parsed.slice(0,5).map(function(r){ return (r.ticker||'?')+' x'+(r.quantity||0)+' @ '+(r.avg_buy_price||0); }).join('\n');
+  if(!confirm('Importare '+parsed.length+' posizioni dal PDF?\n\n'+preview+(parsed.length>5?'\n...':''))) return;
+
+  var errors = [];
+  for(var i=0; i<parsed.length; i++){
+    var row = parsed[i];
+    if(!row.ticker) continue;
+    row.user_id = currentUser.id;
+    row.ticker  = String(row.ticker).toUpperCase();
+    row.quantity = parseFloat(row.quantity) || 0;
+    row.avg_buy_price = parseFloat(row.avg_buy_price) || 0;
+    row.asset_type = row.asset_type || 'stock';
+    row.currency   = row.currency   || 'USD';
+
+    var existing = positions.find(function(p){ return p.ticker === row.ticker; });
+    var res = existing
+      ? await sb.from('trading_positions').update({quantity:row.quantity,avg_buy_price:row.avg_buy_price,name:row.name||existing.name}).eq('id',existing.id)
+      : await sb.from('trading_positions').insert(row);
+    if(res.error) errors.push(row.ticker+': '+res.error.message);
+  }
+
+  if(errors.length) alert('Errori:\n'+errors.slice(0,5).join('\n'));
+  else showMsg(parsed.length+' posizioni importate dal PDF!','success');
+  await loadPositions();
 }
 
