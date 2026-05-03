@@ -1858,67 +1858,69 @@ async function saveTransaction2(){
 
 // ── PRICE FETCHING (Yahoo Finance) ────────────────────────────────────────────
 async function fetchPrice(ticker, range, interval){
-  range = range || '3mo';
-  interval = interval || '1d';
-  var cacheKey = ticker+'_'+range;
+  range = range || '1d';
+  interval = interval || '5m';
+  var cacheKey = ticker + '_' + range;
   var cached = priceCache[cacheKey];
-  if(cached && Date.now()-cached.ts < (range==='1d'?60000:300000)) return cached;
+  var maxAge = range === '1d' ? 60000 : 300000;
+  if(cached && Date.now() - cached.ts < maxAge) return cached;
 
-  // Try multiple endpoints for CORS compatibility
-  var baseUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?interval='+interval+'&range='+range+'&includePrePost=false';
-  var endpoints = [
-    'https://corsproxy.io/?'+encodeURIComponent(baseUrl),
-    'https://api.allorigins.win/get?url='+encodeURIComponent(baseUrl),
-    'https://proxy.cors.sh/'+baseUrl
+  var yahooUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' +
+    encodeURIComponent(ticker) + '?interval=' + interval + '&range=' + range + '&includePrePost=false';
+
+  // Try proxies in order
+  var attempts = [
+    { url: 'https://corsproxy.io/?' + encodeURIComponent(yahooUrl), wrap: false },
+    { url: 'https://api.allorigins.win/get?url=' + encodeURIComponent(yahooUrl), wrap: true },
+    { url: yahooUrl, wrap: false }  // direct (works on localhost)
   ];
-  
-  var rawData = null;
-  for(var ep=0; ep<endpoints.length; ep++){
+
+  for(var i = 0; i < attempts.length; i++){
     try{
-      var resp = await fetch(endpoints[ep], {signal: AbortSignal.timeout(8000)});
+      var resp = await fetch(attempts[i].url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      });
       if(!resp.ok) continue;
       var json = await resp.json();
-      // allorigins wraps in .contents
-      if(json.contents) json = JSON.parse(json.contents);
-      if(json.chart && json.chart.result && json.chart.result[0]){
-        rawData = json; break;
-      }
-    } catch(e){ continue; }
-  }
+      if(attempts[i].wrap && json.contents) json = JSON.parse(json.contents);
+      if(!json.chart || !json.chart.result || !json.chart.result[0]) continue;
 
-  if(!rawData) {
-    console.warn('All price endpoints failed for '+ticker);
-    return null;
-  }
+      var meta   = json.chart.result[0].meta;
+      var quotes = json.chart.result[0].indicators.quote[0];
+      var closes = (quotes.close || []).filter(function(c){ return c !== null && !isNaN(c); });
+      var timestamps = json.chart.result[0].timestamp || [];
 
-  try{
-    var meta = rawData.chart.result[0].meta;
-    var quotes = rawData.chart.result[0].indicators.quote[0];
-    var closes = quotes.close || [];
-    var timestamps = rawData.chart.result[0].timestamp || [];
-    var currentPrice = meta.regularMarketPrice || meta.chartPreviousClose;
-    var prevClose = meta.chartPreviousClose || currentPrice;
-    var change = currentPrice - prevClose;
-    var changePct = prevClose>0 ? change/prevClose*100 : 0;
-    var validCloses = closes.filter(function(c){ return c!==null && !isNaN(c); });
-    var firstValid = validCloses[0] || currentPrice;
-    var periodChange = currentPrice - firstValid;
-    var periodChangePct = firstValid>0 ? periodChange/firstValid*100 : 0;
-    var high = validCloses.length ? Math.max.apply(null,validCloses) : currentPrice;
-    var low  = validCloses.length ? Math.min.apply(null,validCloses) : currentPrice;
-    var result = {
-      price:currentPrice, change:change, changePct:changePct,
-      periodChange:periodChange, periodChangePct:periodChangePct,
-      high:high, low:low, closes:closes, timestamps:timestamps,
-      currency:meta.currency||'USD', name:meta.shortName||ticker, ts:Date.now()
-    };
-    priceCache[cacheKey] = result;
-    priceCache[ticker] = result;
-    return result;
-  } catch(e){
-    console.warn('Price parse error for '+ticker+':', e.message);
-    return null;
+      var currentPrice = meta.regularMarketPrice || meta.chartPreviousClose || 0;
+      var prevClose    = meta.chartPreviousClose  || currentPrice;
+      var change       = currentPrice - prevClose;
+      var changePct    = prevClose > 0 ? change / prevClose * 100 : 0;
+      var firstClose   = closes[0] || currentPrice;
+      var periodChangePct = firstClose > 0 ? (currentPrice - firstClose) / firstClose * 100 : 0;
+      var high = closes.length ? Math.max.apply(null, closes) : currentPrice;
+      var low  = closes.length ? Math.min.apply(null, closes) : currentPrice;
+
+      // Rebuild closes array preserving nulls but mapped to clean values
+      var allCloses = (quotes.close || []).map(function(c){ return (c !== null && !isNaN(c)) ? c : null; });
+
+      var result = {
+        price: currentPrice, change: change, changePct: changePct,
+        periodChange: currentPrice - firstClose, periodChangePct: periodChangePct,
+        high: high, low: low, closes: allCloses, timestamps: timestamps,
+        currency: meta.currency || 'USD',
+        name: meta.shortName || meta.longName || ticker,
+        ts: Date.now(), source: i
+      };
+      priceCache[cacheKey] = result;
+      priceCache[ticker]   = result;
+      console.log('Price OK:', ticker, '@', currentPrice, 'via proxy', i);
+      return result;
+    } catch(e){
+      console.warn('Proxy', i, 'failed for', ticker, ':', e.message);
+    }
   }
+  console.error('All proxies failed for', ticker);
+  return null;
 }
 
 function setTradingPeriod(range, btn){
@@ -2185,13 +2187,8 @@ async function generateRecommendations(){
   '[{"ticker":"AAPL","action":"buy|sell|hold|watch","urgency":"high|medium|low","title":"titolo","reason":"motivazione 2-3 frasi","detail":"livelli prezzo e analisi tecnica","warning":"rischi o null"}]';
 
   // Check API key
-  var apiKey=cfg('key');
-  if(!apiKey){
-    el.innerHTML='<div style="color:var(--orange);font-size:12px;padding:12px;background:rgba(251,146,60,0.1);border-radius:8px">'+
-      '&#128273; Per i consigli AI inserisci la tua <b>Anthropic API Key</b> in Impostazioni (campo "Anthropic API Key"). '+
-      'Puoi ottenerla su <a href="https://console.anthropic.com" target="_blank" style="color:var(--accent)">console.anthropic.com</a>.</div>';
-    return;
-  }
+  var apiKey = localStorage.getItem('inv_key') || DEFAULT_KEY;
+  if(!apiKey){el.innerHTML='<div style="color:var(--red)">API key mancante.</div>';return;}
   try{
     var response=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
