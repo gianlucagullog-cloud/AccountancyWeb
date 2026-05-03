@@ -2173,82 +2173,150 @@ async function importPortfolioFile(input){
 }
 
 async function importPortfolioXLS(file){
-  var reader = new FileReader();
-  reader.onload = async function(e){
-    var data = new Uint8Array(e.target.result);
-    var wb, rows;
-    try{
-      wb   = XLSX.read(data, {type:'array'});
-      var ws = wb.Sheets[wb.SheetNames[0]];
-      rows = XLSX.utils.sheet_to_json(ws, {defval:''});
-    } catch(err){ alert('Errore lettura file: '+err.message); return; }
+  // Promisified FileReader
+  var arrayBuf = await new Promise(function(resolve, reject){
+    var reader = new FileReader();
+    reader.onload  = function(e){ resolve(e.target.result); };
+    reader.onerror = function(e){ reject(new Error('Lettura file fallita')); };
+    reader.readAsArrayBuffer(file);
+  });
 
-    if(!rows || !rows.length){ alert('File vuoto o formato non riconosciuto.'); return; }
-
-    // Detect columns (case-insensitive, multi-language)
-    var sample = rows[0];
-    var keys = Object.keys(sample).map(function(k){ return k.toLowerCase(); });
-    function col(names){
-      for(var n of names){
-        var k = Object.keys(sample).find(function(k){ return k.toLowerCase().indexOf(n.toLowerCase())>=0; });
-        if(k) return k;
-      }
-      return null;
+  var rows;
+  try{
+    // Try XLSX first
+    if(typeof XLSX === 'undefined') throw new Error('Libreria XLSX non caricata');
+    var data = new Uint8Array(arrayBuf);
+    var ext  = file.name.split('.').pop().toLowerCase();
+    var wb, ws;
+    if(ext === 'csv'){
+      var text = new TextDecoder().decode(data);
+      ws = XLSX.utils.aoa_to_sheet(text.split('\n').map(function(l){ return l.split(','); }));
+      wb = {SheetNames:['Sheet1'], Sheets:{Sheet1:ws}};
+    } else {
+      wb = XLSX.read(data, {type:'array'});
     }
+    ws   = wb.Sheets[wb.SheetNames[0]];
+    rows = XLSX.utils.sheet_to_json(ws, {defval:'', raw:false});
+  } catch(err){
+    alert('Errore lettura file: '+err.message);
+    return;
+  }
 
-    var cTicker = col(['ticker','symbol','isin','codice','titolo','asset','stock']);
-    var cName   = col(['name','nome','description','descrizione','company']);
-    var cType   = col(['type','tipo','asset type','category','categoria']);
-    var cQty    = col(['qty','quantity','quantita','shares','units','pezzi','quota']);
-    var cPrice  = col(['avg price','average price','prezzo medio','buy price','costo medio','avg cost','carico']);
-    var cCurr   = col(['currency','valuta','ccy']);
+  if(!rows || !rows.length){
+    alert('File vuoto o formato non riconosciuto. Assicurati che la prima riga contenga le intestazioni (es. Ticker, Quantity, Avg Price).');
+    return;
+  }
 
-    if(!cTicker){ alert('Colonna Ticker/Symbol non trovata nel file.'); return; }
-
-    var toUpsert = [];
-    rows.forEach(function(row){
-      var ticker = String(row[cTicker]||'').trim().toUpperCase();
-      if(!ticker) return;
-      var qty   = parseFloat(String(row[cQty]||'').replace(',','.'))  || 0;
-      var price = parseFloat(String(row[cPrice]||'').replace(',','.')) || 0;
-      toUpsert.push({
-        user_id:    currentUser.id,
-        ticker:     ticker,
-        name:       cName   ? String(row[cName]||'') : '',
-        asset_type: cType   ? String(row[cType]||'stock').toLowerCase() : 'stock',
-        quantity:   qty,
-        avg_buy_price: price,
-        currency:   cCurr   ? String(row[cCurr]||'USD') : 'USD'
+  // Column detection - flexible
+  var sample = rows[0];
+  function col(names){
+    var found = null;
+    Object.keys(sample).forEach(function(k){
+      var kl = k.toLowerCase().trim();
+      names.forEach(function(n){
+        if(!found && kl.indexOf(n.toLowerCase()) >= 0) found = k;
       });
     });
+    return found;
+  }
 
-    if(!toUpsert.length){ alert('Nessuna riga valida trovata.'); return; }
+  var cTicker = col(['ticker','symbol','isin','codice','titolo','asset','stock','strumento']);
+  var cName   = col(['name','nome','description','descrizione','company','issuer','emittente']);
+  var cType   = col(['type','tipo','asset type','category','categoria','classe']);
+  var cQty    = col(['qty','quantity','quantita','shares','units','pezzi','quota','num','numero']);
+  var cPrice  = col(['avg price','average price','prezzo medio','buy price','costo medio','avg cost','carico','prezzo di carico','prezzo acquisto','prezzo unitario']);
+  var cCurr   = col(['currency','valuta','ccy','divisa']);
 
-    var preview = toUpsert.slice(0,5).map(function(r){ return r.ticker+' x'+r.quantity+' @ '+r.avg_buy_price; }).join('\n');
-    if(!confirm('Importare/aggiornare '+toUpsert.length+' posizioni?\n\n'+preview+(toUpsert.length>5?'\n...':''))){return;}
+  console.log('Columns detected:', {cTicker, cName, cType, cQty, cPrice, cCurr});
+  console.log('Sample row:', sample);
 
-    // Upsert each position
-    var errors = [];
-    for(var i=0; i<toUpsert.length; i++){
-      var row = toUpsert[i];
-      var existing = positions.find(function(p){ return p.ticker === row.ticker; });
-      var res;
-      if(existing){
-        res = await sb.from('trading_positions').update({
-          quantity: row.quantity, avg_buy_price: row.avg_buy_price,
-          name: row.name||existing.name, asset_type: row.asset_type||existing.asset_type
-        }).eq('id', existing.id);
-      } else {
-        res = await sb.from('trading_positions').insert(row);
+  if(!cTicker){
+    var available = Object.keys(sample).join(', ');
+    alert('Colonna Ticker/Symbol non trovata.\n\nColonne trovate nel file: '+available+'\n\nAssicurati che ci sia una colonna con nome "Ticker" o "Symbol".');
+    return;
+  }
+
+  var toUpsert = [];
+  rows.forEach(function(row){
+    var ticker = String(row[cTicker]||'').trim().toUpperCase().replace(/[^A-Z0-9.-]/g,'');
+    if(!ticker || ticker.length < 1) return;
+    // Extract numeric value AND currency symbol from the same cell
+    // e.g. "EUR 219.00", "$ 450,50", "219.00 USD", "€150"
+    function parseAmountAndCurrency(raw){
+      var s = String(raw||'0').trim();
+      var currMatch = s.match(/([A-Z]{3}|[$€£¥₹₩])/);
+      var detectedCurr = null;
+      if(currMatch){
+        var sym = currMatch[1];
+        var symMap = {'$':'USD','€':'EUR','£':'GBP','¥':'JPY','₹':'INR','₩':'KRW'};
+        detectedCurr = symMap[sym] || sym;
       }
-      if(res.error) errors.push(row.ticker+': '+res.error.message);
+      var num = parseFloat(s.replace(/[^0-9.,\-]/g,'').replace(',','.')) || 0;
+      return {value: num, currency: detectedCurr};
     }
 
-    if(errors.length) alert('Errori:\n'+errors.join('\n'));
-    else showMsg(toUpsert.length+' posizioni importate/aggiornate!','success');
-    await loadPositions();
-  };
-  reader.readAsArrayBuffer(file);
+    var qtyParsed   = parseAmountAndCurrency(row[cQty]   || '0');
+    var priceParsed = parseAmountAndCurrency(row[cPrice]  || '0');
+    var qty   = qtyParsed.value;
+    var price = priceParsed.value;
+    // Currency: prefer explicit column, then from price cell, then qty cell, then default
+    var detectedCurr = (cCurr ? String(row[cCurr]||'').trim() : null)
+      || priceParsed.currency || qtyParsed.currency || 'USD';
+    var type  = cType ? String(row[cType]||'stock').toLowerCase() : 'stock';
+    // Normalize type
+    if(type.indexOf('etf')>=0) type='etf';
+    else if(type.indexOf('bond')>=0||type.indexOf('obblig')>=0) type='bond';
+    else if(type.indexOf('crypto')>=0||type.indexOf('crypt')>=0) type='crypto';
+    else type='stock';
+
+    toUpsert.push({
+      user_id:       currentUser.id,
+      ticker:        ticker,
+      name:          cName ? String(row[cName]||'').trim() : '',
+      asset_type:    type,
+      quantity:      qty,
+      avg_buy_price: price,
+      currency:      detectedCurr
+    });
+  });
+
+  if(!toUpsert.length){
+    alert('Nessuna riga valida trovata. Controlla che le celle non siano vuote.');
+    return;
+  }
+
+  var preview = toUpsert.slice(0,5).map(function(r){
+    return r.ticker + ' x' + r.quantity + ' @ ' + r.avg_buy_price + ' ' + r.currency;
+  }).join('\n');
+
+  if(!confirm('Importare/aggiornare '+toUpsert.length+' posizioni?\n\n'+preview+(toUpsert.length>5?'\n...':''))) return;
+
+  var errors = [];
+  var updated = 0, inserted = 0;
+  for(var i = 0; i < toUpsert.length; i++){
+    var row = toUpsert[i];
+    var existing = positions.find(function(p){ return p.ticker === row.ticker; });
+    var res;
+    if(existing){
+      res = await sb.from('trading_positions').update({
+        quantity:      row.quantity,
+        avg_buy_price: row.avg_buy_price,
+        name:          row.name || existing.name,
+        asset_type:    row.asset_type || existing.asset_type,
+        currency:      row.currency || existing.currency
+      }).eq('id', existing.id);
+      if(!res.error) updated++;
+    } else {
+      res = await sb.from('trading_positions').insert(row);
+      if(!res.error) inserted++;
+    }
+    if(res.error) errors.push(row.ticker + ': ' + res.error.message);
+  }
+
+  var msg = inserted + ' nuove, ' + updated + ' aggiornate.';
+  if(errors.length) alert('Import completato con errori.\n'+msg+'\n\nErrori:\n'+errors.slice(0,5).join('\n'));
+  else showMsg('Import riuscito: ' + msg, 'success');
+  await loadPositions();
 }
 
 async function importPortfolioPDF(file){
