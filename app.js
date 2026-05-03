@@ -2074,6 +2074,109 @@ async function openCompareChart(){ await updatePortfolioChart(); }
 
 
 // ── AI RECOMMENDATIONS ────────────────────────────────────────────────────────
+
+// ── RENDER POSITIONS (table view) ────────────────────────────────────────────
+function renderPositions(){
+  var filterType = (document.getElementById('pos-filter-type')||{}).value || 'all';
+  var arr = filterType === 'all' ? positions : positions.filter(function(p){ return p.asset_type === filterType; });
+  var tbody    = document.getElementById('pos-tbody');
+  var empty    = document.getElementById('pos-empty');
+  var recPanel = document.getElementById('ai-rec-panel');
+
+  if(!arr.length){
+    if(tbody) tbody.innerHTML = '';
+    if(empty) empty.style.display = '';
+    if(recPanel) recPanel.style.display = 'none';
+    renderTradingStats([]);
+    return;
+  }
+  if(empty) empty.style.display = 'none';
+  if(recPanel) recPanel.style.display = '';
+
+  if(!tbody){ renderTradingStats(arr); return; }
+
+  function fmtPct(v){
+    if(v === null || v === undefined || isNaN(v)) return '<span style="color:var(--text3)">—</span>';
+    var cls = v >= 0 ? 'pnl-pos' : 'pnl-neg';
+    return '<span class="'+cls+'">'+(v>=0?'+':'')+v.toFixed(2)+'%</span>';
+  }
+  function fmtAmt(v){
+    if(v === null || v === undefined || isNaN(v)) return '<span style="color:var(--text3)">—</span>';
+    var cls = v >= 0 ? 'pnl-pos' : 'pnl-neg';
+    return '<span class="'+cls+'">'+(v>=0?'+':'')+v.toFixed(2)+'</span>';
+  }
+
+  tbody.innerHTML = arr.map(function(p){
+    var data = priceCache[p.ticker+'_'+tradingPeriod] || priceCache[p.ticker];
+    var qty  = parseFloat(p.quantity) || 0;
+    var avg  = parseFloat(p.avg_buy_price) || 0;
+    var curr = data ? data.price : null;
+    var cost = qty * avg;
+    var val  = curr !== null ? qty * curr : cost;
+    var pnl  = curr !== null ? val - cost : null;
+    var pnlPct  = cost > 0 && pnl !== null ? pnl / cost * 100 : null;
+    var dayPct  = data ? data.changePct : null;
+    var perPct  = data ? data.periodChangePct : null;
+    var sel = selectedPosTickers.has(p.ticker);
+    var badgeCls = 'pos-badge pos-badge-'+(p.asset_type||'other');
+
+    return '<tr class="'+(sel?'pos-selected':'')+'" style="'+(sel?'background:rgba(79,70,229,0.06)':'')+'">'
+      +'<td style="width:32px;padding:8px 10px"><input type="checkbox" '+(sel?'checked':'')+' data-ticker="'+p.ticker+'" onchange="handlePosSelect(this)" style="accent-color:var(--accent)"></td>'
+      +'<td class="ticker-cell">'+p.ticker+'</td>'
+      +'<td style="color:var(--text2);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(data&&data.name||p.name||'')+'</td>'
+      +'<td><span class="'+badgeCls+'">'+(p.asset_type||'other')+'</span></td>'
+      +'<td><b>'+(curr!==null?curr.toFixed(2):'<span style="color:var(--text3)">N/D</span>')+'</b>'+(data?'&nbsp;<small style="color:var(--text3)">'+(data.currency||p.currency||'')+'</small>':'')+'</td>'
+      +'<td>'+fmtPct(dayPct)+'</td>'
+      +'<td>'+fmtPct(perPct)+'</td>'
+      +'<td>'+qty.toLocaleString('it-IT',{maximumFractionDigits:6})+'</td>'
+      +'<td>'+avg.toFixed(2)+'</td>'
+      +'<td><b>'+val.toFixed(2)+'</b></td>'
+      +'<td>'+fmtAmt(pnl)+'</td>'
+      +'<td>'+fmtPct(pnlPct)+'</td>'
+      +'<td style="color:var(--text3)">'+(data?data.high.toFixed(2):'—')+'</td>'
+      +'<td style="color:var(--text3)">'+(data?data.low.toFixed(2):'—')+'</td>'
+      +'<td style="white-space:nowrap">'
+        +'<button class="btn btn-primary" style="font-size:10px;padding:3px 8px" onclick="openTxModal('+p.id+')">+Tx</button> '
+        +'<button class="btn btn-edit" style="font-size:10px;padding:3px 7px" onclick="openEditPosition('+p.id+')">&#9998;</button> '
+        +'<button class="btn btn-danger" style="font-size:10px;padding:3px 7px" onclick="deletePosition('+p.id+')">&#215;</button>'
+      +'</td>'
+    +'</tr>';
+  }).join('');
+
+  renderTradingStats(arr);
+  updatePortfolioChart();
+}
+
+function renderTradingStats(arr){
+  var totalValue = 0, totalCost = 0;
+  arr.forEach(function(p){
+    var data = priceCache[p.ticker+'_'+tradingPeriod] || priceCache[p.ticker];
+    var qty  = parseFloat(p.quantity) || 0;
+    var avg  = parseFloat(p.avg_buy_price) || 0;
+    totalCost  += qty * avg;
+    totalValue += data ? qty * data.price : qty * avg;
+  });
+  var totalPnl    = totalValue - totalCost;
+  var totalPnlPct = totalCost > 0 ? totalPnl / totalCost * 100 : 0;
+  var el = document.getElementById('trading-stats');
+  if(el) el.innerHTML =
+    stat('Valore Portfolio', totalValue.toFixed(2), 'var(--accent)') +
+    stat('Costo Totale',     totalCost.toFixed(2),  'var(--text2)') +
+    stat('P&L Totale', (totalPnl>=0?'+':'')+totalPnl.toFixed(2)+' ('+totalPnlPct.toFixed(1)+'%)', totalPnl>=0?'var(--green)':'var(--red)') +
+    stat('Posizioni', arr.length, 'var(--accent)');
+}
+
+function toggleAllPositions(cb){
+  var ft  = (document.getElementById('pos-filter-type')||{}).value || 'all';
+  var arr = ft === 'all' ? positions : positions.filter(function(p){ return p.asset_type === ft; });
+  if(cb.checked) arr.forEach(function(p){ selectedPosTickers.add(p.ticker); });
+  else           selectedPosTickers.clear();
+  var btn = document.getElementById('compare-btn');
+  if(btn) btn.style.display = selectedPosTickers.size > 1 ? '' : 'none';
+  renderPositions();
+  updatePortfolioChart();
+}
+
 async function generateRecommendations(){
   var el=document.getElementById('ai-rec-content');
   if(!el) return;
@@ -2161,18 +2264,24 @@ async function importPortfolioFile(input){
   var file = input.files[0];
   if(!file){ input.value=''; return; }
   var ext = file.name.split('.').pop().toLowerCase();
-
-  if(ext === 'pdf'){
-    await importPortfolioPDF(file);
-  } else if(ext === 'xlsx' || ext === 'xls' || ext === 'csv'){
-    await importPortfolioXLS(file);
-  } else {
-    alert('Formato non supportato. Usa XLS, XLSX, CSV o PDF.');
+  console.log('Import started:', file.name, 'ext:', ext, 'size:', file.size);
+  try{
+    if(ext === 'pdf'){
+      await importPortfolioPDF(file);
+    } else if(ext === 'xlsx' || ext === 'xls' || ext === 'csv'){
+      await importPortfolioXLS(file);
+    } else {
+      alert('Formato non supportato. Usa XLS, XLSX, CSV o PDF.');
+    }
+  } catch(e){
+    console.error('Import error:', e);
+    alert('Errore durante import: ' + e.message);
   }
   input.value = '';
 }
 
 async function importPortfolioXLS(file){
+  console.log('importPortfolioXLS called, XLSX available:', typeof XLSX !== 'undefined');
   // Promisified FileReader
   var arrayBuf = await new Promise(function(resolve, reject){
     var reader = new FileReader();
