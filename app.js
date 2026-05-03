@@ -682,7 +682,7 @@ function handleFile(file){
       'Issued=fattura emessa/attiva, Received=ricevuta/passiva. Solo uno tra entrate/uscite deve avere valori >0.';
     return fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
       body:JSON.stringify({model:'claude-opus-4-5',max_tokens:1200,messages:[{role:'user',content:[cb,{type:'text',text:prompt}]}]})
     });
   }).then(function(r){return r.json();}).then(function(data){
@@ -1863,47 +1863,60 @@ async function fetchPrice(ticker, range, interval){
   var cacheKey = ticker+'_'+range;
   var cached = priceCache[cacheKey];
   if(cached && Date.now()-cached.ts < (range==='1d'?60000:300000)) return cached;
-  try{
-    // Try direct first, fallback to CORS proxy
-    var baseUrl='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?interval='+interval+'&range='+range;
-    var r;
+
+  // Try multiple endpoints for CORS compatibility
+  var baseUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?interval='+interval+'&range='+range+'&includePrePost=false';
+  var endpoints = [
+    'https://corsproxy.io/?'+encodeURIComponent(baseUrl),
+    'https://api.allorigins.win/get?url='+encodeURIComponent(baseUrl),
+    'https://proxy.cors.sh/'+baseUrl
+  ];
+  
+  var rawData = null;
+  for(var ep=0; ep<endpoints.length; ep++){
     try{
-      r=await fetch(baseUrl,{headers:{'Accept':'application/json'}});
-      if(!r.ok) throw new Error('direct failed');
-    } catch(corsErr){
-      // Fallback: use allorigins proxy
-      var proxy='https://api.allorigins.win/get?url='+encodeURIComponent(baseUrl);
-      r=await fetch(proxy);
-      if(!r.ok) throw new Error('proxy failed');
-      var wrapped=await r.json();
-      var proxied={ok:true,json:function(){return Promise.resolve(JSON.parse(wrapped.contents));}};
-      r=proxied;
-    }
-    var d=await r.json();
-    if(!d.result||!d.result[0]) throw new Error('No data');
-    var meta=d.result[0].meta;
-    var closes=d.result[0].indicators.quote[0].close||[];
-    var timestamps=d.result[0].timestamp||[];
-    var currentPrice=meta.regularMarketPrice||meta.chartPreviousClose;
-    var prevClose=meta.chartPreviousClose||currentPrice;
-    var change=currentPrice-prevClose;
-    var changePct=prevClose>0?change/prevClose*100:0;
-    var validCloses=closes.filter(function(c){return c!==null;});
-    var firstValid=validCloses[0]||currentPrice;
-    var periodChange=currentPrice-firstValid;
-    var periodChangePct=firstValid>0?periodChange/firstValid*100:0;
-    var high=validCloses.length?Math.max.apply(null,validCloses):currentPrice;
-    var low=validCloses.length?Math.min.apply(null,validCloses):currentPrice;
-    var result={price:currentPrice,change:change,changePct:changePct,
-      periodChange:periodChange,periodChangePct:periodChangePct,
-      high:high,low:low,closes:closes,timestamps:timestamps,
-      currency:meta.currency||'USD',ts:Date.now()};
-    priceCache[cacheKey]=result;
-    // Also store as default for current period
-    if(range===tradingPeriod) priceCache[ticker]=result;
+      var resp = await fetch(endpoints[ep], {signal: AbortSignal.timeout(8000)});
+      if(!resp.ok) continue;
+      var json = await resp.json();
+      // allorigins wraps in .contents
+      if(json.contents) json = JSON.parse(json.contents);
+      if(json.chart && json.chart.result && json.chart.result[0]){
+        rawData = json; break;
+      }
+    } catch(e){ continue; }
+  }
+
+  if(!rawData) {
+    console.warn('All price endpoints failed for '+ticker);
+    return null;
+  }
+
+  try{
+    var meta = rawData.chart.result[0].meta;
+    var quotes = rawData.chart.result[0].indicators.quote[0];
+    var closes = quotes.close || [];
+    var timestamps = rawData.chart.result[0].timestamp || [];
+    var currentPrice = meta.regularMarketPrice || meta.chartPreviousClose;
+    var prevClose = meta.chartPreviousClose || currentPrice;
+    var change = currentPrice - prevClose;
+    var changePct = prevClose>0 ? change/prevClose*100 : 0;
+    var validCloses = closes.filter(function(c){ return c!==null && !isNaN(c); });
+    var firstValid = validCloses[0] || currentPrice;
+    var periodChange = currentPrice - firstValid;
+    var periodChangePct = firstValid>0 ? periodChange/firstValid*100 : 0;
+    var high = validCloses.length ? Math.max.apply(null,validCloses) : currentPrice;
+    var low  = validCloses.length ? Math.min.apply(null,validCloses) : currentPrice;
+    var result = {
+      price:currentPrice, change:change, changePct:changePct,
+      periodChange:periodChange, periodChangePct:periodChangePct,
+      high:high, low:low, closes:closes, timestamps:timestamps,
+      currency:meta.currency||'USD', name:meta.shortName||ticker, ts:Date.now()
+    };
+    priceCache[cacheKey] = result;
+    priceCache[ticker] = result;
     return result;
   } catch(e){
-    console.warn('Price fetch failed for '+ticker+':', e.message);
+    console.warn('Price parse error for '+ticker+':', e.message);
     return null;
   }
 }
@@ -2168,7 +2181,8 @@ async function generateRecommendations(){
     };
   });
 
-  var prompt='Sei un consulente finanziario esperto. Analizza questo portafoglio e fornisci consigli specifici su QUANDO e PERCHE\' comprare di piu o vendere per ciascuna posizione. Rispondi SOLO con un JSON array, nessun testo fuori dal JSON.\n\nPortafoglio:\n'+JSON.stringify(positionsSummary,null,2)+'\n\nRispondi ESATTAMENTE in questo formato JSON:\n[{"ticker":"AAPL","action":"buy|sell|hold|watch","urgency":"high|medium|low","title":"Titolo breve del consiglio","reason":"Spiegazione dettagliata in italiano (2-4 frasi) con riferimento ai numeri specifici","detail":"Dettaglio tecnico: livelli di prezzo target, percentuali, contesto di mercato","warning":"Eventuali rischi o avvertenze (opzionale, puo essere null)"}]';
+  var prompt='Analizza questo portafoglio e dai consigli su quando comprare o vendere ciascun titolo. Rispondi SOLO con JSON array, nessun testo fuori. Portafoglio:\n'+JSON.stringify(positionsSummary,null,2)+'\n\nFormato risposta (JSON array):'+
+  '[{"ticker":"AAPL","action":"buy|sell|hold|watch","urgency":"high|medium|low","title":"titolo","reason":"motivazione 2-3 frasi","detail":"livelli prezzo e analisi tecnica","warning":"rischi o null"}]';
 
   // Check API key
   var apiKey=cfg('key');
@@ -2183,7 +2197,7 @@ async function generateRecommendations(){
       method:'POST',
       headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
       body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',
+        model:'claude-opus-4-5-20251001',
         max_tokens:2000,
         messages:[{role:'user',content:prompt}]
       })
