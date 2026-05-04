@@ -1506,6 +1506,8 @@ function drawSparkline(closes, width, height, color){
 
 var isinCache = JSON.parse(localStorage.getItem('isin_cache') || '{}');
 var isinConversionDone = false;
+var tradingSortField = 'ticker';
+var tradingSortDir = 1;
 
 async function isinToTicker(isin){
   // Return if already cached
@@ -2293,6 +2295,36 @@ function renderPositions(){
 
   if(!tbody){ renderTradingStats(arr); return; }
 
+  // Apply sort
+  arr = arr.slice().sort(function(a,b){
+    var da = priceCache[a.ticker+'_'+tradingPeriod] || priceCache[a.ticker];
+    var db = priceCache[b.ticker+'_'+tradingPeriod] || priceCache[b.ticker];
+    var qa = parseFloat(a.quantity)||0, qb = parseFloat(b.quantity)||0;
+    var aa = parseFloat(a.avg_buy_price)||0, ab = parseFloat(b.avg_buy_price)||0;
+    function val(p,d){ return d&&d.price ? (parseFloat(p.quantity)||0)*d.price : 0; }
+    function pnl(p,d){ return d&&d.price ? val(p,d)-(parseFloat(p.quantity)||0)*(parseFloat(p.avg_buy_price)||0) : 0; }
+    function pnlPct(p,d){ var c=(parseFloat(p.quantity)||0)*(parseFloat(p.avg_buy_price)||0); return c>0?pnl(p,d)/c*100:0; }
+    var map = {
+      ticker: [a.ticker, b.ticker],
+      name:   [a.name||'', b.name||''],
+      type:   [a.asset_type||'', b.asset_type||''],
+      price:  [da?da.price:0, db?db.price:0],
+      day:    [da?da.changePct:0, db?db.changePct:0],
+      period: [da?da.periodChangePct:0, db?db.periodChangePct:0],
+      qty:    [qa, qb],
+      avg:    [aa, ab],
+      value:  [val(a,da), val(b,db)],
+      pnl:    [pnl(a,da), pnl(b,db)],
+      pnlpct: [pnlPct(a,da), pnlPct(b,db)],
+      high:   [da?da.high:0, db?db.high:0],
+      low:    [da?da.low:0, db?db.low:0]
+    };
+    var va = map[tradingSortField] ? map[tradingSortField][0] : a.ticker;
+    var vb = map[tradingSortField] ? map[tradingSortField][1] : b.ticker;
+    if(typeof va === 'string') return va.localeCompare(vb) * tradingSortDir;
+    return (va - vb) * tradingSortDir;
+  });
+
   function fmtPct(v){
     if(v === null || v === undefined || isNaN(v)) return '<span style="color:var(--text3)">—</span>';
     var cls = v >= 0 ? 'pnl-pos' : 'pnl-neg';
@@ -2343,6 +2375,18 @@ function renderPositions(){
 
   renderTradingStats(arr);
   updatePortfolioChart();
+}
+
+
+function setTradingSort(field){
+  if(tradingSortField === field) tradingSortDir = -tradingSortDir;
+  else { tradingSortField = field; tradingSortDir = 1; }
+  // Update header arrows
+  document.querySelectorAll('.pos-th-sort').forEach(function(th){
+    th.classList.remove('asc','desc');
+    if(th.dataset.field === field) th.classList.add(tradingSortDir===1?'asc':'desc');
+  });
+  renderPositions();
 }
 
 function renderTradingStats(arr){
@@ -2529,12 +2573,13 @@ async function importPortfolioXLS(file){
     });
     return found;
   }
-  var cTicker = col(['ticker','symbol','isin','codice','titolo','asset','stock','strumento']);
-  var cName   = col(['name','nome','description','descrizione','company','issuer','emittente']);
-  var cType   = col(['type','tipo','asset type','category','categoria','classe']);
-  var cQty    = col(['qty','quantity','quantita','shares','units','pezzi','quota','num','numero']);
-  var cPrice  = col(['avg price','average price','prezzo medio','buy price','costo medio','avg cost','carico','prezzo di carico','prezzo acquisto','prezzo unitario']);
-  var cCurr   = col(['currency','valuta','ccy','divisa']);
+  var cTicker    = col(['ticker','symbol','isin','codice','titolo','asset','stock','strumento']);
+  var cName      = col(['name','nome','description','descrizione','company','issuer','emittente']);
+  var cType      = col(['type','tipo','asset type','category','categoria','classe']);
+  var cQty       = col(['qty','quantity','quantita','shares','units','pezzi','quota','num','numero','quantit']);
+  var cPrice     = col(['avg price','average price','prezzo medio','buy price','costo medio','avg cost','carico','prezzo di carico','prezzo acquisto','prezzo unitario']);
+  var cInvested  = col(['invested','investito','invested value','valore investito','book value','costo totale','total cost','tot invest','investment']);
+  var cCurr      = col(['currency','valuta','ccy','divisa']);
 
   console.log('Columns:', {cTicker,cName,cType,cQty,cPrice,cCurr}, 'sample:', sample);
 
@@ -2562,10 +2607,15 @@ async function importPortfolioXLS(file){
   rows.forEach(function(row){
     var rawVal = String(row[cTicker]||'').trim().toUpperCase();
     if(!rawVal) return;
-    var qtyP   = parseCell(row[cQty]   || '0');
-    var priceP = parseCell(row[cPrice] || '0');
+    var qtyP      = parseCell(row[cQty]      || '0');
+    var priceP    = parseCell(row[cPrice]    || '0');
+    var investedP = parseCell(row[cInvested] || '0');
+    // Compute avg price: prefer explicit price col, else invested/qty
+    if(priceP.value === 0 && investedP.value > 0 && qtyP.value > 0){
+      priceP.value = investedP.value / qtyP.value;
+    }
     var detCurr = (cCurr ? String(row[cCurr]||'').trim() : null)
-      || priceP.currency || qtyP.currency || 'USD';
+      || investedP.currency || priceP.currency || qtyP.currency || 'USD';
     var type = cType ? String(row[cType]||'stock').toLowerCase() : 'stock';
     if(type.indexOf('etf')>=0)         type='etf';
     else if(type.indexOf('bond')>=0||type.indexOf('obblig')>=0) type='bond';

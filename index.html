@@ -9,7 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="app.js?v=1777806965"></script>
+<script src="app.js?v=1777911118"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=Syne:wght@600;700;800&display=swap');
 
@@ -963,20 +963,20 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
       <table class="reg-table" style="width:100%">
         <thead>
           <tr>
-            <th style="width:32px"><input type="checkbox" id="pos-cb-all" onchange="toggleAllPositions(this)"></th>
-            <th>Ticker</th>
-            <th>Nome</th>
-            <th>Tipo</th>
-            <th>Prezzo</th>
-            <th>Var. giorno</th>
-            <th>Var. periodo</th>
-            <th>Qtà</th>
-            <th>P.Medio</th>
-            <th>Valore</th>
-            <th>P&amp;L</th>
-            <th>P&amp;L %</th>
-            <th>Max</th>
-            <th>Min</th>
+            <th style="width:32px;padding:8px 10px"><input type="checkbox" id="pos-cb-all" onchange="toggleAllPositions(this)"></th>
+            <th class="pos-th-sort th-sort" data-field="ticker" onclick="setTradingSort('ticker')" style="cursor:pointer;text-align:left">Ticker <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="name" onclick="setTradingSort('name')" style="cursor:pointer;text-align:left">Nome <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="type" onclick="setTradingSort('type')" style="cursor:pointer;text-align:left">Tipo <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="price" onclick="setTradingSort('price')" style="cursor:pointer;text-align:right">Prezzo <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="day" onclick="setTradingSort('day')" style="cursor:pointer;text-align:right">Var. giorno <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="period" onclick="setTradingSort('period')" style="cursor:pointer;text-align:right">Var. periodo <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="qty" onclick="setTradingSort('qty')" style="cursor:pointer;text-align:right">Qtà <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="avg" onclick="setTradingSort('avg')" style="cursor:pointer;text-align:right">P.Medio <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="value" onclick="setTradingSort('value')" style="cursor:pointer;text-align:right">Valore <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="pnl" onclick="setTradingSort('pnl')" style="cursor:pointer;text-align:right">P&amp;L <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="pnlpct" onclick="setTradingSort('pnlpct')" style="cursor:pointer;text-align:right">P&amp;L % <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="high" onclick="setTradingSort('high')" style="cursor:pointer;text-align:right">Max <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="low" onclick="setTradingSort('low')" style="cursor:pointer;text-align:right">Min <span class="sort-arrow"></span></th>
             <th></th>
           </tr>
         </thead>
