@@ -337,12 +337,12 @@ function importCSV(input){
         category:row['category']||row['categoria']||'Other',
         country:row['country']||'',vat_id:row['vat / tax id']||'',
         address:row['address']||'',description:row['description']||row['descrizione']||'',
-        entrate_net:parseFloat(row['entrate net']||row['entrate_net']||0)||0,
-        entrate_vat:parseFloat(row['entrate vat']||row['entrate_vat']||0)||0,
-        entrate_total:parseFloat(row['entrate total']||row['entrate_total']||0)||0,
-        uscite_net:parseFloat(row['uscite net']||row['uscite_net']||0)||0,
-        uscite_vat:parseFloat(row['uscite vat']||row['uscite_vat']||0)||0,
-        uscite_total:parseFloat(row['uscite total']||row['uscite_total']||0)||0,
+        entrate_net:parseLocalNum(row['entrate net']||row['entrate_net']||''),
+        entrate_vat:parseLocalNum(row['entrate vat']||row['entrate_vat']||''),
+        entrate_total:parseLocalNum(row['entrate total']||row['entrate_total']||''),
+        uscite_net:parseLocalNum(row['uscite net']||row['uscite_net']||''),
+        uscite_vat:parseLocalNum(row['uscite vat']||row['uscite_vat']||''),
+        uscite_total:parseLocalNum(row['uscite total']||row['uscite_total']||''),
         notes:row['notes']||row['note']||''};
       if(t.date&&t.counterparty)rows.push(t);
     }
