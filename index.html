@@ -940,6 +940,13 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
       <button class="period-pill"        data-range="6mo" onclick="setTradingPeriod('6mo',this)">6M</button>
       <button class="period-pill"        data-range="1y"  onclick="setTradingPeriod('1y',this)">1A</button>
       <button class="period-pill"        data-range="5y"  onclick="setTradingPeriod('5y',this)">5A</button>
+      <button class="period-pill"        data-range="custom" onclick="setTradingPeriod('custom',this)">Personalizzato</button>
+    </div>
+    <div id="custom-period-controls" style="display:none;align-items:center;gap:6px;flex-wrap:wrap">
+      <input type="date" id="custom-period-from" style="font-size:11px;padding:6px 8px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--font)">
+      <span style="font-size:11px;color:var(--text2)">→</span>
+      <input type="date" id="custom-period-to" style="font-size:11px;padding:6px 8px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--font)">
+      <button class="btn btn-secondary" style="font-size:11px;padding:6px 10px" onclick="applyCustomTradingPeriod()">Applica</button>
     </div>
     <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
       <button class="btn btn-secondary" style="font-size:11px" onclick="deselectAllPos()">Deseleziona tutto</button>
@@ -970,6 +977,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
             <th class="pos-th-sort th-sort" data-field="price" onclick="setTradingSort('price')" style="cursor:pointer;text-align:right">Prezzo <span class="sort-arrow"></span></th>
             <th class="pos-th-sort th-sort" data-field="day" onclick="setTradingSort('day')" style="cursor:pointer;text-align:right">Var. giorno <span class="sort-arrow"></span></th>
             <th class="pos-th-sort th-sort" data-field="period" onclick="setTradingSort('period')" style="cursor:pointer;text-align:right">Var. periodo <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="periodpnl" onclick="setTradingSort('periodpnl')" style="cursor:pointer;text-align:right">P&amp;L periodo <span class="sort-arrow"></span></th>
             <th class="pos-th-sort th-sort" data-field="qty" onclick="setTradingSort('qty')" style="cursor:pointer;text-align:right">Qtà <span class="sort-arrow"></span></th>
             <th class="pos-th-sort th-sort" data-field="avg" onclick="setTradingSort('avg')" style="cursor:pointer;text-align:right">P.Medio <span class="sort-arrow"></span></th>
             <th class="pos-th-sort th-sort" data-field="value" onclick="setTradingSort('value')" style="cursor:pointer;text-align:right">Valore <span class="sort-arrow"></span></th>
