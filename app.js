@@ -1461,18 +1461,20 @@ function exportZIP(){
 // ── MISSING FUNCTIONS RESTORED ───────────────────────────────────────────────
 
 async function refreshAllPrices(){
-  var btn = document.getElementById('refresh-btn');
-  if(btn){ btn.disabled = true; btn.textContent = 'Aggiornamento...'; }
-  var tickers = Array.from(new Set(positions.map(function(p){ return p.ticker; })));
-  for(var i = 0; i < tickers.length; i++){
-    await fetchPrice(tickers[i], tradingPeriod, tradingPeriodInterval);
-    await new Promise(function(r){ setTimeout(r, 150); });
+  var btn=document.getElementById('refresh-btn');
+  if(btn){btn.disabled=true;btn.textContent='Aggiornamento...';}
+  var tickers=Array.from(new Set(positions.map(function(p){return p.ticker;})));
+  for(var i=0;i<tickers.length;i++){
+    await fetchPrice(tickers[i],tradingPeriod,tradingPeriodInterval);
+    if(i<tickers.length-1) await new Promise(function(r){setTimeout(r,200);});
   }
-  if(btn){ btn.disabled = false; btn.textContent = '↻ Aggiorna prezzi'; }
-  var upd = document.getElementById('last-update');
-  if(upd) upd.textContent = 'Aggiornato: ' + new Date().toLocaleTimeString('it-IT');
+  if(btn){btn.disabled=false;btn.textContent='\u21BB Aggiorna prezzi';}
+  var upd=document.getElementById('last-update');
+  if(upd) upd.textContent='Aggiornato: '+new Date().toLocaleTimeString('it-IT');
   renderPositions();
+  updatePortfolioChart();
 }
+
 
 async function linkGuestIfNeeded(){
   if(!currentUser) return;
@@ -2010,78 +2012,80 @@ async function saveTransaction2(){
 
 // ── PRICE FETCHING (Yahoo Finance) ────────────────────────────────────────────
 async function fetchPrice(ticker, range, interval){
-  range = range || '1d';
-  interval = interval || '5m';
-  var cacheKey = ticker + '_' + range;
-  var cached = priceCache[cacheKey];
-  var maxAge = range === '1d' ? 60000 : 300000;
-  if(cached && Date.now() - cached.ts < maxAge) return cached;
+  range    = range    || tradingPeriod    || '1d';
+  interval = interval || tradingPeriodInterval || '5m';
+  var key  = ticker + '_' + range;
+  var ttl  = (range === '1d') ? 60000 : 300000;
+  if(priceCache[key] && (Date.now() - priceCache[key].ts) < ttl) return priceCache[key];
 
-  var yahooUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' +
-    encodeURIComponent(ticker) + '?interval=' + interval + '&range=' + range + '&includePrePost=false';
+  // Yahoo Finance URL
+  var yurl = 'https://query1.finance.yahoo.com/v8/finance/chart/'
+    + encodeURIComponent(ticker)
+    + '?interval=' + interval
+    + '&range='    + range
+    + '&includePrePost=false';
 
-  // Try proxies in order
-  var attempts = [
-    { url: 'https://corsproxy.io/?' + encodeURIComponent(yahooUrl), wrap: false },
-    { url: 'https://api.allorigins.win/get?url=' + encodeURIComponent(yahooUrl), wrap: true },
-    { url: yahooUrl, wrap: false }  // direct (works on localhost)
+  // Proxy list — try in order
+  var proxies = [
+    'https://corsproxy.io/?' + encodeURIComponent(yurl),
+    'https://api.allorigins.win/get?url=' + encodeURIComponent(yurl),
+    'https://corsproxy.io/?' + encodeURIComponent(
+      'https://query2.finance.yahoo.com/v8/finance/chart/'
+      + encodeURIComponent(ticker)
+      + '?interval=' + interval + '&range=' + range)
   ];
 
-  for(var i = 0; i < attempts.length; i++){
+  for(var pi = 0; pi < proxies.length; pi++){
     try{
-      var resp = await fetch(attempts[i].url, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' }
-      });
+      var resp = await fetch(proxies[pi], {method:'GET'});
       if(!resp.ok) continue;
       var json = await resp.json();
-      if(attempts[i].wrap && json.contents) json = JSON.parse(json.contents);
+      // allorigins wraps in .contents
+      if(json.contents) json = JSON.parse(json.contents);
       if(!json.chart || !json.chart.result || !json.chart.result[0]) continue;
 
       var meta   = json.chart.result[0].meta;
-      var quotes = json.chart.result[0].indicators.quote[0];
-      var closes = (quotes.close || []).filter(function(c){ return c !== null && !isNaN(c); });
-      var timestamps = json.chart.result[0].timestamp || [];
+      var q      = json.chart.result[0].indicators.quote[0];
+      var closes = (q.close || []);
+      var valid  = closes.filter(function(c){ return c !== null && !isNaN(c); });
 
-      var currentPrice = meta.regularMarketPrice || meta.chartPreviousClose || 0;
-      var prevClose    = meta.chartPreviousClose  || currentPrice;
-      var change       = currentPrice - prevClose;
-      var changePct    = prevClose > 0 ? change / prevClose * 100 : 0;
-      var firstClose   = closes[0] || currentPrice;
-      var periodChangePct = firstClose > 0 ? (currentPrice - firstClose) / firstClose * 100 : 0;
-      var high = closes.length ? Math.max.apply(null, closes) : currentPrice;
-      var low  = closes.length ? Math.min.apply(null, closes) : currentPrice;
-
-      // Rebuild closes array preserving nulls but mapped to clean values
-      var allCloses = (quotes.close || []).map(function(c){ return (c !== null && !isNaN(c)) ? c : null; });
+      var price    = meta.regularMarketPrice || meta.chartPreviousClose || 0;
+      var prev     = meta.chartPreviousClose || price;
+      var dayChg   = price - prev;
+      var dayChgPct= prev > 0 ? dayChg / prev * 100 : 0;
+      var first    = valid[0] || price;
+      var perChgPct= first > 0 ? (price - first) / first * 100 : 0;
+      var hi = valid.length ? Math.max.apply(null,valid) : price;
+      var lo = valid.length ? Math.min.apply(null,valid) : price;
 
       var result = {
-        price: currentPrice, change: change, changePct: changePct,
-        periodChange: currentPrice - firstClose, periodChangePct: periodChangePct,
-        high: high, low: low, closes: allCloses, timestamps: timestamps,
+        price: price, change: dayChg, changePct: dayChgPct,
+        periodChange: price-first, periodChangePct: perChgPct,
+        high: hi, low: lo, closes: closes,
         currency: meta.currency || 'USD',
         name: meta.shortName || meta.longName || ticker,
-        ts: Date.now(), source: i
+        ts: Date.now()
       };
-      priceCache[cacheKey] = result;
-      priceCache[ticker]   = result;
-      console.log('Price OK:', ticker, '@', currentPrice, 'via proxy', i);
+      priceCache[key]   = result;
+      priceCache[ticker]= result;
       return result;
     } catch(e){
-      console.warn('Proxy', i, 'failed for', ticker, ':', e.message);
+      console.warn('Proxy', pi, 'failed for', ticker, ':', e.message);
     }
   }
-  console.error('All proxies failed for', ticker);
+  console.error('All proxies failed:', ticker);
   return null;
 }
 
-function setTradingPeriod(range, btn){
+
+function setTradingPeriod(range,btn){
   tradingPeriod=range;
   tradingPeriodInterval=PERIOD_INTERVALS[range]||'1d';
   document.querySelectorAll('[data-range]').forEach(function(b){b.classList.remove('active');});
-  if(btn)btn.classList.add('active');
-  // Clear cache for this period to force refetch
-  positions.forEach(function(p){ delete priceCache[p.ticker+'_'+range]; });
+  if(btn) btn.classList.add('active');
+  var lbl=document.getElementById('compare-period-label');
+  if(lbl) lbl.textContent=PERIOD_LABELS[range]||range;
+  positions.forEach(function(p){delete priceCache[p.ticker+'_'+range];});
   refreshAllPrices();
 }
 
@@ -2099,6 +2103,7 @@ function deselectAllPos(){
   var btn=document.getElementById('compare-btn');
   if(btn) btn.style.display='none';
   renderPositions();
+  updatePortfolioChart();
 }
 
 async function updatePortfolioChart(){
@@ -2293,6 +2298,23 @@ function renderPositions(){
   if(empty) empty.style.display = 'none';
   if(recPanel) recPanel.style.display = '';
 
+  // Apply sort
+  arr=arr.slice().sort(function(a,b){
+    var da=priceCache[a.ticker+'_'+tradingPeriod]||priceCache[a.ticker];
+    var db=priceCache[b.ticker+'_'+tradingPeriod]||priceCache[b.ticker];
+    function gv(p,d,f){
+      var qty=parseFloat(p.quantity)||0, avg=parseFloat(p.avg_buy_price)||0;
+      var val=d&&d.price?qty*d.price:0, cost=qty*avg;
+      var pnl=val-cost, pnlp=cost>0?pnl/cost*100:0;
+      return {ticker:p.ticker,name:p.name||'',type:p.asset_type||'',
+        price:d?d.price:0,day:d?d.changePct:0,period:d?d.periodChangePct:0,
+        qty:qty,avg:avg,value:val,pnl:pnl,pnlpct:pnlp,high:d?d.high:0,low:d?d.low:0};
+    }
+    var va=gv(a,da)[tradingSortField||'ticker'];
+    var vb=gv(b,db)[tradingSortField||'ticker'];
+    if(typeof va==='string') return va.localeCompare(vb)*tradingSortDir;
+    return ((va||0)-(vb||0))*tradingSortDir;
+  });
   if(!tbody){ renderTradingStats(arr); return; }
 
   // Apply sort
