@@ -785,7 +785,7 @@ function calcEditE(){var n=eNum('e-en-net'),vt=eNum('e-en-vat');if(n||vt)eSet('e
 function calcEditU(){var n=eNum('e-us-net'),vt=eNum('e-us-vat');if(n||vt)eSet('e-us-tot',(n+vt).toFixed(2));}
 function eV(id){return document.getElementById(id).value;}
 function eSet(id,val){var el=document.getElementById(id);if(el)el.value=val;}
-ffunction eNum(id){return parseLocalNum(eV(id));}
+function eNum(id){return parseLocalNum(eV(id));}
 function setState(s){
   document.getElementById('state-upload').style.display=s==='upload'?'':'none';
   document.getElementById('state-processing').style.display=s==='processing'?'':'none';
