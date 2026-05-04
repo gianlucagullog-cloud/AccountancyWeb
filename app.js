@@ -1529,7 +1529,8 @@ async function isinToTicker(isin){
     'IE00B4BNMY34':'IWDA.AS','IE00B5BMR087':'CSPX.L',  'IE00B3WJKG14':'EUNL.DE',
     'LU0274208692':'VUSA.DE','IE00B3RBWM25':'VWRL.AS', 'IE00B52MJY50':'IUSA.DE',
     'US9229087690':'VTI',    'US9219097683':'VT',      'US4642874329':'IVV',
-    'US4642872265':'IJH',    'US46432F8419':'EEM'
+    'US4642872265':'IJH',    'US46432F8419':'EEM',     'IE00BWT6H894':'FLTR.L',
+    'US5949724083':'MSTR'
   };
   if(manual[isin]) {
     isinCache[isin] = manual[isin];
@@ -1873,6 +1874,20 @@ function mergePositionImportMeta(userNotes, meta){
   if(!meta) return clean;
   var payload = IMPORT_META_PREFIX + JSON.stringify(meta);
   return clean ? (clean + '\n' + payload) : payload;
+}
+
+function normalizeImportedCurrency(cur, isin){
+  var c = (cur || '').toUpperCase();
+  var securityIsin = (isin || '').toUpperCase();
+  if(c === '$' || c === 'DOLLAR') c = 'USD';
+  if(c === 'USD'){
+    if(/^CA/.test(securityIsin)) return 'CAD';
+    if(/^CH/.test(securityIsin)) return 'CHF';
+    if(/^AU/.test(securityIsin)) return 'AUD';
+    if(/^HK/.test(securityIsin)) return 'HKD';
+    if(/^SG/.test(securityIsin)) return 'SGD';
+  }
+  return c || 'USD';
 }
 
 async function fetchFXRates(){
@@ -2426,13 +2441,16 @@ function renderPositions(){
   }
 
   tbody.innerHTML = arr.map(function(p){
+    var meta = getPositionImportMeta(p.notes);
     var data = priceCache[p.ticker+'_'+tradingPeriod] || priceCache[p.ticker];
     var qty  = parseFloat(p.quantity) || 0;
     var avg  = parseFloat(p.avg_buy_price) || 0;
     var curr = data ? data.price : null;
-    var cost = qty * avg;
-    var val  = curr !== null ? qty * curr : cost;
+    var displayCur = (meta && meta.importedCurrency) || (data && data.currency) || p.currency || 'USD';
+    var cost = meta && meta.importedInvestedValue > 0 ? meta.importedInvestedValue : qty * avg;
+    var val  = meta && meta.importedCurrentValue > 0 ? meta.importedCurrentValue : (curr !== null ? qty * curr : cost);
     var pnl  = curr !== null ? val - cost : null;
+    if(meta && meta.importedCurrentValue > 0) pnl = val - cost;
     var pnlPct  = cost > 0 && pnl !== null ? pnl / cost * 100 : null;
     var dayPct  = data ? data.changePct : null;
     var perPct  = data ? data.periodChangePct : null;
@@ -2444,7 +2462,7 @@ function renderPositions(){
       +'<td class="ticker-cell">'+p.ticker+'</td>'
       +'<td style="color:var(--text2);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(data&&data.name||p.name||'')+'</td>'
       +'<td><span class="'+badgeCls+'">'+(p.asset_type||'other')+'</span></td>'
-      +'<td><b>'+(curr!==null?curr.toFixed(2):'<span style="color:var(--text3)">N/D</span>')+'</b>'+(data?'&nbsp;<small style="color:var(--text3)">'+(data.currency||p.currency||'')+'</small>':'')+'</td>'
+      +'<td><b>'+(curr!==null?curr.toFixed(2):'<span style="color:var(--text3)">N/D</span>')+'</b>'+'&nbsp;<small style="color:var(--text3)">'+displayCur+'</small></td>'
       +'<td>'+fmtPct(dayPct)+'</td>'
       +'<td>'+fmtPct(perPct)+'</td>'
       +'<td>'+qty.toLocaleString('it-IT',{maximumFractionDigits:6})+'</td>'
@@ -2504,11 +2522,10 @@ function renderTradingStats(arr){
   });
   var totalPnl    = totalCost > 0 ? totalValue - totalCost : 0;
   var totalPnlPct = totalCost > 0 ? totalPnl / totalCost * 100 : 0;
-  var pricedNote  = unpriced > 0 ? ' <small style="color:var(--text3)">('+unpriced+' senza prezzo)</small>' : '';
   var el = document.getElementById('trading-stats');
   if(el) el.innerHTML =
     stat('Investito (EUR)', totalCost > 0 ? totalCost.toFixed(0) : 'N/D', 'var(--text2)') +
-    stat('Valore Attuale (EUR)', totalValue.toFixed(0)+pricedNote, 'var(--accent)') +
+    stat('Valore Attuale (EUR)', totalValue.toFixed(0), 'var(--accent)') +
     stat('P&L (EUR)', totalCost>0 ? (totalPnl>=0?'+':'')+totalPnl.toFixed(0)+' ('+(totalPnlPct>=0?'+':'')+totalPnlPct.toFixed(1)+'%)' : 'Aggiorna prezzi', totalPnl>=0?'var(--green)':'var(--red)') +
     stat('Posizioni', arr.length, 'var(--accent)');
 }
@@ -2822,8 +2839,9 @@ async function importPortfolioXLS(file){
     }
 
     // Currency: prefer explicit col, then from price cell, then invested value cell
-    var currency = (COL.currency ? String(row[COL.currency]||'').trim().toUpperCase() : null)
+    var rawCurrency = (COL.currency ? String(row[COL.currency]||'').trim().toUpperCase() : null)
       || invP.cur || invV.cur || curV.cur || 'USD';
+    var currency = normalizeImportedCurrency(rawCurrency, isinRaw);
 
     if(qty === 0) return; // skip rows with no quantity
 
