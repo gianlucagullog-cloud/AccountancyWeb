@@ -2594,6 +2594,110 @@ async function importPortfolioFile(input){
 }
 
 async function importPortfolioXLS(file){
+  function detectDelimiter(text){
+    var sample = text.split(/\r?\n/).filter(function(line){ return line.trim(); }).slice(0, 5);
+    var candidates = [',',';','\t'];
+    var best = ',', bestScore = -1;
+    candidates.forEach(function(delim){
+      var score = sample.reduce(function(acc, line){
+        var parts = splitDelimitedLine(line, delim);
+        return acc + (parts.length > 1 ? parts.length : 0);
+      }, 0);
+      if(score > bestScore){ best = delim; bestScore = score; }
+    });
+    return best;
+  }
+
+  function splitDelimitedLine(line, delimiter){
+    var out = [];
+    var cur = '';
+    var inQuotes = false;
+    for(var i=0; i<line.length; i++){
+      var ch = line[i];
+      if(ch === '"'){
+        if(inQuotes && line[i+1] === '"'){
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if(ch === delimiter && !inQuotes){
+        out.push(cur);
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur);
+    return out.map(function(part){ return part.trim(); });
+  }
+
+  function parseDelimitedText(text){
+    var delimiter = detectDelimiter(text);
+    var lines = text.split(/\r?\n/).filter(function(line){ return line.trim(); });
+    if(!lines.length) return [];
+    var headers = splitDelimitedLine(lines[0], delimiter).map(function(h){
+      return h.replace(/^"|"$/g,'').trim();
+    });
+    return lines.slice(1).map(function(line){
+      var values = splitDelimitedLine(line, delimiter).map(function(v){
+        return v.replace(/^"|"$/g,'').trim();
+      });
+      var obj = {};
+      headers.forEach(function(h, i){ obj[h] = values[i] || ''; });
+      return obj;
+    });
+  }
+
+  function normalizeHeader(value){
+    return String(value || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g,'')
+      .replace(/[^a-z0-9]+/g,' ')
+      .trim();
+  }
+
+  function parseNum(raw){
+    if(raw === null || raw === undefined) return {n:0, cur:null};
+    var original = String(raw).replace(/\u00A0/g,' ').trim();
+    if(!original) return {n:0, cur:null};
+
+    var cur = null;
+    var symMap = {'€':'EUR','$':'USD','£':'GBP','¥':'JPY','CHF':'CHF'};
+    Object.keys(symMap).some(function(sym){
+      if(original.indexOf(sym) >= 0){ cur = symMap[sym]; return true; }
+      return false;
+    });
+    var codeMatch = original.match(/\b(EUR|USD|GBP|JPY|CHF|CAD|AUD|HKD|SGD)\b/i);
+    if(codeMatch && !cur) cur = codeMatch[1].toUpperCase();
+
+    var s = original
+      .replace(/\s+/g,'')
+      .replace(/'/g,'')
+      .replace(/[^0-9,.\-]/g,'');
+    if(!s || s === '-' || s === ',' || s === '.') return {n:0, cur:cur};
+
+    var lastComma = s.lastIndexOf(',');
+    var lastDot   = s.lastIndexOf('.');
+    if(lastComma >= 0 && lastDot >= 0){
+      if(lastComma > lastDot){
+        s = s.replace(/\./g,'').replace(/,/g,'.');
+      } else {
+        s = s.replace(/,/g,'');
+      }
+    } else if(lastComma >= 0){
+      var commaDecimals = s.length - lastComma - 1;
+      s = commaDecimals > 0 && commaDecimals <= 4 ? s.replace(/,/g,'.') : s.replace(/,/g,'');
+    } else if(lastDot >= 0){
+      var dotDecimals = s.length - lastDot - 1;
+      if(!(dotDecimals > 0 && dotDecimals <= 4)){
+        s = s.replace(/\./g,'');
+      }
+    }
+    return {n: parseFloat(s)||0, cur: cur};
+  }
+
   // Read file
   var arrayBuf = await new Promise(function(resolve, reject){
     var r = new FileReader();
@@ -2610,18 +2714,14 @@ async function importPortfolioXLS(file){
     var ext  = file.name.split('.').pop().toLowerCase();
     if(ext === 'csv'){
       var text = new TextDecoder().decode(data);
-      rows = text.split('\n').filter(function(l){ return l.trim(); });
-      var headers = rows[0].split(',').map(function(h){ return h.replace(/"/g,'').trim(); });
-      rows = rows.slice(1).map(function(l){
-        var vals = l.split(',').map(function(v){ return v.replace(/"/g,'').trim(); });
-        var obj = {};
-        headers.forEach(function(h,i){ obj[h]=vals[i]||''; });
-        return obj;
-      });
+      rows = parseDelimitedText(text);
     } else {
       wb = XLSX.read(data, {type:'array'});
-      ws = wb.Sheets[wb.SheetNames[0]];
-      rows = XLSX.utils.sheet_to_json(ws, {defval:'', raw:false});
+      for(var si=0; si<wb.SheetNames.length; si++){
+        ws = wb.Sheets[wb.SheetNames[si]];
+        rows = XLSX.utils.sheet_to_json(ws, {defval:'', raw:false});
+        if(rows && rows.length) break;
+      }
     }
   } catch(err){ alert('Errore lettura: '+err.message); return; }
 
@@ -2629,14 +2729,22 @@ async function importPortfolioXLS(file){
 
   // --- COLUMN DETECTION ---
   // Find each column by checking all header names (case-insensitive, partial match)
-  var headers = Object.keys(rows[0]);
+  var headers = [];
+  rows.slice(0, 20).forEach(function(row){
+    Object.keys(row || {}).forEach(function(key){
+      if(headers.indexOf(key) === -1) headers.push(key);
+    });
+  });
+  var normalizedHeaders = headers.map(function(header){
+    return {raw: header, norm: normalizeHeader(header)};
+  });
   console.log('Headers nel file:', headers);
 
   function findCol(keywords){
     for(var ki=0; ki<keywords.length; ki++){
-      var kw = keywords[ki].toLowerCase();
-      for(var hi=0; hi<headers.length; hi++){
-        if(headers[hi].toLowerCase().indexOf(kw) >= 0) return headers[hi];
+      var kw = normalizeHeader(keywords[ki]);
+      for(var hi=0; hi<normalizedHeaders.length; hi++){
+        if(normalizedHeaders[hi].norm.indexOf(kw) >= 0) return normalizedHeaders[hi].raw;
       }
     }
     return null;
@@ -2652,39 +2760,14 @@ async function importPortfolioXLS(file){
                             'prezzo carico','prezzo unitario','carico']),
     investedValue: findCol(['invested value','valore investito','book value',
                             'total invested','costo totale','total cost','importo investito']),
-    currentValue:  findCol(['current value','valore corrente','market value']),
-    currency:      findCol(['currency','valuta','ccy','divisa'])
+    currentValue:  findCol(['current value','valore corrente','market value','last value','valore attuale']),
+    currency:      findCol(['currency','valuta','ccy','divisa','currency code'])
   };
 
   console.log('Colonne rilevate:', COL);
 
   if(!COL.isin){ alert('Colonna ISIN/Ticker non trovata.\nColonne presenti: '+headers.join(', ')); return; }
   if(!COL.qty){  alert('Colonna Quantity non trovata.\nColonne presenti: '+headers.join(', ')); return; }
-
-  // --- PARSE EACH ROW ---
-  // Strip currency symbols and parse number from string like "€ 81.52" or "$1,234.56"
-  function parseNum(raw){
-    if(raw === null || raw === undefined) return {n:0, cur:null};
-    var s = String(raw).trim();
-    // Detect currency symbol
-    var cur = null;
-    var symMap = {'€':'EUR','$':'USD','£':'GBP','¥':'JPY','CHF':'CHF'};
-    for(var sym in symMap){
-      if(s.indexOf(sym) >= 0){ cur = symMap[sym]; break; }
-    }
-    // Also detect 3-letter currency code
-    var codeMatch = s.match(/\b(EUR|USD|GBP|JPY|CHF|CAD|AUD|HKD|SGD)\b/);
-    if(codeMatch && !cur) cur = codeMatch[1];
-    // Remove everything except digits, comma, dot, minus
-    s = s.replace(/[^0-9.,-]/g,'').trim();
-    // Handle European format: 1.234,56 → 1234.56
-    if(s.match(/\d{1,3}\.\d{3},\d{2}$/)){
-      s = s.replace(/\./g,'').replace(',','.');
-    } else {
-      s = s.replace(',','.');
-    }
-    return {n: parseFloat(s)||0, cur: cur};
-  }
 
   var rawRows = [];
   rows.forEach(function(row){
@@ -2705,7 +2788,7 @@ async function importPortfolioXLS(file){
     }
 
     // Currency: prefer explicit col, then from price cell, then invested value cell
-    var currency = (COL.currency ? String(row[COL.currency]||'').trim() : null)
+    var currency = (COL.currency ? String(row[COL.currency]||'').trim().toUpperCase() : null)
       || invP.cur || invV.cur || curV.cur || 'USD';
 
     if(qty === 0) return; // skip rows with no quantity
@@ -2852,4 +2935,3 @@ async function importPortfolioPDF(file){
   else showMsg(parsed.length+' posizioni importate dal PDF!','success');
   await loadPositions();
 }
-
