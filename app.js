@@ -2666,8 +2666,10 @@ function renderPositions(){
     var displayPriceEur = curr !== null ? toEUR(curr, liveCur) : null;
     var displayAvgEur = toEUR(avg, baseCur);
     var cost = meta && meta.importedInvestedValue > 0 ? toEUR(meta.importedInvestedValue, baseCur) : toEUR(qty * avg, baseCur);
-    var val  = meta && meta.importedCurrentValue > 0 ? toEUR(meta.importedCurrentValue, baseCur) : (curr !== null ? toEUR(qty * curr, liveCur) : cost);
-    var pnl  = curr !== null || (meta && meta.importedCurrentValue > 0) ? val - cost : null;
+    var liveValueEur = curr !== null ? toEUR(qty * curr, liveCur) : null;
+    var importedValueEur = meta && meta.importedCurrentValue > 0 ? toEUR(meta.importedCurrentValue, baseCur) : null;
+    var val  = liveValueEur !== null ? liveValueEur : (importedValueEur !== null ? importedValueEur : cost);
+    var pnl  = val !== null ? val - cost : null;
     var pnlPct  = cost > 0 && pnl !== null ? pnl / cost * 100 : null;
     var dayPct  = dayData ? dayData.changePct : null;
     var perPct  = data ? data.periodChangePct : null;
