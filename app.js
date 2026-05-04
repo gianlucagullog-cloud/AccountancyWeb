@@ -1502,6 +1502,14 @@ function applyCustomTradingPeriod(){
   setTradingPeriod('custom', document.querySelector('[data-range="custom"]'));
 }
 
+function syncPositionFilter(value){
+  var top = document.getElementById('pos-filter-type');
+  var table = document.getElementById('pos-filter-type-table');
+  if(top && top.value !== value) top.value = value;
+  if(table && table.value !== value) table.value = value;
+  renderPositions();
+}
+
 
 async function linkGuestIfNeeded(){
   if(!currentUser) return;
@@ -1967,6 +1975,65 @@ function filterSeriesByCustomRange(timestamps, closes){
   return filtered;
 }
 
+function buildSeriesPoints(timestamps, closes){
+  var points = [];
+  for(var i=0; i<Math.min((timestamps || []).length, (closes || []).length); i++){
+    var close = closes[i];
+    if(close !== null && !isNaN(close)){
+      points.push({ts:(timestamps[i] || 0) * 1000, close:close});
+    }
+  }
+  return points;
+}
+
+function getRangeStartTs(range, referenceTs){
+  var d = new Date(referenceTs || Date.now());
+  if(range === '5d') d.setDate(d.getDate() - 7);
+  else if(range === '1mo') d.setMonth(d.getMonth() - 1);
+  else if(range === '3mo') d.setMonth(d.getMonth() - 3);
+  else if(range === '6mo') d.setMonth(d.getMonth() - 6);
+  else if(range === '1y') d.setFullYear(d.getFullYear() - 1);
+  else if(range === '5y') d.setFullYear(d.getFullYear() - 5);
+  else if(range === '1d') d.setDate(d.getDate() - 1);
+  return d.getTime();
+}
+
+function selectSeriesForRange(range, timestamps, closes){
+  var points = buildSeriesPoints(timestamps, closes);
+  if(!points.length) return [];
+  if(range === 'custom'){
+    var custom = filterSeriesByCustomRange(timestamps, closes);
+    return custom || [];
+  }
+  if(range === '1d') return points;
+  var refTs = points[points.length - 1].ts;
+  var targetTs = getRangeStartTs(range, refTs);
+  var startIdx = 0;
+  for(var i=0; i<points.length; i++){
+    if(points[i].ts <= targetTs) startIdx = i;
+    if(points[i].ts > targetTs) break;
+  }
+  return points.slice(startIdx);
+}
+
+function getFetchRangeForPeriod(range){
+  if(range === '1d') return '5d';
+  if(range === '5d') return '1mo';
+  if(range === '1mo') return '3mo';
+  if(range === '3mo') return '6mo';
+  if(range === '6mo') return '1y';
+  if(range === '1y') return '2y';
+  if(range === '5y') return '10y';
+  if(range === 'custom') return 'max';
+  return range || '1mo';
+}
+
+function getFetchIntervalForPeriod(range){
+  if(range === '5y') return '1wk';
+  if(range === 'custom') return '1d';
+  return '1d';
+}
+
 function detectAssetType(name, ticker, isin){
   var text = ((name || '') + ' ' + (ticker || '')).toLowerCase();
   var code = String(isin || '').toUpperCase();
@@ -2219,12 +2286,8 @@ async function fetchPrice(ticker, range, interval){
   var ttl  = (range === '1d') ? 60000 : 300000;
   if(priceCache[key] && (Date.now() - priceCache[key].ts) < ttl) return priceCache[key];
 
-  var fetchRange = range;
-  var fetchInterval = interval;
-  if(range === 'custom'){
-    fetchRange = 'max';
-    fetchInterval = '1d';
-  }
+  var fetchRange = getFetchRangeForPeriod(range);
+  var fetchInterval = range === '1d' ? interval : getFetchIntervalForPeriod(range);
 
   // Yahoo Finance URL
   var yurl = 'https://query1.finance.yahoo.com/v8/finance/chart/'
@@ -2256,14 +2319,14 @@ async function fetchPrice(ticker, range, interval){
       var timestamps = json.chart.result[0].timestamp || [];
       var q      = json.chart.result[0].indicators.quote[0];
       var closes = (q.close || []);
-      var valid  = closes.filter(function(c){ return c !== null && !isNaN(c); });
-      var filteredSeries = filterSeriesByCustomRange(timestamps, closes);
-      var series = filteredSeries && filteredSeries.length
-        ? filteredSeries.map(function(point){ return point.close; })
-        : valid;
+      var points = selectSeriesForRange(range, timestamps, closes);
+      var series = points.map(function(point){ return point.close; });
 
-      var price    = series.length ? series[series.length-1] : (meta.regularMarketPrice || meta.chartPreviousClose || 0);
-      var prev     = series.length > 1 ? series[series.length-2] : (meta.chartPreviousClose || price);
+      var livePrice = meta.regularMarketPrice || meta.chartPreviousClose || (series.length ? series[series.length-1] : 0);
+      var price    = livePrice;
+      var prev     = range === '1d'
+        ? (meta.chartPreviousClose || (series.length > 1 ? series[series.length-2] : price))
+        : (series.length > 1 ? series[series.length-2] : (meta.chartPreviousClose || price));
       var dayChg   = price - prev;
       var dayChgPct= prev > 0 ? dayChg / prev * 100 : 0;
       var first    = series[0] || price;
@@ -2527,12 +2590,15 @@ function renderPositions(){
     function gv(p,d,f){
       var qty=parseFloat(p.quantity)||0, avg=parseFloat(p.avg_buy_price)||0;
       var live = f || d;
-      var val=live&&live.price?qty*live.price:0, cost=qty*avg;
+      var priceEur = live&&live.price ? toEUR(live.price, (live.currency || p.currency || 'USD')) : 0;
+      var avgEur = toEUR(avg, (p.currency || 'USD'));
+      var val=live&&live.price ? toEUR(qty*live.price, (live.currency || p.currency || 'USD')) : 0;
+      var cost=toEUR(qty*avg, (p.currency || 'USD'));
       var pnl=val-cost, pnlp=cost>0?pnl/cost*100:0;
       var periodPnl = d && d.periodChange !== null && d.periodChange !== undefined ? toEUR(d.periodChange * qty, (d.currency || p.currency || 'USD')) : 0;
       return {ticker:p.ticker,name:p.name||'',type:p.asset_type||'',
-        price:live?live.price:0,day:f?f.changePct:0,period:d?d.periodChangePct:0,
-        periodpnl: periodPnl, qty:qty,avg:avg,value:val,pnl:pnl,pnlpct:pnlp,high:d?d.high:0,low:d?d.low:0};
+        price:priceEur,day:f?f.changePct:0,period:d?d.periodChangePct:0,
+        periodpnl: periodPnl, qty:qty,avg:avgEur,value:val,pnl:pnl,pnlpct:pnlp,high:d?d.high:0,low:d?d.low:0};
     }
     var va=gv(a,da,dayA)[tradingSortField||'ticker'];
     var vb=gv(b,db,dayB)[tradingSortField||'ticker'];
@@ -2548,16 +2614,18 @@ function renderPositions(){
     var dayA = priceCache[getTradingCacheKey(a.ticker, '1d')] || da;
     var dayB = priceCache[getTradingCacheKey(b.ticker, '1d')] || db;
     var qa = parseFloat(a.quantity)||0, qb = parseFloat(b.quantity)||0;
-    var aa = parseFloat(a.avg_buy_price)||0, ab = parseFloat(b.avg_buy_price)||0;
-    function val(p,d){ return d&&d.price ? (parseFloat(p.quantity)||0)*d.price : 0; }
-    function pnl(p,d){ return d&&d.price ? val(p,d)-(parseFloat(p.quantity)||0)*(parseFloat(p.avg_buy_price)||0) : 0; }
-    function pnlPct(p,d){ var c=(parseFloat(p.quantity)||0)*(parseFloat(p.avg_buy_price)||0); return c>0?pnl(p,d)/c*100:0; }
+    var aa = toEUR(parseFloat(a.avg_buy_price)||0, (a.currency || 'USD'));
+    var ab = toEUR(parseFloat(b.avg_buy_price)||0, (b.currency || 'USD'));
+    function val(p,d){ return d&&d.price ? toEUR((parseFloat(p.quantity)||0)*d.price, (d.currency || p.currency || 'USD')) : 0; }
+    function cost(p){ return toEUR((parseFloat(p.quantity)||0)*(parseFloat(p.avg_buy_price)||0), (p.currency || 'USD')); }
+    function pnl(p,d){ return d&&d.price ? val(p,d)-cost(p) : 0; }
+    function pnlPct(p,d){ var c=cost(p); return c>0?pnl(p,d)/c*100:0; }
     function periodPnl(p,d){ return d&&d.periodChange !== null && d.periodChange !== undefined ? toEUR((parseFloat(p.quantity)||0)*d.periodChange, (d.currency || p.currency || 'USD')) : 0; }
     var map = {
       ticker: [a.ticker, b.ticker],
       name:   [a.name||'', b.name||''],
       type:   [a.asset_type||'', b.asset_type||''],
-      price:  [dayA?dayA.price:(da?da.price:0), dayB?dayB.price:(db?db.price:0)],
+      price:  [dayA&&dayA.price?toEUR(dayA.price, (dayA.currency || a.currency || 'USD')):(da&&da.price?toEUR(da.price, (da.currency || a.currency || 'USD')):0), dayB&&dayB.price?toEUR(dayB.price, (dayB.currency || b.currency || 'USD')):(db&&db.price?toEUR(db.price, (db.currency || b.currency || 'USD')):0)],
       day:    [dayA?dayA.changePct:0, dayB?dayB.changePct:0],
       period: [da?da.periodChangePct:0, db?db.periodChangePct:0],
       periodpnl: [periodPnl(a,da), periodPnl(b,db)],
@@ -2593,15 +2661,17 @@ function renderPositions(){
     var qty  = parseFloat(p.quantity) || 0;
     var avg  = parseFloat(p.avg_buy_price) || 0;
     var curr = dayData ? dayData.price : (data ? data.price : null);
-    var displayCur = (meta && meta.importedCurrency) || (dayData && dayData.currency) || (data && data.currency) || p.currency || 'USD';
-    var cost = meta && meta.importedInvestedValue > 0 ? meta.importedInvestedValue : qty * avg;
-    var val  = meta && meta.importedCurrentValue > 0 ? meta.importedCurrentValue : (curr !== null ? qty * curr : cost);
-    var pnl  = curr !== null ? val - cost : null;
-    if(meta && meta.importedCurrentValue > 0) pnl = val - cost;
+    var baseCur = (meta && meta.importedCurrency) || p.currency || 'USD';
+    var liveCur = (dayData && dayData.currency) || (data && data.currency) || baseCur;
+    var displayPriceEur = curr !== null ? toEUR(curr, liveCur) : null;
+    var displayAvgEur = toEUR(avg, baseCur);
+    var cost = meta && meta.importedInvestedValue > 0 ? toEUR(meta.importedInvestedValue, baseCur) : toEUR(qty * avg, baseCur);
+    var val  = meta && meta.importedCurrentValue > 0 ? toEUR(meta.importedCurrentValue, baseCur) : (curr !== null ? toEUR(qty * curr, liveCur) : cost);
+    var pnl  = curr !== null || (meta && meta.importedCurrentValue > 0) ? val - cost : null;
     var pnlPct  = cost > 0 && pnl !== null ? pnl / cost * 100 : null;
     var dayPct  = dayData ? dayData.changePct : null;
     var perPct  = data ? data.periodChangePct : null;
-    var perPnl  = data && data.periodChange !== null && data.periodChange !== undefined ? toEUR(data.periodChange * qty, (data.currency || p.currency || displayCur || 'USD')) : null;
+    var perPnl  = data && data.periodChange !== null && data.periodChange !== undefined ? toEUR(data.periodChange * qty, (data.currency || liveCur || 'USD')) : null;
     var sel = selectedPosTickers.has(p.ticker);
     var badgeCls = 'pos-badge pos-badge-'+(p.asset_type||'other');
     var displayName = (p.name || (data && data.name) || p.ticker || '').trim();
@@ -2610,12 +2680,12 @@ function renderPositions(){
       +'<td style="width:32px;padding:8px 10px"><input type="checkbox" '+(sel?'checked':'')+' data-ticker="'+p.ticker+'" onchange="handlePosSelect(this)" style="accent-color:var(--accent)"></td>'
       +'<td class="ticker-cell" style="max-width:280px;white-space:normal;line-height:1.35">'+esc(displayName)+'</td>'
       +'<td><span class="'+badgeCls+'">'+(p.asset_type||'other')+'</span></td>'
-      +'<td><b>'+(curr!==null?curr.toFixed(2):'<span style="color:var(--text3)">N/D</span>')+'</b>'+'&nbsp;<small style="color:var(--text3)">'+displayCur+'</small></td>'
+      +'<td><b>'+(displayPriceEur!==null?displayPriceEur.toFixed(2):'<span style="color:var(--text3)">N/D</span>')+'</b>&nbsp;<small style="color:var(--text3)">EUR</small></td>'
       +'<td>'+fmtPct(dayPct)+'</td>'
       +'<td>'+fmtPct(perPct)+'</td>'
       +'<td>'+fmtAmt(perPnl)+'</td>'
       +'<td>'+qty.toLocaleString('it-IT',{maximumFractionDigits:6})+'</td>'
-      +'<td>'+avg.toFixed(2)+'</td>'
+      +'<td>'+displayAvgEur.toFixed(2)+'</td>'
       +'<td><b>'+val.toFixed(2)+'</b></td>'
       +'<td>'+fmtAmt(pnl)+'</td>'
       +'<td>'+fmtPct(pnlPct)+'</td>'
