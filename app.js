@@ -1844,6 +1844,43 @@ var tradingPeriodInterval = '5m';
 var selectedPosTickers = new Set();
 var PERIOD_LABELS = {'1d':'1 Giorno','5d':'1 Settimana','1mo':'1 Mese','3mo':'3 Mesi','6mo':'6 Mesi','1y':'1 Anno','5y':'5 Anni'};
 var PERIOD_INTERVALS = {'1d':'5m','5d':'60m','1mo':'1d','3mo':'1d','6mo':'1d','1y':'1wk','5y':'1mo'};
+// ── FX RATES (convert all to EUR) ────────────────────────────────────────────
+var fxRates = {EUR:1, USD:1, GBP:1, CHF:1, JPY:1}; // defaults, updated live
+var fxLastFetch = 0;
+
+async function fetchFXRates(){
+  if(Date.now() - fxLastFetch < 3600000) return; // refresh every hour
+  try{
+    // Use corsproxy to get rates from exchangerate-api (free, no key)
+    var url = 'https://api.exchangerate-api.com/v4/latest/EUR';
+    var resp = await fetch('https://corsproxy.io/?' + encodeURIComponent(url));
+    if(!resp.ok) throw new Error('FX fetch failed');
+    var data = await resp.json();
+    if(data.rates){
+      // We want rate TO convert FROM currency TO EUR
+      // data.rates['USD'] = how many USD per 1 EUR
+      // So to convert X USD to EUR: X / data.rates['USD']
+      fxRates = data.rates;
+      fxRates.EUR = 1;
+      fxLastFetch = Date.now();
+      console.log('FX rates updated:', {USD:fxRates.USD, GBP:fxRates.GBP, CHF:fxRates.CHF});
+    }
+  } catch(e){
+    console.warn('FX fetch failed, using fallback rates:', e.message);
+    // Fallback approximate rates (EUR base)
+    fxRates = {EUR:1, USD:1.08, GBP:0.86, CHF:0.97, JPY:163, CAD:1.47, AUD:1.65};
+  }
+}
+
+function toEUR(amount, currency){
+  if(!currency || currency === 'EUR') return amount;
+  var rate = fxRates[currency.toUpperCase()];
+  if(!rate) return amount; // unknown currency, return as-is
+  // fxRates[USD] = 1.08 means 1 EUR = 1.08 USD, so USD->EUR = amount / 1.08
+  return amount / rate;
+}
+
+
 
 // Trading tab handled in main showTab
 
@@ -1870,6 +1907,7 @@ async function convertExistingISINs(){
 }
 
 async function loadPositions(){
+  await fetchFXRates(); // ensure FX rates are fresh
   var uid = isGuestMode ? adminUserId : currentUser.id;
   var {data,error} = await sb.from('trading_positions').select('*').eq('user_id', uid).order('created_at');
   if(error){ console.error(error); return; }
@@ -2412,28 +2450,32 @@ function setTradingSort(field){
 }
 
 function renderTradingStats(arr){
-  var totalValue = 0, totalCost = 0, priced = 0;
+  var totalValue = 0, totalCost = 0, priced = 0, unpriced = 0;
   arr.forEach(function(p){
     var data = priceCache[p.ticker+'_'+tradingPeriod] || priceCache[p.ticker];
     var qty  = parseFloat(p.quantity) || 0;
     var avg  = parseFloat(p.avg_buy_price) || 0;
-    // Only add to cost if avg_buy_price > 0
-    if(avg > 0) totalCost += qty * avg;
+    // Get currency: from price data or from stored position currency
+    var cur  = (data && data.currency) || p.currency || 'USD';
+    // Convert invested cost to EUR
+    if(avg > 0) totalCost += toEUR(qty * avg, cur);
+    // Convert current value to EUR
     if(data && data.price){
-      totalValue += qty * data.price;
+      totalValue += toEUR(qty * data.price, cur);
       priced++;
-    } else if(avg > 0){
-      totalValue += qty * avg; // fallback to cost if no price
+    } else {
+      if(avg > 0) totalValue += toEUR(qty * avg, cur); // fallback
+      unpriced++;
     }
   });
   var totalPnl    = totalCost > 0 ? totalValue - totalCost : 0;
   var totalPnlPct = totalCost > 0 ? totalPnl / totalCost * 100 : 0;
-  var pricedNote  = priced < arr.length ? ' <small style="color:var(--text3)">('+(arr.length-priced)+' senza prezzo)</small>' : '';
+  var pricedNote  = unpriced > 0 ? ' <small style="color:var(--text3)">('+unpriced+' senza prezzo)</small>' : '';
   var el = document.getElementById('trading-stats');
   if(el) el.innerHTML =
-    stat('Investito (EUR)', totalCost > 0 ? totalCost.toFixed(2) : 'N/D', 'var(--text2)') +
-    stat('Valore Attuale (EUR)', totalValue.toFixed(2)+pricedNote, 'var(--accent)') +
-    stat('P&L', totalCost>0 ? (totalPnl>=0?'+':'')+totalPnl.toFixed(2)+' ('+totalPnlPct.toFixed(1)+'%)' : 'Aggiorna prezzi', totalPnl>=0?'var(--green)':'var(--red)') +
+    stat('Investito (EUR)', totalCost > 0 ? totalCost.toFixed(0) : 'N/D', 'var(--text2)') +
+    stat('Valore Attuale (EUR)', totalValue.toFixed(0)+pricedNote, 'var(--accent)') +
+    stat('P&L (EUR)', totalCost>0 ? (totalPnl>=0?'+':'')+totalPnl.toFixed(0)+' ('+(totalPnlPct>=0?'+':'')+totalPnlPct.toFixed(1)+'%)' : 'Aggiorna prezzi', totalPnl>=0?'var(--green)':'var(--red)') +
     stat('Posizioni', arr.length, 'var(--accent)');
 }
 
