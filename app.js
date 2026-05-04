@@ -1460,19 +1460,46 @@ function exportZIP(){
 
 // ── MISSING FUNCTIONS RESTORED ───────────────────────────────────────────────
 
-async function refreshAllPrices(){
+async function refreshAllPrices(options){
+  options = options || {};
   var btn=document.getElementById('refresh-btn');
   if(btn){btn.disabled=true;btn.textContent='Aggiornamento...';}
   var tickers=Array.from(new Set(positions.map(function(p){return p.ticker;})));
-  for(var i=0;i<tickers.length;i++){
-    await fetchPrice(tickers[i],tradingPeriod,tradingPeriodInterval);
-    if(i<tickers.length-1) await new Promise(function(r){setTimeout(r,200);});
+  var batchSize = 4;
+  for(var i=0;i<tickers.length;i+=batchSize){
+    var batch = tickers.slice(i, i + batchSize);
+    await Promise.allSettled(batch.map(async function(ticker){
+      await fetchPrice(ticker,tradingPeriod,tradingPeriodInterval);
+      if(tradingPeriod !== '1d'){
+        await fetchPrice(ticker,'1d',PERIOD_INTERVALS['1d']);
+      }
+    }));
+    if(i + batchSize < tickers.length) await new Promise(function(r){setTimeout(r,120);});
   }
   if(btn){btn.disabled=false;btn.textContent='\u21BB Aggiorna prezzi';}
   var upd=document.getElementById('last-update');
   if(upd) upd.textContent='Aggiornato: '+new Date().toLocaleTimeString('it-IT');
   renderPositions();
-  updatePortfolioChart();
+  if(options.updateChart !== false) updatePortfolioChart();
+}
+
+function applyCustomTradingPeriod(){
+  var fromEl = document.getElementById('custom-period-from');
+  var toEl = document.getElementById('custom-period-to');
+  if(!fromEl || !toEl) return;
+  var from = fromEl.value;
+  var to = toEl.value;
+  if(!from || !to){
+    alert('Seleziona sia la data iniziale sia la data finale.');
+    return;
+  }
+  if(from > to){
+    alert('La data iniziale deve essere precedente o uguale alla data finale.');
+    return;
+  }
+  tradingCustomFrom = from;
+  tradingCustomTo = to;
+  setTradingPeriod('custom', document.querySelector('[data-range="custom"]'));
 }
 
 
@@ -1584,6 +1611,14 @@ function isISIN(str){
 // INIT — tutto dentro DOMContentLoaded per garantire che le variabili siano pronte
 document.addEventListener('DOMContentLoaded', function(){
   updateAmountSections();
+  var customFromEl = document.getElementById('custom-period-from');
+  var customToEl = document.getElementById('custom-period-to');
+  if(customFromEl && customToEl){
+    var today = new Date();
+    var past = new Date(today.getTime() - 30*24*60*60*1000);
+    customToEl.value = today.toISOString().slice(0,10);
+    customFromEl.value = past.toISOString().slice(0,10);
+  }
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeEditModal(); });
   var dz=document.getElementById('dropzone');
   if(dz){
@@ -1842,9 +1877,12 @@ var priceCache = {};
 var txType = 'buy';
 var tradingPeriod = '1d';
 var tradingPeriodInterval = '5m';
+var tradingCustomFrom = null;
+var tradingCustomTo = null;
 var selectedPosTickers = new Set();
-var PERIOD_LABELS = {'1d':'1 Giorno','5d':'1 Settimana','1mo':'1 Mese','3mo':'3 Mesi','6mo':'6 Mesi','1y':'1 Anno','5y':'5 Anni'};
+var PERIOD_LABELS = {'1d':'1 Giorno','5d':'1 Settimana','1mo':'1 Mese','3mo':'3 Mesi','6mo':'6 Mesi','1y':'1 Anno','5y':'5 Anni','custom':'Personalizzato'};
 var PERIOD_INTERVALS = {'1d':'5m','5d':'60m','1mo':'1d','3mo':'1d','6mo':'1d','1y':'1wk','5y':'1mo'};
+var LEGACY_TICKER_MAP = {'PPB.DE':'FLTR.L','MIGA.DE':'MSTR'};
 // ── FX RATES (convert all to EUR) ────────────────────────────────────────────
 var fxRates = {EUR:1, USD:1, GBP:1, CHF:1, JPY:1}; // defaults, updated live
 var fxLastFetch = 0;
@@ -1888,6 +1926,69 @@ function normalizeImportedCurrency(cur, isin){
     if(/^SG/.test(securityIsin)) return 'SGD';
   }
   return c || 'USD';
+}
+
+function normalizeTickerSymbol(ticker){
+  var key = String(ticker || '').trim().toUpperCase();
+  return LEGACY_TICKER_MAP[key] || key;
+}
+
+function getTradingLabel(){
+  if(tradingPeriod !== 'custom') return PERIOD_LABELS[tradingPeriod] || tradingPeriod;
+  if(tradingCustomFrom && tradingCustomTo) return tradingCustomFrom + ' → ' + tradingCustomTo;
+  return PERIOD_LABELS.custom;
+}
+
+function getTradingCacheKey(ticker, range){
+  var norm = normalizeTickerSymbol(ticker);
+  if(range === 'custom'){
+    return norm + '_custom_' + (tradingCustomFrom || 'start') + '_' + (tradingCustomTo || 'end');
+  }
+  return norm + '_' + (range || tradingPeriod || '1d');
+}
+
+function setCustomPeriodControlsVisible(show){
+  var box = document.getElementById('custom-period-controls');
+  if(box) box.style.display = show ? 'flex' : 'none';
+}
+
+function filterSeriesByCustomRange(timestamps, closes){
+  if(tradingPeriod !== 'custom' || !tradingCustomFrom || !tradingCustomTo) return null;
+  var fromTs = new Date(tradingCustomFrom + 'T00:00:00').getTime();
+  var toTs = new Date(tradingCustomTo + 'T23:59:59').getTime();
+  var filtered = [];
+  for(var i=0; i<Math.min((timestamps || []).length, (closes || []).length); i++){
+    var ts = (timestamps[i] || 0) * 1000;
+    var close = closes[i];
+    if(ts >= fromTs && ts <= toTs && close !== null && !isNaN(close)){
+      filtered.push({ts: ts, close: close});
+    }
+  }
+  return filtered;
+}
+
+function detectAssetType(name, ticker, isin){
+  var text = ((name || '') + ' ' + (ticker || '')).toLowerCase();
+  var code = String(isin || '').toUpperCase();
+  if(text.indexOf('etf') >= 0 || text.indexOf('ucits') >= 0 || text.indexOf('ishares') >= 0 || text.indexOf('vanguard') >= 0){
+    return 'etf';
+  }
+  if(text.indexOf('bond') >= 0 || text.indexOf('treasury') >= 0){
+    return 'bond';
+  }
+  if(text.indexOf('crypto') >= 0 || text.indexOf('bitcoin') >= 0 || text.indexOf('ethereum') >= 0){
+    return 'crypto';
+  }
+  if(text.indexOf('gold') >= 0 || text.indexOf('silver') >= 0 || text.indexOf('commodity') >= 0){
+    return 'commodity';
+  }
+  if(code.indexOf('IE00') === 0 || code.indexOf('LU') === 0){
+    if(text.indexOf('etf') >= 0 || text.indexOf('ucits') >= 0 || text.indexOf('fund') >= 0 || text.indexOf('index') >= 0){
+      return 'etf';
+    }
+  }
+  if(name || ticker) return 'stock';
+  return 'other';
 }
 
 async function fetchFXRates(){
@@ -1954,6 +2055,23 @@ async function loadPositions(){
   var {data,error} = await sb.from('trading_positions').select('*').eq('user_id', uid).order('created_at');
   if(error){ console.error(error); return; }
   positions = data || [];
+  for(var pi=0; pi<positions.length; pi++){
+    var pos = positions[pi];
+    var normalizedTicker = normalizeTickerSymbol(pos.ticker);
+    var normalizedType = detectAssetType(pos.name, normalizedTicker, pos.isin || pos.ticker);
+    var updateRow = {};
+    if(normalizedTicker !== pos.ticker){
+      updateRow.ticker = normalizedTicker;
+      pos.ticker = normalizedTicker;
+    }
+    if((!pos.asset_type || pos.asset_type === 'stock' || pos.asset_type === 'other') && normalizedType !== pos.asset_type){
+      updateRow.asset_type = normalizedType;
+      pos.asset_type = normalizedType;
+    }
+    if(Object.keys(updateRow).length){
+      await sb.from('trading_positions').update(updateRow).eq('id', pos.id);
+    }
+  }
   // Auto-convert ISINs (only once per session)
   var hasISINs = positions.some(function(p){ return isISIN(p.ticker); });
   if(hasISINs && !isinConversionDone){
@@ -2094,17 +2212,25 @@ async function saveTransaction2(){
 
 // ── PRICE FETCHING (Yahoo Finance) ────────────────────────────────────────────
 async function fetchPrice(ticker, range, interval){
+  ticker   = normalizeTickerSymbol(ticker);
   range    = range    || tradingPeriod    || '1d';
   interval = interval || tradingPeriodInterval || '5m';
-  var key  = ticker + '_' + range;
+  var key  = getTradingCacheKey(ticker, range);
   var ttl  = (range === '1d') ? 60000 : 300000;
   if(priceCache[key] && (Date.now() - priceCache[key].ts) < ttl) return priceCache[key];
+
+  var fetchRange = range;
+  var fetchInterval = interval;
+  if(range === 'custom'){
+    fetchRange = 'max';
+    fetchInterval = '1d';
+  }
 
   // Yahoo Finance URL
   var yurl = 'https://query1.finance.yahoo.com/v8/finance/chart/'
     + encodeURIComponent(ticker)
-    + '?interval=' + interval
-    + '&range='    + range
+    + '?interval=' + fetchInterval
+    + '&range='    + fetchRange
     + '&includePrePost=false';
 
   // Proxy list — try in order
@@ -2114,7 +2240,7 @@ async function fetchPrice(ticker, range, interval){
     'https://corsproxy.io/?' + encodeURIComponent(
       'https://query2.finance.yahoo.com/v8/finance/chart/'
       + encodeURIComponent(ticker)
-      + '?interval=' + interval + '&range=' + range)
+      + '?interval=' + fetchInterval + '&range=' + fetchRange)
   ];
 
   for(var pi = 0; pi < proxies.length; pi++){
@@ -2127,29 +2253,34 @@ async function fetchPrice(ticker, range, interval){
       if(!json.chart || !json.chart.result || !json.chart.result[0]) continue;
 
       var meta   = json.chart.result[0].meta;
+      var timestamps = json.chart.result[0].timestamp || [];
       var q      = json.chart.result[0].indicators.quote[0];
       var closes = (q.close || []);
       var valid  = closes.filter(function(c){ return c !== null && !isNaN(c); });
+      var filteredSeries = filterSeriesByCustomRange(timestamps, closes);
+      var series = filteredSeries && filteredSeries.length
+        ? filteredSeries.map(function(point){ return point.close; })
+        : valid;
 
-      var price    = meta.regularMarketPrice || meta.chartPreviousClose || 0;
-      var prev     = meta.chartPreviousClose || price;
+      var price    = series.length ? series[series.length-1] : (meta.regularMarketPrice || meta.chartPreviousClose || 0);
+      var prev     = series.length > 1 ? series[series.length-2] : (meta.chartPreviousClose || price);
       var dayChg   = price - prev;
       var dayChgPct= prev > 0 ? dayChg / prev * 100 : 0;
-      var first    = valid[0] || price;
+      var first    = series[0] || price;
       var perChgPct= first > 0 ? (price - first) / first * 100 : 0;
-      var hi = valid.length ? Math.max.apply(null,valid) : price;
-      var lo = valid.length ? Math.min.apply(null,valid) : price;
+      var hi = series.length ? Math.max.apply(null,series) : price;
+      var lo = series.length ? Math.min.apply(null,series) : price;
 
       var result = {
         price: price, change: dayChg, changePct: dayChgPct,
         periodChange: price-first, periodChangePct: perChgPct,
-        high: hi, low: lo, closes: closes,
+        high: hi, low: lo, closes: series.length ? series : closes, timestamps: timestamps,
         currency: meta.currency || 'USD',
         name: meta.shortName || meta.longName || ticker,
         ts: Date.now()
       };
       priceCache[key]   = result;
-      priceCache[ticker]= result;
+      if(range === '1d' || !priceCache[ticker]) priceCache[ticker]= result;
       return result;
     } catch(e){
       console.warn('Proxy', pi, 'failed for', ticker, ':', e.message);
@@ -2161,14 +2292,21 @@ async function fetchPrice(ticker, range, interval){
 
 
 function setTradingPeriod(range,btn){
+  if(range === 'custom' && (!tradingCustomFrom || !tradingCustomTo)){
+    document.querySelectorAll('[data-range]').forEach(function(b){b.classList.remove('active');});
+    if(btn) btn.classList.add('active');
+    setCustomPeriodControlsVisible(true);
+    return;
+  }
   tradingPeriod=range;
   tradingPeriodInterval=PERIOD_INTERVALS[range]||'1d';
   document.querySelectorAll('[data-range]').forEach(function(b){b.classList.remove('active');});
   if(btn) btn.classList.add('active');
+  setCustomPeriodControlsVisible(range === 'custom');
   var lbl=document.getElementById('compare-period-label');
-  if(lbl) lbl.textContent=PERIOD_LABELS[range]||range;
-  positions.forEach(function(p){delete priceCache[p.ticker+'_'+range];});
-  refreshAllPrices();
+  if(lbl) lbl.textContent=getTradingLabel();
+  positions.forEach(function(p){delete priceCache[getTradingCacheKey(p.ticker, range)];});
+  refreshAllPrices({updateChart:false});
 }
 
 function handlePosSelect(cb){ togglePosSelect(cb.dataset.ticker); }
@@ -2196,14 +2334,14 @@ async function updatePortfolioChart(){
   if(!tickers.length) return;
 
   var lbl = document.getElementById('compare-period-label');
-  if(lbl) lbl.textContent = PERIOD_LABELS[tradingPeriod] || tradingPeriod;
+  if(lbl) lbl.textContent = getTradingLabel();
   var titleEl = document.getElementById('chart-title');
 
   var COLORS = ['#4f46e5','#16a34a','#dc2626','#d97706','#0891b2','#7c3aed','#db2777','#059669','#ea580c','#0d9488'];
 
   // Collect data
   var allData = tickers.map(function(t){
-    var d = priceCache[t+'_'+tradingPeriod] || priceCache[t];
+    var d = priceCache[getTradingCacheKey(t, tradingPeriod)] || priceCache[normalizeTickerSymbol(t)];
     var pos = positions.find(function(p){ return p.ticker===t; });
     return {ticker:t, data:d, pos:pos};
   }).filter(function(a){ return a.data && a.data.closes && a.data.closes.length > 1; });
@@ -2234,7 +2372,7 @@ async function updatePortfolioChart(){
 
   if(!showSingle){
     // === AGGREGATED PORTFOLIO LINE ===
-    if(titleEl) titleEl.innerHTML = '&#128200; Portafoglio — <span id="compare-period-label">'+(PERIOD_LABELS[tradingPeriod]||tradingPeriod)+'</span>';
+    if(titleEl) titleEl.innerHTML = '&#128200; Portafoglio — <span id="compare-period-label">'+getTradingLabel()+'</span>';
 
     // Find max closes length
     var maxLen = 0;
@@ -2334,7 +2472,7 @@ async function updatePortfolioChart(){
     var a = allData[0];
     var cls = a.data.closes.filter(function(c){return c!==null&&!isNaN(c);});
     var shortName = (a.data.name||a.pos&&a.pos.name||a.ticker).substring(0,6);
-    if(titleEl) titleEl.innerHTML = '&#128200; '+shortName+' — <span id="compare-period-label">'+(PERIOD_LABELS[tradingPeriod]||tradingPeriod)+'</span>';
+    if(titleEl) titleEl.innerHTML = '&#128200; '+shortName+' — <span id="compare-period-label">'+getTradingLabel()+'</span>';
     var first = cls[0], last = cls[cls.length-1];
     var chgPct = first>0?(last-first)/first*100:0;
     var color = chgPct>=0?'#16a34a':'#dc2626';
@@ -2382,18 +2520,22 @@ function renderPositions(){
 
   // Apply sort
   arr=arr.slice().sort(function(a,b){
-    var da=priceCache[a.ticker+'_'+tradingPeriod]||priceCache[a.ticker];
-    var db=priceCache[b.ticker+'_'+tradingPeriod]||priceCache[b.ticker];
+    var da=priceCache[getTradingCacheKey(a.ticker, tradingPeriod)]||priceCache[normalizeTickerSymbol(a.ticker)];
+    var db=priceCache[getTradingCacheKey(b.ticker, tradingPeriod)]||priceCache[normalizeTickerSymbol(b.ticker)];
+    var dayA=priceCache[getTradingCacheKey(a.ticker, '1d')]||da;
+    var dayB=priceCache[getTradingCacheKey(b.ticker, '1d')]||db;
     function gv(p,d,f){
       var qty=parseFloat(p.quantity)||0, avg=parseFloat(p.avg_buy_price)||0;
-      var val=d&&d.price?qty*d.price:0, cost=qty*avg;
+      var live = f || d;
+      var val=live&&live.price?qty*live.price:0, cost=qty*avg;
       var pnl=val-cost, pnlp=cost>0?pnl/cost*100:0;
+      var periodPnl = d && d.periodChange !== null && d.periodChange !== undefined ? toEUR(d.periodChange * qty, (d.currency || p.currency || 'USD')) : 0;
       return {ticker:p.ticker,name:p.name||'',type:p.asset_type||'',
-        price:d?d.price:0,day:d?d.changePct:0,period:d?d.periodChangePct:0,
-        qty:qty,avg:avg,value:val,pnl:pnl,pnlpct:pnlp,high:d?d.high:0,low:d?d.low:0};
+        price:live?live.price:0,day:f?f.changePct:0,period:d?d.periodChangePct:0,
+        periodpnl: periodPnl, qty:qty,avg:avg,value:val,pnl:pnl,pnlpct:pnlp,high:d?d.high:0,low:d?d.low:0};
     }
-    var va=gv(a,da)[tradingSortField||'ticker'];
-    var vb=gv(b,db)[tradingSortField||'ticker'];
+    var va=gv(a,da,dayA)[tradingSortField||'ticker'];
+    var vb=gv(b,db,dayB)[tradingSortField||'ticker'];
     if(typeof va==='string') return va.localeCompare(vb)*tradingSortDir;
     return ((va||0)-(vb||0))*tradingSortDir;
   });
@@ -2401,25 +2543,29 @@ function renderPositions(){
 
   // Apply sort
   arr = arr.slice().sort(function(a,b){
-    var da = priceCache[a.ticker+'_'+tradingPeriod] || priceCache[a.ticker];
-    var db = priceCache[b.ticker+'_'+tradingPeriod] || priceCache[b.ticker];
+    var da = priceCache[getTradingCacheKey(a.ticker, tradingPeriod)] || priceCache[normalizeTickerSymbol(a.ticker)];
+    var db = priceCache[getTradingCacheKey(b.ticker, tradingPeriod)] || priceCache[normalizeTickerSymbol(b.ticker)];
+    var dayA = priceCache[getTradingCacheKey(a.ticker, '1d')] || da;
+    var dayB = priceCache[getTradingCacheKey(b.ticker, '1d')] || db;
     var qa = parseFloat(a.quantity)||0, qb = parseFloat(b.quantity)||0;
     var aa = parseFloat(a.avg_buy_price)||0, ab = parseFloat(b.avg_buy_price)||0;
     function val(p,d){ return d&&d.price ? (parseFloat(p.quantity)||0)*d.price : 0; }
     function pnl(p,d){ return d&&d.price ? val(p,d)-(parseFloat(p.quantity)||0)*(parseFloat(p.avg_buy_price)||0) : 0; }
     function pnlPct(p,d){ var c=(parseFloat(p.quantity)||0)*(parseFloat(p.avg_buy_price)||0); return c>0?pnl(p,d)/c*100:0; }
+    function periodPnl(p,d){ return d&&d.periodChange !== null && d.periodChange !== undefined ? toEUR((parseFloat(p.quantity)||0)*d.periodChange, (d.currency || p.currency || 'USD')) : 0; }
     var map = {
       ticker: [a.ticker, b.ticker],
       name:   [a.name||'', b.name||''],
       type:   [a.asset_type||'', b.asset_type||''],
-      price:  [da?da.price:0, db?db.price:0],
-      day:    [da?da.changePct:0, db?db.changePct:0],
+      price:  [dayA?dayA.price:(da?da.price:0), dayB?dayB.price:(db?db.price:0)],
+      day:    [dayA?dayA.changePct:0, dayB?dayB.changePct:0],
       period: [da?da.periodChangePct:0, db?db.periodChangePct:0],
+      periodpnl: [periodPnl(a,da), periodPnl(b,db)],
       qty:    [qa, qb],
       avg:    [aa, ab],
-      value:  [val(a,da), val(b,db)],
-      pnl:    [pnl(a,da), pnl(b,db)],
-      pnlpct: [pnlPct(a,da), pnlPct(b,db)],
+      value:  [val(a,dayA||da), val(b,dayB||db)],
+      pnl:    [pnl(a,dayA||da), pnl(b,dayB||db)],
+      pnlpct: [pnlPct(a,dayA||da), pnlPct(b,dayB||db)],
       high:   [da?da.high:0, db?db.high:0],
       low:    [da?da.low:0, db?db.low:0]
     };
@@ -2442,29 +2588,32 @@ function renderPositions(){
 
   tbody.innerHTML = arr.map(function(p){
     var meta = getPositionImportMeta(p.notes);
-    var data = priceCache[p.ticker+'_'+tradingPeriod] || priceCache[p.ticker];
+    var data = priceCache[getTradingCacheKey(p.ticker, tradingPeriod)] || priceCache[normalizeTickerSymbol(p.ticker)];
+    var dayData = priceCache[getTradingCacheKey(p.ticker, '1d')] || data;
     var qty  = parseFloat(p.quantity) || 0;
     var avg  = parseFloat(p.avg_buy_price) || 0;
-    var curr = data ? data.price : null;
-    var displayCur = (meta && meta.importedCurrency) || (data && data.currency) || p.currency || 'USD';
+    var curr = dayData ? dayData.price : (data ? data.price : null);
+    var displayCur = (meta && meta.importedCurrency) || (dayData && dayData.currency) || (data && data.currency) || p.currency || 'USD';
     var cost = meta && meta.importedInvestedValue > 0 ? meta.importedInvestedValue : qty * avg;
     var val  = meta && meta.importedCurrentValue > 0 ? meta.importedCurrentValue : (curr !== null ? qty * curr : cost);
     var pnl  = curr !== null ? val - cost : null;
     if(meta && meta.importedCurrentValue > 0) pnl = val - cost;
     var pnlPct  = cost > 0 && pnl !== null ? pnl / cost * 100 : null;
-    var dayPct  = data ? data.changePct : null;
+    var dayPct  = dayData ? dayData.changePct : null;
     var perPct  = data ? data.periodChangePct : null;
+    var perPnl  = data && data.periodChange !== null && data.periodChange !== undefined ? toEUR(data.periodChange * qty, (data.currency || p.currency || displayCur || 'USD')) : null;
     var sel = selectedPosTickers.has(p.ticker);
     var badgeCls = 'pos-badge pos-badge-'+(p.asset_type||'other');
+    var displayName = (p.name || (data && data.name) || p.ticker || '').trim();
 
     return '<tr class="'+(sel?'pos-selected':'')+'" style="'+(sel?'background:rgba(79,70,229,0.06)':'')+'">'
       +'<td style="width:32px;padding:8px 10px"><input type="checkbox" '+(sel?'checked':'')+' data-ticker="'+p.ticker+'" onchange="handlePosSelect(this)" style="accent-color:var(--accent)"></td>'
-      +'<td class="ticker-cell">'+p.ticker+'</td>'
-      +'<td style="color:var(--text2);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(data&&data.name||p.name||'')+'</td>'
+      +'<td class="ticker-cell" style="max-width:280px;white-space:normal;line-height:1.35">'+esc(displayName)+'</td>'
       +'<td><span class="'+badgeCls+'">'+(p.asset_type||'other')+'</span></td>'
       +'<td><b>'+(curr!==null?curr.toFixed(2):'<span style="color:var(--text3)">N/D</span>')+'</b>'+'&nbsp;<small style="color:var(--text3)">'+displayCur+'</small></td>'
       +'<td>'+fmtPct(dayPct)+'</td>'
       +'<td>'+fmtPct(perPct)+'</td>'
+      +'<td>'+fmtAmt(perPnl)+'</td>'
       +'<td>'+qty.toLocaleString('it-IT',{maximumFractionDigits:6})+'</td>'
       +'<td>'+avg.toFixed(2)+'</td>'
       +'<td><b>'+val.toFixed(2)+'</b></td>'
@@ -2500,7 +2649,7 @@ function renderTradingStats(arr){
   var totalValue = 0, totalCost = 0, priced = 0, unpriced = 0;
   arr.forEach(function(p){
     var meta = getPositionImportMeta(p.notes);
-    var data = priceCache[p.ticker+'_'+tradingPeriod] || priceCache[p.ticker];
+    var data = priceCache[getTradingCacheKey(p.ticker, tradingPeriod)] || priceCache[normalizeTickerSymbol(p.ticker)];
     var qty  = parseFloat(p.quantity) || 0;
     var avg  = parseFloat(p.avg_buy_price) || 0;
     var positionCur = (meta && meta.importedCurrency) || p.currency || 'USD';
@@ -2875,7 +3024,7 @@ async function importPortfolioXLS(file){
       user_id:       currentUser.id,
       ticker:        tick,
       name:          rr.name,
-      asset_type:    'stock',
+      asset_type:    detectAssetType(rr.name, tick, rr.rawTicker),
       quantity:      rr.qty,
       avg_buy_price: Math.round(rr.avgPx * 100) / 100,
       currency:      rr.currency,
