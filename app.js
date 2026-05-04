@@ -785,7 +785,7 @@ function calcEditE(){var n=eNum('e-en-net'),vt=eNum('e-en-vat');if(n||vt)eSet('e
 function calcEditU(){var n=eNum('e-us-net'),vt=eNum('e-us-vat');if(n||vt)eSet('e-us-tot',(n+vt).toFixed(2));}
 function eV(id){return document.getElementById(id).value;}
 function eSet(id,val){var el=document.getElementById(id);if(el)el.value=val;}
-function eNum(id){return parseFloat(eV(id))||0;}
+ffunction eNum(id){return parseLocalNum(eV(id));}
 function setState(s){
   document.getElementById('state-upload').style.display=s==='upload'?'':'none';
   document.getElementById('state-processing').style.display=s==='processing'?'':'none';
@@ -1403,7 +1403,7 @@ function exportCSV(){
 // helpers
 function v(id){return document.getElementById(id).value;}
 function set(id,val){var el=document.getElementById(id);if(el)el.value=val;}
-function num(id){return parseFloat(v(id))||0;}
+function num(id){return parseLocalNum(v(id));}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
 function sum(field){return txs.reduce(function(s,t){return s+(t[field]||0);},0);}
 function fmt(n){return (n||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});}
