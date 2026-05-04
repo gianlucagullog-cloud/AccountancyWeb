@@ -1847,6 +1847,33 @@ var PERIOD_INTERVALS = {'1d':'5m','5d':'60m','1mo':'1d','3mo':'1d','6mo':'1d','1
 // ── FX RATES (convert all to EUR) ────────────────────────────────────────────
 var fxRates = {EUR:1, USD:1, GBP:1, CHF:1, JPY:1}; // defaults, updated live
 var fxLastFetch = 0;
+var IMPORT_META_PREFIX = '[[IMPORT_META]]';
+
+function round2(v){
+  return Math.round((parseFloat(v) || 0) * 100) / 100;
+}
+
+function getPositionImportMeta(notes){
+  if(!notes || typeof notes !== 'string') return null;
+  var idx = notes.indexOf(IMPORT_META_PREFIX);
+  if(idx < 0) return null;
+  var raw = notes.slice(idx + IMPORT_META_PREFIX.length).trim();
+  if(!raw) return null;
+  try{ return JSON.parse(raw); } catch(e){ return null; }
+}
+
+function stripPositionImportMeta(notes){
+  if(!notes || typeof notes !== 'string') return '';
+  var idx = notes.indexOf(IMPORT_META_PREFIX);
+  return (idx >= 0 ? notes.slice(0, idx) : notes).trim();
+}
+
+function mergePositionImportMeta(userNotes, meta){
+  var clean = stripPositionImportMeta(userNotes || '');
+  if(!meta) return clean;
+  var payload = IMPORT_META_PREFIX + JSON.stringify(meta);
+  return clean ? (clean + '\n' + payload) : payload;
+}
 
 async function fetchFXRates(){
   if(Date.now() - fxLastFetch < 3600000) return; // refresh every hour
@@ -1928,6 +1955,8 @@ async function loadPositions(){
 
 async function savePosition(){
   var id = document.getElementById('pos-edit-id').value;
+  var existing = id ? positions.find(function(x){ return String(x.id) === String(id); }) : null;
+  var importMeta = existing ? getPositionImportMeta(existing.notes) : null;
   var row = {
     user_id:   currentUser.id,
     ticker:    document.getElementById('pos-ticker').value.trim().toUpperCase(),
@@ -1936,7 +1965,7 @@ async function savePosition(){
     quantity:  parseFloat(document.getElementById('pos-qty').value)||0,
     avg_buy_price: parseFloat(document.getElementById('pos-avgprice').value)||0,
     currency:  document.getElementById('pos-currency').value,
-    notes:     document.getElementById('pos-notes').value.trim()
+    notes:     mergePositionImportMeta(document.getElementById('pos-notes').value.trim(), importMeta)
   };
   if(!row.ticker){ alert('Inserisci il Ticker Symbol.'); return; }
   var {error} = id
@@ -1976,7 +2005,7 @@ function openEditPosition(id){
   document.getElementById('pos-qty').value=p.quantity;
   document.getElementById('pos-avgprice').value=p.avg_buy_price;
   document.getElementById('pos-currency').value=p.currency||'USD';
-  document.getElementById('pos-notes').value=p.notes||'';
+  document.getElementById('pos-notes').value=stripPositionImportMeta(p.notes||'');
   document.getElementById('pos-modal-title').textContent='Modifica posizione';
   var m=document.getElementById('pos-modal'); m.style.display='flex';
 }
@@ -2452,19 +2481,24 @@ function setTradingSort(field){
 function renderTradingStats(arr){
   var totalValue = 0, totalCost = 0, priced = 0, unpriced = 0;
   arr.forEach(function(p){
+    var meta = getPositionImportMeta(p.notes);
     var data = priceCache[p.ticker+'_'+tradingPeriod] || priceCache[p.ticker];
     var qty  = parseFloat(p.quantity) || 0;
     var avg  = parseFloat(p.avg_buy_price) || 0;
-    // Get currency: from price data or from stored position currency
-    var cur  = (data && data.currency) || p.currency || 'USD';
-    // Convert invested cost to EUR
-    if(avg > 0) totalCost += toEUR(qty * avg, cur);
-    // Convert current value to EUR
-    if(data && data.price){
-      totalValue += toEUR(qty * data.price, cur);
+    var positionCur = (meta && meta.importedCurrency) || p.currency || 'USD';
+    if(meta && meta.importedInvestedValue > 0){
+      totalCost += toEUR(meta.importedInvestedValue, positionCur);
+    } else if(avg > 0){
+      totalCost += toEUR(qty * avg, positionCur);
+    }
+    if(meta && meta.importedCurrentValue > 0){
+      totalValue += toEUR(meta.importedCurrentValue, positionCur);
+      priced++;
+    } else if(data && data.price){
+      totalValue += toEUR(qty * data.price, (data && data.currency) || positionCur);
       priced++;
     } else {
-      if(avg > 0) totalValue += toEUR(qty * avg, cur); // fallback
+      if(avg > 0) totalValue += toEUR(qty * avg, positionCur);
       unpriced++;
     }
   });
@@ -2798,7 +2832,9 @@ async function importPortfolioXLS(file){
       name:      COL.name ? String(row[COL.name]||'').trim() : '',
       qty:       qty,
       avgPx:     avgPx,
-      currency:  currency
+      currency:  currency,
+      investedValue: round2(invV.n),
+      currentValue: round2(curV.n)
     });
   });
 
@@ -2824,7 +2860,12 @@ async function importPortfolioXLS(file){
       asset_type:    'stock',
       quantity:      rr.qty,
       avg_buy_price: Math.round(rr.avgPx * 100) / 100,
-      currency:      rr.currency
+      currency:      rr.currency,
+      notes:         mergePositionImportMeta('', {
+        importedInvestedValue: rr.investedValue,
+        importedCurrentValue: rr.currentValue,
+        importedCurrency: rr.currency
+      })
     });
   }
 
@@ -2844,11 +2885,13 @@ async function importPortfolioXLS(file){
     var existing = positions.find(function(p){ return p.ticker===row.ticker; });
     var res;
     if(existing){
+      var existingMeta = getPositionImportMeta(existing.notes);
       res = await sb.from('trading_positions').update({
         quantity:      row.quantity,
         avg_buy_price: row.avg_buy_price,
         name:          row.name || existing.name,
-        currency:      row.currency || existing.currency
+        currency:      row.currency || existing.currency,
+        notes:         mergePositionImportMeta(stripPositionImportMeta(existing.notes || ''), getPositionImportMeta(row.notes) || existingMeta)
       }).eq('id', existing.id);
       if(!res.error) updated++;
     } else {
