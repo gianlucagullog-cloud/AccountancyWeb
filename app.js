@@ -2090,6 +2090,13 @@ function toEUR(amount, currency){
   return amount / rate;
 }
 
+function normalizeQuoteCurrency(currency){
+  var cur = String(currency || 'USD');
+  if(cur === 'GBp' || cur === 'GBX') return {currency:'GBP', divisor:100};
+  if(cur === 'ZAc') return {currency:'ZAR', divisor:100};
+  return {currency:cur, divisor:1};
+}
+
 
 
 // Trading tab handled in main showTab
@@ -2316,17 +2323,23 @@ async function fetchPrice(ticker, range, interval){
       if(!json.chart || !json.chart.result || !json.chart.result[0]) continue;
 
       var meta   = json.chart.result[0].meta;
+      var quoteInfo = normalizeQuoteCurrency(meta.currency || 'USD');
       var timestamps = json.chart.result[0].timestamp || [];
       var q      = json.chart.result[0].indicators.quote[0];
-      var closes = (q.close || []);
+      var closes = (q.close || []).map(function(c){
+        return (c === null || isNaN(c)) ? c : c / quoteInfo.divisor;
+      });
       var points = selectSeriesForRange(range, timestamps, closes);
       var series = points.map(function(point){ return point.close; });
 
-      var livePrice = meta.regularMarketPrice || meta.chartPreviousClose || (series.length ? series[series.length-1] : 0);
+      var rawLivePrice = meta.regularMarketPrice || meta.chartPreviousClose || null;
+      var livePrice = rawLivePrice !== null && rawLivePrice !== undefined
+        ? rawLivePrice / quoteInfo.divisor
+        : (series.length ? series[series.length-1] : 0);
       var price    = livePrice;
       var prev     = range === '1d'
-        ? (meta.chartPreviousClose || (series.length > 1 ? series[series.length-2] : price))
-        : (series.length > 1 ? series[series.length-2] : (meta.chartPreviousClose || price));
+        ? (((meta.chartPreviousClose || 0) / quoteInfo.divisor) || (series.length > 1 ? series[series.length-2] : price))
+        : (series.length > 1 ? series[series.length-2] : (((meta.chartPreviousClose || 0) / quoteInfo.divisor) || price));
       var dayChg   = price - prev;
       var dayChgPct= prev > 0 ? dayChg / prev * 100 : 0;
       var first    = series[0] || price;
@@ -2338,7 +2351,7 @@ async function fetchPrice(ticker, range, interval){
         price: price, change: dayChg, changePct: dayChgPct,
         periodChange: price-first, periodChangePct: perChgPct,
         high: hi, low: lo, closes: series.length ? series : closes, timestamps: timestamps,
-        currency: meta.currency || 'USD',
+        currency: quoteInfo.currency,
         name: meta.shortName || meta.longName || ticker,
         ts: Date.now()
       };
