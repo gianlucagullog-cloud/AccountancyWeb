@@ -2573,15 +2573,23 @@ async function importPortfolioXLS(file){
     });
     return found;
   }
-  var cTicker    = col(['ticker','symbol','isin','codice','titolo','asset','stock','strumento']);
+  var cTicker    = col(['isin','ticker','symbol','codice','strumento','asset','stock','titolo']);
   var cName      = col(['name','nome','description','descrizione','company','issuer','emittente']);
   var cType      = col(['type','tipo','asset type','category','categoria','classe']);
-  var cQty       = col(['qty','quantity','quantita','shares','units','pezzi','quota','num','numero','quantit']);
-  var cPrice     = col(['avg price','average price','prezzo medio','buy price','costo medio','avg cost','carico','prezzo di carico','prezzo acquisto','prezzo unitario']);
-  var cInvested  = col(['invested','investito','invested value','valore investito','book value','costo totale','total cost','tot invest','investment']);
+  var cQty       = col(['quantity','qty','quantita','shares','units','pezzi','quota','num','numero']);
+  // "Invested Price" = avg price per share; check before generic 'invested'
+  var cPrice     = col(['invested price','avg price','average price','prezzo medio','buy price',
+                        'costo medio','avg cost','carico','prezzo unitario','unit price',
+                        'purchase price','prezzo acquisto','entry price']);
+  // "Invested Value" = total amount invested (qty * avg price)
+  var cInvested  = col(['invested value','valore investito','book value','total invested',
+                        'costo totale','total cost','importo investito','capital invested',
+                        'controvalore investito','purchase value','valore acquisto']);
+  var cCurrentVal= col(['current value','valore corrente','market value','valore mercato']);
   var cCurr      = col(['currency','valuta','ccy','divisa']);
 
-  console.log('Columns:', {cTicker,cName,cType,cQty,cPrice,cCurr}, 'sample:', sample);
+  console.log('=== IMPORT COLUMNS ===', {cTicker,cName,cQty,cPrice,cInvested,cCurrentVal,cCurr});
+  console.log('All headers:', Object.keys(sample));
 
   if(!cTicker){
     alert('Colonna Ticker/ISIN non trovata.\nColonne presenti: ' + Object.keys(sample).join(', '));
@@ -2607,20 +2615,26 @@ async function importPortfolioXLS(file){
   rows.forEach(function(row){
     var rawVal = String(row[cTicker]||'').trim().toUpperCase();
     if(!rawVal) return;
-    var qtyP      = parseCell(row[cQty]      || '0');
-    var priceP    = parseCell(row[cPrice]    || '0');
-    var investedP = parseCell(row[cInvested] || '0');
-    // Compute avg price: prefer explicit price col, else invested/qty
+    var qtyP       = parseCell(row[cQty]        || '0');
+    var priceP     = parseCell(row[cPrice]      || '0');
+    var investedP  = parseCell(row[cInvested]   || '0');
+    var currValP   = parseCell(row[cCurrentVal] || '0');
+    // Priority: explicit avg price col > invested_value/qty > 0
     if(priceP.value === 0 && investedP.value > 0 && qtyP.value > 0){
       priceP.value = investedP.value / qtyP.value;
     }
+    // Detect currency from price, invested value, or current value cells
     var detCurr = (cCurr ? String(row[cCurr]||'').trim() : null)
-      || investedP.currency || priceP.currency || qtyP.currency || 'USD';
+      || priceP.currency || investedP.currency || currValP.currency || qtyP.currency || 'USD';
     var type = cType ? String(row[cType]||'stock').toLowerCase() : 'stock';
     if(type.indexOf('etf')>=0)         type='etf';
     else if(type.indexOf('bond')>=0||type.indexOf('obblig')>=0) type='bond';
     else if(type.indexOf('crypto')>=0) type='crypto';
     else                               type='stock';
+    if(priceP.value === 0 && qtyP.value > 0){
+      console.warn('No avg price for', rawVal, '| cPrice col:', cPrice, '| cInvested col:', cInvested,
+        '| price raw:', row[cPrice], '| invested raw:', row[cInvested]);
+    }
     rawRows.push({
       rawTicker:     rawVal,
       name:          cName ? String(row[cName]||'').trim() : '',
