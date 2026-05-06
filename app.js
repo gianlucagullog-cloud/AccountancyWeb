@@ -171,7 +171,15 @@ function viewFromLocalStorage(t){
 
 // DATA FUNCTIONS
 function loadInvoices(){
-  return sb.from('invoices').select('*').order('date',{ascending:true}).then(function(r){
+  var query = sb.from('invoices').select('*');
+  // If guest with period restriction, filter server-side
+  if(isGuestMode && adminUserId){
+    query = sb.from('invoices').select('*').eq('user_id', adminUserId);
+    var p = guestPermissions;
+    if(p.period_from) query = query.gte('date', p.period_from);
+    if(p.period_to)   query = query.lte('date', p.period_to);
+  }
+  return query.order('date',{ascending:true}).then(function(r){
     if(r.error){console.error(r.error);return;}
     txs=(r.data||[]).map(dbToTx);
     populateYearFilters();renderTable();renderStats('stats-a');updateCount();
@@ -1522,6 +1530,109 @@ async function linkGuestIfNeeded(){
   } catch(e){ console.log('linkGuestIfNeeded skipped:', e.message); }
 }
 
+// ══ GUEST PERMISSION SYSTEM ══════════════════════════════════════════════════
+
+async function checkGuestMode(){
+  if(!currentUser) return;
+  // Is this user a guest of someone?
+  var {data, error} = await sb.from('guest_access')
+    .select('*')
+    .eq('guest_user_id', currentUser.id)
+    .eq('active', true)
+    .maybeSingle();
+
+  if(!data) {
+    isGuestMode = false;
+    // Show user management section to admin
+    var gs = document.getElementById('guest-access-section');
+    if(gs) gs.style.display = '';
+    return;
+  }
+
+  isGuestMode = true;
+  adminUserId = data.admin_user_id;
+  guestPermissions = data.permissions || {};
+
+  // Show guest banner
+  var banner = document.getElementById('guest-banner');
+  if(banner){
+    banner.style.display = '';
+    var secs = guestPermissions.sections || {};
+    var acts = guestPermissions.actions  || {};
+    var visibleSecs = ['carica','registro','summary','trading'].filter(function(s){
+      return secs[s] !== false;
+    });
+    banner.innerHTML = '<b>Accesso ospite</b> — Stai visualizzando i dati in modalita limitata. '+
+      'Sezioni visibili: ' + visibleSecs.join(', ') + '.';
+  }
+
+  // Hide forbidden tab buttons
+  ['carica','registro','summary','trading','settings','utenti'].forEach(function(s){
+    var btn = document.getElementById('tab-btn-'+s);
+    if(btn) btn.style.display = canSeeSection(s) ? '' : 'none';
+  });
+
+  // Hide forbidden action buttons after render
+  setTimeout(applyGuestActionRestrictions, 500);
+}
+
+function canSeeSection(section){
+  if(!isGuestMode) return true;
+  var secs = guestPermissions.sections || {};
+  // Default: registro and summary visible, rest hidden
+  var defaults = {carica:false, registro:true, summary:true, trading:false, settings:false, utenti:false};
+  if(secs[section] === undefined) return defaults[section] || false;
+  return secs[section] === true;
+}
+
+function canDo(action){
+  if(!isGuestMode) return true;
+  var acts = guestPermissions.actions || {};
+  var defaults = {download:true, delete:false, edit:false, export:true, import:false};
+  if(acts[action] === undefined) return defaults[action] || false;
+  return acts[action] === true;
+}
+
+function applyGuestActionRestrictions(){
+  if(!isGuestMode) return;
+  if(!canDo('delete')){
+    document.querySelectorAll('.btn-danger').forEach(function(b){ b.style.display='none'; });
+  }
+  if(!canDo('edit')){
+    document.querySelectorAll('.btn-edit').forEach(function(b){ b.style.display='none'; });
+    var selBar = document.getElementById('sel-bar');
+    if(selBar) selBar.style.display = 'none';
+  }
+  if(!canDo('export')){
+    document.querySelectorAll('[onclick*="exportXLSX"],[onclick*="exportZIP"],[onclick*="exportSelected"]')
+      .forEach(function(b){ b.style.display='none'; });
+  }
+  if(!canDo('download')){
+    document.querySelectorAll('[onclick*="downloadInvoiceFile"],[onclick*="viewInvoiceFile"]')
+      .forEach(function(b){ b.style.display='none'; });
+  }
+  // Hide utenti tab for guests always
+  var ut = document.getElementById('tab-btn-utenti');
+  if(ut) ut.style.display = 'none';
+  var utDiv = document.getElementById('tab-utenti');
+  if(utDiv) utDiv.style.display = 'none';
+}
+
+// ── INVOICE PERIOD FILTER FOR GUESTS ─────────────────────────────────────────
+function guestFilterInvoices(arr){
+  if(!isGuestMode) return arr;
+  var p = guestPermissions;
+  if(!p.period_from && !p.period_to) return arr;
+  return arr.filter(function(t){
+    var d = t.date || '';
+    if(p.period_from && d < p.period_from) return false;
+    if(p.period_to   && d > p.period_to)   return false;
+    return true;
+  });
+}
+
+
+
 function drawSparkline(closes, width, height, color){
   if(!closes || closes.length < 2) return '';
   var valid = closes.filter(function(c){ return c !== null && !isNaN(c); }).slice(-30);
@@ -1735,102 +1846,185 @@ async function submitInvite(){
 }
 
 async function loadUtenti(){
-  if(isGuestMode)return; // guests can't see user management
-  var {data,error}=await sb.from('guest_access').select('*').eq('admin_user_id',currentUser.id).order('created_at');
-  var el=document.getElementById('utenti-list');
-  if(!el)return;
-  if(error||!data||!data.length){
-    el.innerHTML='<div style="text-align:center;padding:40px;color:var(--text3)"><div style="font-size:32px;margin-bottom:10px">&#128101;</div><p>Nessun utente invitato. Clicca "+ Invita utente" per iniziare.</p></div>';
+  if(isGuestMode) return;
+  var el = document.getElementById('utenti-list');
+  if(!el) return;
+
+  var {data, error} = await sb.from('guest_access')
+    .select('*').eq('admin_user_id', currentUser.id).order('created_at');
+
+  if(!data || !data.length){
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3)">'+
+      '<div style="font-size:32px;margin-bottom:10px">&#128101;</div>'+
+      '<p>Nessun utente invitato. Clicca "+ Invita utente" per iniziare.</p></div>';
     return;
   }
 
-  var secLabels={carica:'Carica fattura',registro:'Registro',summary:'Summary & Tax',trading:'Trading',settings:'Impostazioni'};
-  var actLabels={export:'Esporta',download:'Scarica allegati',edit:'Modifica',delete:'Elimina',import:'Importa CSV'};
+  var secLabels = {carica:'Carica fattura', registro:'Registro', summary:'Summary & Tax',
+                   trading:'Trading', settings:'Impostazioni'};
+  var actLabels = {export:'Esporta', download:'Scarica allegati', edit:'Modifica',
+                   delete:'Elimina', import:'Importa CSV'};
 
-  el.innerHTML=data.map(function(g){
-    var p=g.permissions||{};
-    var secs=p.sections||{};
-    var acts=p.actions||{};
-    var linked=!!g.guest_user_id;
-    var statusColor=g.active?'var(--green)':'var(--text3)';
-    var statusBg=g.active?'var(--green-light)':'var(--surface2)';
-    var statusLabel=!linked?'In attesa registrazione':g.active?'Attivo':'Disattivato';
+  // Quarter presets
+  var now = new Date();
+  var yr  = now.getFullYear();
+  var quarters = [
+    {label:'Q1 '+yr, from:yr+'-01-01', to:yr+'-03-31'},
+    {label:'Q2 '+yr, from:yr+'-04-01', to:yr+'-06-30'},
+    {label:'Q3 '+yr, from:yr+'-07-01', to:yr+'-09-30'},
+    {label:'Q4 '+yr, from:yr+'-10-01', to:yr+'-12-31'},
+    {label:'Anno '+(yr-1), from:(yr-1)+'-01-01', to:(yr-1)+'-12-31'},
+    {label:'Anno '+yr,     from:yr+'-01-01',     to:yr+'-12-31'},
+    {label:'Tutti',        from:null,             to:null}
+  ];
 
-    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;margin-bottom:12px;box-shadow:var(--shadow)">'+
+  el.innerHTML = data.map(function(g){
+    var p    = g.permissions || {};
+    var secs = p.sections || {};
+    var acts = p.actions  || {};
+    var linked = !!g.guest_user_id;
+    var statusColor = g.active ? 'var(--green)' : 'var(--text3)';
+    var statusBg    = g.active ? 'rgba(22,163,74,0.1)' : 'var(--surface2)';
+    var statusLabel = !linked ? 'In attesa' : g.active ? 'Attivo' : 'Disattivato';
+
+    function toggle(type, key, val){
+      var on = val;
+      return '<label style="position:relative;display:inline-block;width:36px;height:20px;cursor:pointer">'+
+        '<input type="checkbox" '+(on?'checked':'')+' style="opacity:0;width:0;height:0" '+
+          'data-gid="'+g.id+'" data-sec="'+type+'" data-key="'+key+'" onchange="handlePermChange(this)">'+
+        '<span style="position:absolute;inset:0;border-radius:10px;background:'+(on?'var(--accent)':'#d1d5db')+
+          ';transition:.2s"><span style="position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;'+
+          'top:2px;transition:.2s;'+(on?'right:2px':'left:2px')+'"></span></span>'+
+        '</label>';
+    }
+
+    var qPresets = quarters.map(function(q){
+      var isCurrent = (p.period_from===q.from && p.period_to===q.to) ||
+                      (!q.from && !p.period_from && !p.period_to);
+      return '<button onclick="applyPeriodPreset('+g.id+',\''+q.from+'\',\''+q.to+'\')" '+
+        'style="padding:3px 10px;border-radius:20px;font-size:10.5px;cursor:pointer;border:1.5px solid '+
+        (isCurrent?'var(--accent)':'var(--border)')+ ';background:'+(isCurrent?'var(--accent)':'var(--surface2)')+
+        ';color:'+(isCurrent?'#fff':'var(--text2)')+';margin:2px">'+q.label+'</button>';
+    }).join('');
+
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);'+
+        'padding:18px 20px;margin-bottom:14px;box-shadow:var(--shadow)">'
       // Header
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">'+
-        '<div style="font-size:32px;line-height:1">&#128100;</div>'+
-        '<div>'+
-          '<div style="font-weight:700;font-size:14px">'+g.guest_email+'</div>'+
-          '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+
-            (p.period_from||p.period_to?'Periodo: '+(p.period_from||'inizio')+' → '+(p.period_to||'oggi'):'Accesso: tutti i periodi')+
-          '</div>'+
-        '</div>'+
-        '<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;background:'+statusBg+';color:'+statusColor+';border:1px solid '+statusColor+';margin-left:auto">'+statusLabel+'</span>'+
-      '</div>'+
-
+      +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">'
+        +'<div style="font-size:30px">&#128100;</div>'
+        +'<div><div style="font-weight:700;font-size:14px">'+g.guest_email+'</div>'
+          +'<div style="font-size:11px;color:var(--text3);margin-top:2px">'
+            +(p.period_from||p.period_to
+              ? 'Periodo: '+(p.period_from||'inizio')+' → '+(p.period_to||'oggi')
+              : 'Accesso: tutti i periodi')
+          +'</div></div>'
+        +'<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;'+
+          'background:'+statusBg+';color:'+statusColor+';border:1px solid '+statusColor+
+          ';margin-left:auto">'+statusLabel+'</span>'
+      +'</div>'
       // Permissions grid
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'+
-        // Sections
-        '<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px 14px">'+
-          '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);letter-spacing:.5px;margin-bottom:8px">Sezioni</div>'+
-          Object.keys(secLabels).map(function(k){
-            var on=secs[k]!==false&&secs[k]!==undefined?secs[k]:false;
-            if(secs[k]===undefined&&(k==='registro'||k==='summary'))on=true;
-            var gid=g.id;
-            return '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:12px">'+
-              '<span>'+secLabels[k]+'</span>'+
-              '<label style="position:relative;display:inline-block;width:34px;height:18px;cursor:pointer">'+
-                '<input type="checkbox" '+(on?'checked':'')+' style="opacity:0;width:0;height:0" '+
-                  'data-gid="'+gid+'" data-sec="sections" data-key="'+k+'" onchange="handlePermChange(this)">'+
-                '<span style="position:absolute;inset:0;border-radius:9px;background:'+(on?'var(--accent)':'var(--border)')+';transition:.2s">'+
-                  '<span style="position:absolute;width:14px;height:14px;border-radius:50%;background:#fff;top:2px;left:'+(on?'18px':'2px')+';transition:.2s"></span>'+
-                '</span>'+
-              '</label>'+
-            '</div>';
-          }).join('')+
-        '</div>'+
-        // Actions
-        '<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px 14px">'+
-          '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);letter-spacing:.5px;margin-bottom:8px">Azioni</div>'+
-          Object.keys(actLabels).map(function(k){
-            var on=acts[k]!==undefined?acts[k]:['export','download'].indexOf(k)>=0;
-            var gid=g.id;
-            return '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:12px">'+
-              '<span>'+actLabels[k]+'</span>'+
-              '<label style="position:relative;display:inline-block;width:34px;height:18px;cursor:pointer">'+
-                '<input type="checkbox" '+(on?'checked':'')+' style="opacity:0;width:0;height:0" '+
-                  'data-gid="'+gid+'" data-sec="actions" data-key="'+k+'" onchange="handlePermChange(this)">'+
-                '<span style="position:absolute;inset:0;border-radius:9px;background:'+(on?'var(--accent)':'var(--border)')+';transition:.2s">'+
-                  '<span style="position:absolute;width:14px;height:14px;border-radius:50%;background:#fff;top:2px;left:'+(on?'18px':'2px')+';transition:.2s"></span>'+
-                '</span>'+
-              '</label>'+
-            '</div>';
-          }).join('')+
-        '</div>'+
-      '</div>'+
-
-      // Period limit
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;background:var(--surface2);border-radius:var(--radius-sm)">'+
-        '<span style="font-size:11px;color:var(--text2);font-weight:600;min-width:60px">Periodo:</span>'+
-        '<input type="date" value="'+(p.period_from||'')+ '" style="font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);color:var(--text)" '+
-          'data-gid="'+g.id+'" data-field="period_from" onchange="handlePeriodChange(this)" placeholder="Inizio">'+
-        '<span style="color:var(--text3)">→</span>'+
-        '<input type="date" value="'+(p.period_to||'')+ '" style="font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);color:var(--text)" '+
-          'data-gid="'+g.id+'" data-field="period_to" onchange="handlePeriodChange(this)" placeholder="Fine">'+
-        '<span style="font-size:10px;color:var(--text3)">(vuoto = tutti)</span>'+
-      '</div>'+
-
-      // Actions
-      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
-        '<button class="btn '+(g.active?'btn-secondary':'btn-primary')+'" style="font-size:11px" '+
-          'onclick="toggleUtenteActive('+g.id+','+(g.active?'false':'true')+')">'+(g.active?'Disattiva accesso':'Riattiva accesso')+'</button>'+
-        (!linked?'<span style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px">Condividi il link del sito con questo utente</span>':'')+
-        '<button class="btn btn-danger" style="font-size:11px;margin-left:auto" onclick="removeUtente('+g.id+')">Rimuovi</button>'+
-      '</div>'+
-    '</div>';
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'
+        +'<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px 14px">'
+          +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);'+
+            'letter-spacing:.5px;margin-bottom:8px">Sezioni visibili</div>'
+          +Object.keys(secLabels).map(function(k){
+            var on = secs[k]!==undefined ? secs[k] : (k==='registro'||k==='summary');
+            return '<div style="display:flex;align-items:center;justify-content:space-between;'+
+              'padding:5px 0;font-size:12px"><span>'+secLabels[k]+'</span>'+toggle('sections',k,on)+'</div>';
+          }).join('')
+        +'</div>'
+        +'<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px 14px">'
+          +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);'+
+            'letter-spacing:.5px;margin-bottom:8px">Azioni consentite</div>'
+          +Object.keys(actLabels).map(function(k){
+            var on = acts[k]!==undefined ? acts[k] : (k==='export'||k==='download');
+            return '<div style="display:flex;align-items:center;justify-content:space-between;'+
+              'padding:5px 0;font-size:12px"><span>'+actLabels[k]+'</span>'+toggle('actions',k,on)+'</div>';
+          }).join('')
+        +'</div>'
+      +'</div>'
+      // Period filter
+      +'<div style="margin-bottom:14px;padding:12px 14px;background:var(--surface2);border-radius:var(--radius-sm)">'
+        +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);'+
+          'letter-spacing:.5px;margin-bottom:8px">Filtro periodo fatture</div>'
+        +'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">'+qPresets+'</div>'
+        +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+          +'<span style="font-size:11px;color:var(--text2)">Personalizzato:</span>'
+          +'<input type="date" value="'+(p.period_from||'')+'" '
+            +'data-gid="'+g.id+'" data-field="period_from" onchange="handlePeriodChange(this)" '
+            +'style="font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--border);'+
+            'background:var(--surface);color:var(--text)">'
+          +'<span style="color:var(--text3)">→</span>'
+          +'<input type="date" value="'+(p.period_to||'')+'" '
+            +'data-gid="'+g.id+'" data-field="period_to" onchange="handlePeriodChange(this)" '
+            +'style="font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--border);'+
+            'background:var(--surface);color:var(--text)">'
+          +'<button onclick="applyPeriodPreset('+g.id+',null,null)" '
+            +'style="font-size:10.5px;padding:3px 10px;border-radius:20px;border:1px solid var(--border);'+
+            'background:var(--surface);cursor:pointer;color:var(--text2)">Rimuovi filtro</button>'
+        +'</div>'
+      +'</div>'
+      // Action buttons
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+        +'<button class="btn '+(g.active?'btn-secondary':'btn-primary')+'" style="font-size:11px" '
+          +'onclick="toggleUtenteActive('+g.id+','+(g.active?'false':'true')+')">'
+          +(g.active?'Disattiva accesso':'Riattiva accesso')+'</button>'
+        +(!linked?'<span style="font-size:11px;color:var(--text3);display:flex;align-items:center">'+
+          'Condividi il link del sito con questo utente</span>':'')
+        +'<button class="btn btn-danger" style="font-size:11px;margin-left:auto" '
+          +'onclick="removeUtente('+g.id+')">Rimuovi</button>'
+      +'</div>'
+    +'</div>';
   }).join('');
 }
+
+async function applyPeriodPreset(id, from, to){
+  var {data} = await sb.from('guest_access').select('permissions').eq('id',id).single();
+  if(!data) return;
+  var p = data.permissions || {};
+  p.period_from = from;
+  p.period_to   = to;
+  await sb.from('guest_access').update({permissions:p}).eq('id',id);
+  loadUtenti();
+}
+
+function handlePermChange(cb){
+  updateUtentePerm(parseInt(cb.dataset.gid), cb.dataset.sec, cb.dataset.key, cb.checked);
+}
+
+function handlePeriodChange(el){
+  updateUtentePeriod(parseInt(el.dataset.gid), el.dataset.field, el.value);
+}
+
+async function updateUtentePerm(id, section, key, val){
+  var {data} = await sb.from('guest_access').select('permissions').eq('id',id).single();
+  if(!data) return;
+  var p = data.permissions || {};
+  if(!p[section]) p[section] = {};
+  p[section][key] = val;
+  await sb.from('guest_access').update({permissions:p}).eq('id',id);
+}
+
+async function updateUtentePeriod(id, field, val){
+  var {data} = await sb.from('guest_access').select('permissions').eq('id',id).single();
+  if(!data) return;
+  var p = data.permissions || {};
+  p[field] = val || null;
+  await sb.from('guest_access').update({permissions:p}).eq('id',id);
+}
+
+async function toggleUtenteActive(id, active){
+  await sb.from('guest_access').update({active:active}).eq('id',id);
+  loadUtenti();
+}
+
+async function removeUtente(id){
+  if(!confirm('Rimuovere questo utente? Perdera immediatamente l accesso.')) return;
+  await sb.from('guest_access').delete().eq('id',id);
+  loadUtenti();
+}
+
+
 
 function handlePermChange(cb){
   var id=parseInt(cb.dataset.gid);
