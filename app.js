@@ -382,6 +382,7 @@ function loadSettings(){
     settings.gclientid=localStorage.getItem('inv_gcid')||DEFAULT_GCID;
     settings.gfolderid=localStorage.getItem('inv_gfid')||DEFAULT_GFID;
     var sk=document.getElementById('s-key');if(sk)sk.value=settings.key;
+    var ssk=document.getElementById('s-svc-key');if(ssk)ssk.value=settings.svckey||'';
     var gi=document.getElementById('s-gclientid');if(gi)gi.value=settings.gclientid;
     var gf=document.getElementById('s-gfolderid');if(gf)gf.value=settings.gfolderid;
   });
@@ -391,6 +392,7 @@ function saveSettings(){
   settings.gclientid=v('s-gclientid');settings.gfolderid=v('s-gfolderid');
   sb.from('profile').upsert({user_id:currentUser.id,name:settings.name,vat_number:settings.vat},{onConflict:'user_id'});
   localStorage.setItem('inv_key',settings.key);localStorage.setItem('inv_gcid',settings.gclientid);localStorage.setItem('inv_gfid',settings.gfolderid);
+  if(settings.svckey) localStorage.setItem('inv_svc_key',settings.svckey);
 }
 function cfg(k){return settings[k]||(k==='key'?DEFAULT_KEY:k==='gclientid'?DEFAULT_GCID:k==='gfolderid'?DEFAULT_GFID:'');}
 function updateCount(){var el=document.getElementById('tx-count');if(el)el.textContent=txs.length+' transazioni';}

@@ -9,7 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="app.js?v=1778062884"></script>
+<script src="app.js?v=1778063682"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=Syne:wght@600;700;800&display=swap');
 
@@ -1124,6 +1124,11 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
         <label>API Key Anthropic (per estrazione AI)</label>
         <input type="password" id="s-key" placeholder="sk-ant-..." oninput="saveSettings()">
         <small style="color:var(--text2)">Salvata solo in localStorage &middot; console.anthropic.com</small>
+      </div>
+      <div class="form-group">
+        <label>Supabase Service Role Key <small style="color:var(--orange)">(admin — necessaria per eliminare utenti)</small></label>
+        <input type="password" id="s-svc-key" placeholder="eyJ..." oninput="saveSettings()">
+        <small style="color:var(--text2)">Solo per eliminazione account ospiti &middot; Non condividere mai questa chiave &middot; Supabase → Project Settings → API → service_role</small>
       </div>
     </div>
 
