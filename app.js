@@ -1342,13 +1342,16 @@ function showAdv(tips,panel,content){
 
 
 function exportXLSX(){
-  if(!txs.length){alert('Nessuna transazione.');return;}
+  var arr=getFilteredTxs();
+  if(!arr.length){alert('Nessuna transazione nel periodo selezionato.');return;}
   var wb=XLSX.utils.book_new();
   var name=cfg('name'), vatN=cfg('vat');
   var h1='Invoice Register'+(name?' - '+name:'')+(vatN?' (VAT '+vatN+')':'');
+  var periodDesc=filterYear!=='all'?filterYear:'All years';
+  if(!filterPeriods.has('all'))periodDesc+=(' - '+Array.from(filterPeriods).join(','));
   var rows=[];
   rows.push([h1]);
-  rows.push(['Period: all transactions. All amounts in EUR.']);
+  rows.push(['Period: '+periodDesc+'. All amounts in EUR.']);
   rows.push([]);
   rows.push(['Date','Service Month','Type','Invoice #','Counterparty','Category','Country','VAT / Tax ID','Address','Description','Entrate Net (EUR)','Entrate VAT (EUR)','Entrate Total (EUR)','Uscite Net (EUR)','Uscite VAT (EUR)','Uscite Total (EUR)','Notes']);
   var sorted=[].concat(txs).sort(function(a,b){return a.date.localeCompare(b.date);});
@@ -1380,7 +1383,7 @@ function exportXLSX(){
   // Cat summary sheet
   var cats=['Revenue - Consultancy','Revenue - Other','Professional Services - Accountant','Professional Services - Consultancy','Travel - Flights','Travel - Accommodation','Travel - Local Transport','Utilities - Internet/Mobile','Utilities - Other','Equipment - Office','Equipment - Other','Other'];
   var map={};cats.forEach(function(c){map[c]={n:0,v:0,t:0};});
-  txs.forEach(function(t){
+  arr.forEach(function(t){
     var c=t.category||'Other';if(!map[c])map[c]={n:0,v:0,t:0};
     if(t.type==='Issued'){map[c].n+=t.entrateNet;map[c].v+=t.entrateVat;map[c].t+=t.entrateTotal;}
     else{map[c].n+=t.usciteNet;map[c].v+=t.usciteVat;map[c].t+=t.usciteTotal;}
@@ -1461,10 +1464,14 @@ function _buildZIP(arr,label){
   });
 }
 function exportZIP(){
-  var q=document.getElementById('zip-quarter').value;
+  // Use already-filtered transactions respecting period pills + year filter
+  var base=getFilteredTxs();
+  // Additional quarter filter from ZIP selector
+  var q=document.getElementById('zip-quarter')?document.getElementById('zip-quarter').value:'all';
   var qM={Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
-  var arr=txs.filter(function(t){if(q==='all')return true;var m=t.date.slice(5,7);return qM[q].indexOf(m)>=0;});
-  _buildZIP(arr,q==='all'?'Anno':q);
+  var arr=q==='all'?base:base.filter(function(t){var m=(t.date||'').slice(5,7);return qM[q]&&qM[q].indexOf(m)>=0;});
+  var label=q==='all'?(filterYear!=='all'?filterYear:'Anno'):q+(filterYear!=='all'?' '+filterYear:'');
+  _buildZIP(arr,label);
 }
 
 
@@ -2537,14 +2544,20 @@ async function fetchPrice(ticker, range, interval){
         ? (((meta.chartPreviousClose || 0) / quoteInfo.divisor) || (series.length > 1 ? series[series.length-2] : price))
         : (series.length > 1 ? series[series.length-2] : (((meta.chartPreviousClose || 0) / quoteInfo.divisor) || price));
       var dayChg   = price - prev;
-      var dayChgPct= prev > 0 ? dayChg / prev * 100 : 0;
+      // Use Yahoo's official regularMarketChangePercent for day change (accurate)
+      var dayChgPct = (meta.regularMarketChangePercent !== undefined && meta.regularMarketChangePercent !== null)
+        ? meta.regularMarketChangePercent
+        : (prev > 0 ? dayChg / prev * 100 : 0);
       var first    = series[0] || price;
-      var perChgPct= first > 0 ? (price - first) / first * 100 : 0;
+      // For 1d period, period change = same as day change (vs prev close)
+      var perChgPct = range === '1d'
+        ? dayChgPct
+        : (first > 0 ? (price - first) / first * 100 : 0);
       var hi = series.length ? Math.max.apply(null,series) : price;
       var lo = series.length ? Math.min.apply(null,series) : price;
 
       var result = {
-        price: price, change: dayChg, changePct: dayChgPct,
+        price: price, change: (meta.regularMarketChange !== undefined ? meta.regularMarketChange / (quoteInfo.divisor||1) : dayChg), changePct: dayChgPct,
         periodChange: price-first, periodChangePct: perChgPct,
         high: hi, low: lo, closes: series.length ? series : closes, timestamps: timestamps,
         currency: quoteInfo.currency,
