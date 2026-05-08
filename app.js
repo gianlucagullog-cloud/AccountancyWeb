@@ -2489,91 +2489,114 @@ async function saveTransaction2(){
 
 // ── PRICE FETCHING (Yahoo Finance) ────────────────────────────────────────────
 async function fetchPrice(ticker, range, interval){
-  ticker   = normalizeTickerSymbol(ticker);
-  range    = range    || tradingPeriod    || '1d';
-  interval = interval || tradingPeriodInterval || '5m';
-  var key  = getTradingCacheKey(ticker, range);
-  var ttl  = (range === '1d') ? 60000 : 300000;
+  ticker = normalizeTickerSymbol(ticker);
+  range  = range || tradingPeriod || '1d';
+
+  // Direct Yahoo Finance range/interval map — fetch exactly what we need
+  var rangeMap = {
+    '1d': {r:'1d',  i:'5m'},
+    '5d': {r:'5d',  i:'60m'},
+    '1mo':{r:'1mo', i:'1d'},
+    '3mo':{r:'3mo', i:'1d'},
+    '6mo':{r:'6mo', i:'1d'},
+    '1y': {r:'1y',  i:'1wk'},
+    '5y': {r:'5y',  i:'1mo'}
+  };
+  var rm = rangeMap[range] || {r:range, i:'1d'};
+
+  var key = ticker + '_' + range;
+  var ttl = (range === '1d') ? 60000 : 300000;
   if(priceCache[key] && (Date.now() - priceCache[key].ts) < ttl) return priceCache[key];
 
-  var fetchRange = getFetchRangeForPeriod(range);
-  var fetchInterval = range === '1d' ? interval : getFetchIntervalForPeriod(range);
-
-  // Yahoo Finance URL
   var yurl = 'https://query1.finance.yahoo.com/v8/finance/chart/'
     + encodeURIComponent(ticker)
-    + '?interval=' + fetchInterval
-    + '&range='    + fetchRange
+    + '?interval=' + rm.i
+    + '&range='    + rm.r
     + '&includePrePost=false';
 
-  // Proxy list — try in order
   var proxies = [
     'https://corsproxy.io/?' + encodeURIComponent(yurl),
-    'https://api.allorigins.win/get?url=' + encodeURIComponent(yurl),
-    'https://corsproxy.io/?' + encodeURIComponent(
-      'https://query2.finance.yahoo.com/v8/finance/chart/'
-      + encodeURIComponent(ticker)
-      + '?interval=' + fetchInterval + '&range=' + fetchRange)
+    'https://api.allorigins.win/get?url=' + encodeURIComponent(yurl)
   ];
 
-  for(var pi = 0; pi < proxies.length; pi++){
+  for(var pi=0; pi<proxies.length; pi++){
     try{
       var resp = await fetch(proxies[pi], {method:'GET'});
       if(!resp.ok) continue;
       var json = await resp.json();
-      // allorigins wraps in .contents
       if(json.contents) json = JSON.parse(json.contents);
       if(!json.chart || !json.chart.result || !json.chart.result[0]) continue;
 
-      var meta   = json.chart.result[0].meta;
-      var quoteInfo = normalizeQuoteCurrency(meta.currency || 'USD');
-      var timestamps = json.chart.result[0].timestamp || [];
-      var q      = json.chart.result[0].indicators.quote[0];
-      var closes = (q.close || []).map(function(c){
-        return (c === null || isNaN(c)) ? c : c / quoteInfo.divisor;
-      });
-      var points = selectSeriesForRange(range, timestamps, closes);
-      var series = points.map(function(point){ return point.close; });
+      var meta = json.chart.result[0].meta;
+      var q    = json.chart.result[0].indicators.quote[0];
 
-      var rawLivePrice = meta.regularMarketPrice || meta.chartPreviousClose || null;
-      var livePrice = rawLivePrice !== null && rawLivePrice !== undefined
-        ? rawLivePrice / quoteInfo.divisor
-        : (series.length ? series[series.length-1] : 0);
-      var price    = livePrice;
-      var prev     = range === '1d'
-        ? (((meta.chartPreviousClose || 0) / quoteInfo.divisor) || (series.length > 1 ? series[series.length-2] : price))
-        : (series.length > 1 ? series[series.length-2] : (((meta.chartPreviousClose || 0) / quoteInfo.divisor) || price));
-      var dayChg   = price - prev;
-      // Use Yahoo's official regularMarketChangePercent for day change (accurate)
-      var dayChgPct = (meta.regularMarketChangePercent !== undefined && meta.regularMarketChangePercent !== null)
+      // Handle GBp (pence) conversion
+      var divisor = (meta.currency === 'GBp' || meta.currency === 'GBX') ? 100 : 1;
+      var currency= (meta.currency === 'GBp' || meta.currency === 'GBX') ? 'GBP' : (meta.currency || 'USD');
+
+      // Current price (always from meta — most accurate)
+      var price = (meta.regularMarketPrice || meta.chartPreviousClose || 0) / divisor;
+
+      // Day change from Yahoo official field
+      var dayChgPct = (meta.regularMarketChangePercent != null)
         ? meta.regularMarketChangePercent
-        : (prev > 0 ? dayChg / prev * 100 : 0);
-      var first    = series[0] || price;
-      // For 1d period, period change = same as day change (vs prev close)
-      var perChgPct = range === '1d'
-        ? dayChgPct
-        : (first > 0 ? (price - first) / first * 100 : 0);
-      var hi = series.length ? Math.max.apply(null,series) : price;
-      var lo = series.length ? Math.min.apply(null,series) : price;
+        : 0;
+      var dayChg = (meta.regularMarketChange != null)
+        ? meta.regularMarketChange / divisor
+        : 0;
+
+      // Period change: compare current price vs first valid close in fetched series
+      var closes = (q.close || []).map(function(c){
+        return (c===null || isNaN(c)) ? null : c/divisor;
+      });
+      var validCloses = closes.filter(function(c){ return c!==null; });
+      var firstClose  = validCloses.length ? validCloses[0] : price;
+      var lastClose   = validCloses.length ? validCloses[validCloses.length-1] : price;
+
+      var perChgPct;
+      if(range === '1d'){
+        // For 1d: use official Yahoo day change %
+        perChgPct = dayChgPct;
+      } else {
+        // For multi-day: first close in series is market open of first day
+        // Use prevClose of first day as baseline if available, else firstClose
+        var prevClose = (meta.chartPreviousClose || 0) / divisor;
+        // Best baseline: first close in the period
+        var baseline = firstClose || prevClose || price;
+        perChgPct = baseline > 0 ? (price - baseline) / baseline * 100 : 0;
+      }
+
+      var hi = validCloses.length ? Math.max.apply(null, validCloses) : price;
+      var lo = validCloses.length ? Math.min.apply(null, validCloses) : price;
 
       var result = {
-        price: price, change: (meta.regularMarketChange !== undefined ? meta.regularMarketChange / (quoteInfo.divisor||1) : dayChg), changePct: dayChgPct,
-        periodChange: price-first, periodChangePct: perChgPct,
-        high: hi, low: lo, closes: series.length ? series : closes, timestamps: timestamps,
-        currency: quoteInfo.currency,
+        price: price,
+        change: dayChg,
+        changePct: dayChgPct,
+        periodChange: price - firstClose,
+        periodChangePct: perChgPct,
+        high: hi, low: lo,
+        closes: closes,
+        currency: currency,
         name: meta.shortName || meta.longName || ticker,
         ts: Date.now()
       };
+
       priceCache[key]   = result;
-      if(range === '1d' || !priceCache[ticker]) priceCache[ticker]= result;
+      priceCache[ticker]= result; // default cache entry
+      console.log('Price OK:', ticker, range, price.toFixed(2), currency,
+        'day:', dayChgPct.toFixed(2)+'%',
+        'period:', perChgPct.toFixed(2)+'%');
       return result;
+
     } catch(e){
       console.warn('Proxy', pi, 'failed for', ticker, ':', e.message);
     }
   }
-  console.error('All proxies failed:', ticker);
+  console.error('All proxies failed for:', ticker);
   return null;
 }
+
 
 
 function setTradingPeriod(range,btn){
