@@ -388,11 +388,53 @@ function loadSettings(){
   });
 }
 function saveSettings(){
-  settings.name=v('s-name');settings.vat=v('s-vat');settings.key=v('s-key');
-  settings.gclientid=v('s-gclientid');settings.gfolderid=v('s-gfolderid');
-  sb.from('profile').upsert({user_id:currentUser.id,name:settings.name,vat_number:settings.vat},{onConflict:'user_id'});
-  localStorage.setItem('inv_key',settings.key);localStorage.setItem('inv_gcid',settings.gclientid);localStorage.setItem('inv_gfid',settings.gfolderid);
-  if(settings.svckey) localStorage.setItem('inv_svc_key',settings.svckey);
+  settings.name     = v('s-name');
+  settings.vat      = v('s-vat');
+  settings.key      = v('s-key');
+  settings.gclientid= v('s-gclientid');
+  settings.gfolderid= v('s-gfolderid');
+  settings.svckey   = v('s-svc-key') || '';
+
+  sb.from('profile').upsert({user_id:currentUser.id, name:settings.name, vat_number:settings.vat},{onConflict:'user_id'});
+
+  // Save or clear each key from localStorage
+  if(settings.key)       localStorage.setItem('inv_key',     settings.key);
+  else                   localStorage.removeItem('inv_key');
+
+  if(settings.gclientid) localStorage.setItem('inv_gcid',    settings.gclientid);
+  else                   localStorage.removeItem('inv_gcid');
+
+  if(settings.gfolderid) localStorage.setItem('inv_gfid',    settings.gfolderid);
+  else                   localStorage.removeItem('inv_gfid');
+
+  if(settings.svckey)    localStorage.setItem('inv_svc_key', settings.svckey);
+  else                   localStorage.removeItem('inv_svc_key');
+}
+
+function saveAndConfirm(){
+  saveSettings();
+  var btn = document.getElementById('save-settings-btn');
+  if(btn){
+    var orig = btn.innerHTML;
+    btn.innerHTML = '&#10003; Salvato!';
+    btn.style.background = 'var(--green)';
+    setTimeout(function(){
+      btn.innerHTML = orig;
+      btn.style.background = '';
+    }, 2000);
+  }
+}
+
+function clearField(id){
+  var el = document.getElementById(id);
+  if(el){ el.value = ''; el.type = 'text'; el.focus(); el.type = 'password'; }
+  // Map field id to localStorage key and remove
+  var lsMap = {'s-key':'inv_key','s-gclientid':'inv_gcid','s-gfolderid':'inv_gfid','s-svc-key':'inv_svc_key'};
+  if(lsMap[id]) localStorage.removeItem(lsMap[id]);
+  // Also clear from settings object
+  var settingsMap = {'s-key':'key','s-gclientid':'gclientid','s-gfolderid':'gfolderid','s-svc-key':'svckey'};
+  if(settingsMap[id]) settings[settingsMap[id]] = '';
+  showMsg('Campo "'+id+'" cancellato.','success');
 }
 function cfg(k){return settings[k]||(k==='key'?DEFAULT_KEY:k==='gclientid'?DEFAULT_GCID:k==='gfolderid'?DEFAULT_GFID:'');}
 function updateCount(){var el=document.getElementById('tx-count');if(el)el.textContent=txs.length+' transazioni';}
@@ -693,7 +735,7 @@ function handleFile(file){
     return fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-opus-4-5',max_tokens:1200,messages:[{role:'user',content:[cb,{type:'text',text:prompt}]}]})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1200,messages:[{role:'user',content:[cb,{type:'text',text:prompt}]}]})
     });
   }).then(function(r){return r.json();}).then(function(data){
     if(data.error) throw new Error(data.error.message);
@@ -3009,7 +3051,10 @@ async function generateRecommendations(){
   if(!el) return;
   el.innerHTML = '<div class="ai-thinking">&#129504; Analisi AI in corso — analisi portafoglio, trend e nuove opportunita...</div>';
 
-  var apiKey = localStorage.getItem('inv_key') || DEFAULT_KEY;
+  // Use DEFAULT_KEY as primary (hardcoded), localStorage as override only if explicitly set
+  var storedKey = localStorage.getItem('inv_key');
+  var apiKey = (storedKey && storedKey !== DEFAULT_KEY && storedKey.startsWith('sk-ant-'))
+    ? storedKey : DEFAULT_KEY;
   if(!apiKey){ el.innerHTML='<div style="color:var(--red)">API key Anthropic mancante nelle Impostazioni.</div>'; return; }
 
   // Build portfolio context with all available price data
@@ -3096,7 +3141,7 @@ async function generateRecommendations(){
         'anthropic-dangerous-direct-browser-access':'true'
       },
       body: JSON.stringify({
-        model: 'claude-opus-4-5',
+        model: 'claude-sonnet-4-6',
         max_tokens: 3000,
         messages:[{role:'user', content:prompt}]
       })
@@ -3104,7 +3149,9 @@ async function generateRecommendations(){
 
     if(!response.ok){
       var errData = await response.json().catch(function(){ return {}; });
-      throw new Error('API '+response.status+': '+(errData.error&&errData.error.message||response.statusText));
+      var errMsg = errData.error&&errData.error.message ? errData.error.message : response.statusText;
+      console.error('API Error:', response.status, errMsg, 'key starts:', apiKey.substring(0,15));
+      throw new Error('API '+response.status+': '+errMsg);
     }
 
     var data = await response.json();
@@ -3515,7 +3562,7 @@ async function importPortfolioPDF(file){
       'anthropic-dangerous-direct-browser-access':'true'
     },
     body: JSON.stringify({
-      model:'claude-opus-4-5',
+      model:'claude-sonnet-4-6',
       max_tokens:2000,
       messages:[{
         role:'user',
