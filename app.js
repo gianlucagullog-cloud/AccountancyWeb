@@ -365,7 +365,7 @@ function importCSV(input){
 }
 
 // SETTINGS
-var DEFAULT_KEY='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';
+var DEFAULT_KEY='';
 var DEFAULT_GCID='889043142197-tanccu5tm1mpg2bt40lood3rele3dsns.apps.googleusercontent.com';
 var DEFAULT_GFID='1UvOst1smuek8B5uMb0PfKlCtOqci3GHn';
 
@@ -436,7 +436,7 @@ function clearField(id){
   if(settingsMap[id]) settings[settingsMap[id]] = '';
   showMsg('Campo "'+id+'" cancellato.','success');
 }
-function cfg(k){return settings[k]||(k==='key'?DEFAULT_KEY:k==='gclientid'?DEFAULT_GCID:k==='gfolderid'?DEFAULT_GFID:'');}
+function cfg(k){return settings[k]||(k==='gclientid'?DEFAULT_GCID:k==='gfolderid'?DEFAULT_GFID:'');}
 function updateCount(){var el=document.getElementById('tx-count');if(el)el.textContent=txs.length+' transazioni';}
 
 // TABS
@@ -3051,10 +3051,20 @@ async function generateRecommendations(){
   if(!el) return;
   el.innerHTML = '<div class="ai-thinking">&#129504; Analisi AI in corso — analisi portafoglio, trend e nuove opportunita...</div>';
 
-  // Use DEFAULT_KEY as primary (hardcoded), localStorage as override only if explicitly set
-  var storedKey = localStorage.getItem('inv_key');
-  var apiKey = (storedKey && storedKey !== DEFAULT_KEY && storedKey.startsWith('sk-ant-'))
-    ? storedKey : DEFAULT_KEY;
+  var apiKey = (localStorage.getItem('inv_key')||'').trim();
+  if(!apiKey || !apiKey.startsWith('sk-ant-')){
+    el.innerHTML = '<div style="color:var(--orange);font-size:12px;padding:14px;background:rgba(217,119,6,0.08);border-radius:8px;border:1px solid rgba(217,119,6,0.3)">'+
+      '<b>&#128273; API Key Anthropic mancante o non valida</b><br>'+
+      'Per usare l\'analisi AI devi inserire una API key valida:<br>'+
+      '<ol style="margin:8px 0 0 16px;line-height:2">'+
+      '<li>Vai su <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--accent)">console.anthropic.com</a></li>'+
+      '<li>Clicca <b>Create Key</b></li>'+
+      '<li>Copia la chiave (inizia con sk-ant-...)</li>'+
+      '<li>Incollala in <b>Impostazioni → API Key Anthropic</b></li>'+
+      '<li>Clicca <b>Salva impostazioni</b></li>'+
+      '</ol></div>';
+    return;
+  }
   if(!apiKey){ el.innerHTML='<div style="color:var(--red)">API key Anthropic mancante nelle Impostazioni.</div>'; return; }
 
   // Build portfolio context with all available price data
