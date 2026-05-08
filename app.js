@@ -1778,6 +1778,40 @@ function isISIN(str){
   return /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(str.trim());
 }
 
+
+async function testApiKey(){
+  var apiKey = (localStorage.getItem('inv_key')||'').trim();
+  if(!apiKey){ alert('Nessuna API key inserita in Impostazioni.'); return; }
+  var btn = document.getElementById('test-key-btn');
+  if(btn){ btn.disabled=true; btn.textContent='Test in corso...'; }
+  try{
+    var resp = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model:'claude-sonnet-4-6',
+        max_tokens:10,
+        messages:[{role:'user',content:'Hi'}]
+      })
+    });
+    var data = await resp.json();
+    if(resp.ok){
+      alert('✅ API Key VALIDA!\nModello: '+data.model+'\nRisposta: '+data.content[0].text);
+    } else {
+      alert('❌ API Key NON VALIDA\nErrore '+resp.status+': '+(data.error&&data.error.message||'unknown')+
+        '\n\nSoluzione: genera una nuova chiave su console.anthropic.com → API Keys → Create Key');
+    }
+  } catch(e){
+    alert('Errore di rete: '+e.message);
+  }
+  if(btn){ btn.disabled=false; btn.textContent='&#128273; Testa API Key'; }
+}
+
 // INIT — tutto dentro DOMContentLoaded per garantire che le variabili siano pronte
 document.addEventListener('DOMContentLoaded', function(){
   updateAmountSections();

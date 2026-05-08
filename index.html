@@ -9,7 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="app.js?v=1778244767"></script>
+<script src="app.js?v=1778245159"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=Syne:wght@600;700;800&display=swap');
 
@@ -1123,7 +1123,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
       <div class="form-group full">
         <label style="display:flex;align-items:center;justify-content:space-between">API Key Anthropic (per estrazione AI)<button onclick="clearField('s-key')" style="font-size:10px;padding:1px 8px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);color:var(--text3);cursor:pointer">&#215; Cancella</button></label>
         <input type="password" id="s-key" placeholder="sk-ant-...">
-        <small style="color:var(--text2)">Salvata solo in localStorage &middot; console.anthropic.com</small>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px"><small style="color:var(--text2)">Salvata solo in localStorage &middot; <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--accent)">Genera nuova chiave</a></small><button id="test-key-btn" onclick="testApiKey()" style="font-size:10.5px;padding:3px 12px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);cursor:pointer;color:var(--text2)">&#128273; Testa API Key</button></div>
       </div>
       <div class="form-group">
         <label style="display:flex;align-items:center;justify-content:space-between">Supabase Service Role Key <small style="color:var(--orange)">(admin — necessaria per eliminare utenti)</small><button onclick="clearField('s-svc-key')" style="font-size:10px;padding:1px 8px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);color:var(--text3);cursor:pointer">&#215; Cancella</button></label>
