@@ -3005,85 +3005,191 @@ function toggleAllPositions(cb){
 }
 
 async function generateRecommendations(){
-  var el=document.getElementById('ai-rec-content');
+  var el = document.getElementById('ai-rec-content');
   if(!el) return;
-  el.innerHTML='<div class="ai-thinking"><div style="animation:spin 1s linear infinite;display:inline-block">&#9654;</div>Analisi AI in corso...</div>';
+  el.innerHTML = '<div class="ai-thinking">&#129504; Analisi AI in corso — analisi portafoglio, trend e nuove opportunita...</div>';
 
-  // Build context for Claude
-  var positionsSummary=positions.map(function(p){
-    var data=priceCache[p.ticker];
-    var qty=parseFloat(p.quantity)||0;
-    var avg=parseFloat(p.avg_buy_price)||0;
-    var curr=data?data.price:null;
-    var pnlPct=curr&&avg>0?(curr-avg)/avg*100:null;
-    var recentCloses=data&&data.closes?data.closes.filter(function(c){return c!==null;}).slice(-10):[];
-    var trend=recentCloses.length>=2?(recentCloses[recentCloses.length-1]-recentCloses[0])/recentCloses[0]*100:null;
+  var apiKey = localStorage.getItem('inv_key') || DEFAULT_KEY;
+  if(!apiKey){ el.innerHTML='<div style="color:var(--red)">API key Anthropic mancante nelle Impostazioni.</div>'; return; }
+
+  // Build portfolio context with all available price data
+  var portfolio = positions.map(function(p){
+    var d   = priceCache[p.ticker+'_'+tradingPeriod] || priceCache[p.ticker] || {};
+    var qty = parseFloat(p.quantity)      || 0;
+    var avg = parseFloat(p.avg_buy_price) || 0;
+    var cur = d.price || null;
+    var invested = qty * avg;
+    var value    = cur ? qty * cur : null;
+    var pnlPct   = (cur && avg > 0) ? (cur - avg) / avg * 100 : null;
+    // Get closes for different periods from cache
+    var d1  = priceCache[p.ticker+'_1d']  || {};
+    var d1m = priceCache[p.ticker+'_1mo'] || {};
+    var d3m = priceCache[p.ticker+'_3mo'] || {};
+    var d1y = priceCache[p.ticker+'_1y']  || {};
     return {
-      ticker:p.ticker, name:p.name||p.ticker, type:p.asset_type,
-      qty:qty, avgCost:avg, currentPrice:curr,
-      pnlPct:pnlPct?pnlPct.toFixed(1)+'%':null,
-      dayChange:data?data.changePct.toFixed(2)+'%':null,
-      trend10d:trend?trend.toFixed(1)+'%':null,
-      high3m:data?data.high52.toFixed(2):null,
-      low3m:data?data.low52.toFixed(2):null,
-      currency:p.currency
+      ticker:    p.ticker,
+      name:      d.name || p.name || p.ticker,
+      type:      p.asset_type || 'stock',
+      qty:       qty,
+      avgCost:   avg > 0 ? avg.toFixed(2) : null,
+      price:     cur ? cur.toFixed(2) : null,
+      currency:  d.currency || p.currency || 'USD',
+      invested:  invested > 0 ? invested.toFixed(0) : null,
+      value:     value ? value.toFixed(0) : null,
+      pnlPct:    pnlPct !== null ? pnlPct.toFixed(1)+'%' : null,
+      change1d:  d1.changePct  !== undefined ? d1.changePct.toFixed(2)+'%'  : null,
+      change1mo: d1m.periodChangePct !== undefined ? d1m.periodChangePct.toFixed(2)+'%' : null,
+      change3mo: d3m.periodChangePct !== undefined ? d3m.periodChangePct.toFixed(2)+'%' : null,
+      change1y:  d1y.periodChangePct !== undefined ? d1y.periodChangePct.toFixed(2)+'%' : null,
+      high:      d.high ? d.high.toFixed(2) : null,
+      low:       d.low  ? d.low.toFixed(2)  : null
     };
+  }).filter(function(p){ return p.qty > 0; });
+
+  // Compute portfolio totals for context
+  var totalInvested = 0, totalValue = 0;
+  portfolio.forEach(function(p){
+    if(p.invested) totalInvested += parseFloat(p.invested);
+    if(p.value)    totalValue    += parseFloat(p.value);
   });
 
-  var prompt='Analizza questo portafoglio e dai consigli su quando comprare o vendere ciascun titolo. Rispondi SOLO con JSON array, nessun testo fuori. Portafoglio:\n'+JSON.stringify(positionsSummary,null,2)+'\n\nFormato risposta (JSON array):'+
-  '[{"ticker":"AAPL","action":"buy|sell|hold|watch","urgency":"high|medium|low","title":"titolo","reason":"motivazione 2-3 frasi","detail":"livelli prezzo e analisi tecnica","warning":"rischi o null"}]';
+  var prompt =
+    'Sei un consulente finanziario esperto in investimenti di medio-lungo periodo con strategia buy & hold.\n\n'+
+    'PORTAFOGLIO ATTUALE:\n'+
+    'Investito totale: '+totalInvested.toFixed(0)+' EUR\n'+
+    'Valore attuale: '+totalValue.toFixed(0)+' EUR\n'+
+    'Posizioni ('+portfolio.length+'):\n'+
+    JSON.stringify(portfolio, null, 1)+'\n\n'+
+    'STRATEGIA INVESTITORE: buy & hold, orizzonte 5-15 anni, focus su crescita capitale e qualita aziendale.\n\n'+
+    'COMPITO: Analizza il portafoglio e rispondi SOLO con un JSON object (nessun testo fuori dal JSON):\n'+
+    '{\n'+
+    '  "portfolio_analysis": "breve analisi qualitativa del portafoglio (3-4 frasi: diversificazione, concentrazione settoriale, qualita)",\n'+
+    '  "recommendations": [\n'+
+    '    {\n'+
+    '      "ticker": "AAPL",\n'+
+    '      "action": "buy_more|sell|hold|reduce",\n'+
+    '      "priority": "high|medium|low",\n'+
+    '      "title": "titolo breve",\n'+
+    '      "reason": "motivazione 2-3 frasi basata su trend, fondamentali e strategia buy&hold",\n'+
+    '      "target_action": "Azione concreta suggerita (es: aumenta posizione del 20%, vendi 30%, mantieni)"\n'+
+    '    }\n'+
+    '  ],\n'+
+    '  "new_opportunities": [\n'+
+    '    {\n'+
+    '      "ticker": "VGT",\n'+
+    '      "name": "Vanguard IT ETF",\n'+
+    '      "type": "etf",\n'+
+    '      "reason": "perche si adatta alla strategia e completa il portafoglio",\n'+
+    '      "priority": "high|medium|low"\n'+
+    '    }\n'+
+    '  ]\n'+
+    '}\n'+
+    'Per new_opportunities suggerisci 3-5 titoli/ETF NON presenti nel portafoglio che si adattano alla strategia buy&hold. Includi almeno 2 ETF diversificati.';
 
-  // Check API key
-  var apiKey = localStorage.getItem('inv_key') || DEFAULT_KEY;
-  if(!apiKey){el.innerHTML='<div style="color:var(--red)">API key mancante.</div>';return;}
   try{
-    var response=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({
-        model:'claude-opus-4-5-20251001',
-        max_tokens:2000,
-        messages:[{role:'user',content:prompt}]
+    var response = await fetch('https://api.anthropic.com/v1/messages',{
+      method: 'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-4-5',
+        max_tokens: 3000,
+        messages:[{role:'user', content:prompt}]
       })
     });
-    var data;
-    if(response.json) data=await response.json();
-    else data=response;
-    if(!data.content||!data.content[0]){
-      throw new Error(data.error&&data.error.message?data.error.message:'Risposta API non valida');
+
+    if(!response.ok){
+      var errData = await response.json().catch(function(){ return {}; });
+      throw new Error('API '+response.status+': '+(errData.error&&errData.error.message||response.statusText));
     }
-    var text=data.content[0].text;
-    // Parse JSON from response
-    var jsonMatch=text.match(/\[[\s\S]*\]/);
-    if(!jsonMatch) throw new Error('No JSON found');
-    var recs=JSON.parse(jsonMatch[0]);
 
-    var typeMap={buy:'rec-buy',sell:'rec-sell',hold:'rec-hold',watch:'rec-watch'};
-    var iconMap={buy:'&#128200;',sell:'&#128201;',hold:'&#128336;',watch:'&#128270;'};
-    var urgencyMap={high:'&#128308;',medium:'&#128992;',low:'&#9899;'};
-    var titleColorMap={buy:'var(--green)',sell:'var(--red)',hold:'#854d0e',watch:'var(--accent)'};
+    var data = await response.json();
+    if(!data.content || !data.content[0]) throw new Error('Risposta API vuota');
 
-    el.innerHTML='<div style="font-size:10.5px;color:var(--text3);margin-bottom:12px">Analisi generata da Claude AI. Non costituisce consulenza finanziaria professionale.</div>'+
-      recs.map(function(r){
-        return '<div class="rec-card '+typeMap[r.action]+'">'+
-          '<div class="rec-icon">'+iconMap[r.action]+'</div>'+
+    var text = data.content[0].text;
+    // Extract JSON object from response
+    var jsonMatch = text.match(/\{[\s\S]*\}/);
+    if(!jsonMatch) throw new Error('Nessun JSON nella risposta');
+    var result = JSON.parse(jsonMatch[0]);
+
+    var actionStyle = {
+      buy_more: {cls:'rec-buy',   icon:'&#128200;', color:'var(--green)', label:'AUMENTA'},
+      sell:     {cls:'rec-sell',  icon:'&#128201;', color:'var(--red)',   label:'VENDI'},
+      hold:     {cls:'rec-hold',  icon:'&#9866;',   color:'#854d0e',     label:'MANTIENI'},
+      reduce:   {cls:'rec-watch', icon:'&#128201;', color:'var(--orange)',label:'RIDUCI'}
+    };
+    var prioIcon = {high:'&#128308;', medium:'&#128992;', low:'&#9899;'};
+
+    var html = '<div style="font-size:10.5px;color:var(--text3);margin-bottom:14px">'+
+      'Analisi generata da Claude AI con strategia buy &amp; hold. Non costituisce consulenza finanziaria professionale.</div>';
+
+    // Portfolio analysis
+    if(result.portfolio_analysis){
+      html += '<div style="background:var(--accent-light);border:1px solid var(--border2);border-radius:var(--radius);'+
+        'padding:14px 16px;margin-bottom:16px;font-size:12.5px;line-height:1.7;color:var(--text)">'+
+        '<div style="font-weight:700;margin-bottom:6px;color:var(--accent)">&#128202; Analisi Portafoglio</div>'+
+        result.portfolio_analysis+'</div>';
+    }
+
+    // Recommendations for existing positions
+    if(result.recommendations && result.recommendations.length){
+      html += '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px;'+
+        'color:var(--text2);margin-bottom:8px">Posizioni attuali</div>';
+      html += result.recommendations.map(function(r){
+        var st = actionStyle[r.action] || actionStyle.hold;
+        return '<div class="rec-card '+st.cls+'" style="margin-bottom:8px">'+
+          '<div class="rec-icon">'+st.icon+'</div>'+
           '<div style="flex:1">'+
-            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'+
+            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">'+
               '<span style="font-weight:800;font-size:13px">'+r.ticker+'</span>'+
-              (urgencyMap[r.urgency]||'')+
-              '<span class="rec-title" style="color:'+titleColorMap[r.action]+';margin-left:4px">'+r.title+'</span>'+
+              '<span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:20px;'+
+                'background:'+st.color+';color:#fff">'+st.label+'</span>'+
+              (prioIcon[r.priority]||'')+
+              '<span style="font-size:12px;font-weight:600;color:'+st.color+'">'+r.title+'</span>'+
             '</div>'+
-            '<div style="margin-bottom:5px">'+r.reason+'</div>'+
-            '<div style="font-size:11px;color:var(--text2);background:rgba(0,0,0,0.04);padding:6px 10px;border-radius:4px">'+r.detail+'</div>'+
-            (r.warning?'<div style="font-size:10.5px;color:var(--orange);margin-top:5px">&#9888; '+r.warning+'</div>':'')+
+            '<div style="font-size:12px;margin-bottom:5px;line-height:1.6">'+r.reason+'</div>'+
+            '<div style="font-size:11.5px;font-weight:600;color:'+st.color+';background:rgba(0,0,0,0.04);'+
+              'padding:6px 10px;border-radius:4px">&#8594; '+r.target_action+'</div>'+
           '</div>'+
         '</div>';
       }).join('');
+    }
+
+    // New opportunities
+    if(result.new_opportunities && result.new_opportunities.length){
+      html += '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px;'+
+        'color:var(--text2);margin:16px 0 8px">&#10024; Nuove opportunita da valutare</div>';
+      html += result.new_opportunities.map(function(r){
+        return '<div class="rec-card rec-watch" style="margin-bottom:8px">'+
+          '<div class="rec-icon">&#11088;</div>'+
+          '<div style="flex:1">'+
+            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">'+
+              '<span style="font-weight:800;font-size:13px">'+r.ticker+'</span>'+
+              '<span style="font-size:10px;background:var(--surface2);padding:1px 7px;border-radius:20px">'+
+                (r.type||'').toUpperCase()+'</span>'+
+              (prioIcon[r.priority]||'')+
+              '<span style="font-size:12px;color:var(--text2)">'+r.name+'</span>'+
+            '</div>'+
+            '<div style="font-size:12px;line-height:1.6">'+r.reason+'</div>'+
+          '</div>'+
+        '</div>';
+      }).join('');
+    }
+
+    el.innerHTML = html;
 
   } catch(e){
-    el.innerHTML='<div style="color:var(--red);font-size:12px;padding:12px">Errore analisi AI: '+e.message+'. Assicurati che i prezzi siano stati aggiornati.</div>';
+    el.innerHTML = '<div style="color:var(--red);font-size:12px;padding:14px;background:rgba(220,38,38,0.06);'+
+      'border-radius:var(--radius-sm);border:1px solid rgba(220,38,38,0.2)">'+
+      '<b>Errore analisi AI:</b> '+e.message+'<br><small style="color:var(--text3)">'+
+      'Verifica che i prezzi siano aggiornati e che la API key sia corretta in Impostazioni.</small></div>';
   }
 }
+
 
 
 // ── IMPORT PORTFOLIO FILE (XLS / PDF) ────────────────────────────────────────
