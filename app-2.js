@@ -1,0 +1,3658 @@
+// CONFIG
+var SUPABASE_URL = 'https://tabobhdntfnedwjrqboc.supabase.co';
+var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhYm9iaGRudGZuZWR3anJxYm9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2MTcyMTUsImV4cCI6MjA5MzE5MzIxNX0.Q7p0cd7aseU08JEwrQ2GHpbYQukbctRJlM1A3Y4FTaA';
+var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+var currentUser=null, txs=[], filter='all', dateRef='date', editingId=null;
+var settings={name:'',vat:'',key:'',gclientid:'',gfolderid:''};
+var filterPeriods=new Set(['all']), filterYear='all';
+var filterPeriodsS=new Set(['all']), filterYearS='all';
+var currentRegime='malta-se';
+var selectedIds=new Set();
+var sortField='date', sortDir=1;
+var catFilterSet=null; // null = all
+var isGuestMode=false;
+var guestPermissions={};
+var adminUserId=null;
+window.appStarted=false;
+var validatedDupIds=new Set(JSON.parse(localStorage.getItem('inv_valid_dups')||'[]'));
+var catEntrateExpanded=true;
+var catUsciteExpanded=true;
+
+// DATE FORMAT
+var MESI=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+function formatDate(d){
+  if(!d)return '';
+  var p=d.split('-');if(p.length<3)return d;
+  return parseInt(p[2])+' '+MESI[parseInt(p[1])-1]+' '+p[0];
+}
+
+// SORT
+function setSort(field){
+  if(sortField===field)sortDir=-sortDir;else{sortField=field;sortDir=1;}
+  document.querySelectorAll('.th-sort').forEach(function(th){
+    th.classList.remove('asc','desc');
+    if(th.id==='th-'+field)th.classList.add(sortDir===1?'asc':'desc');
+  });
+  renderTable();
+}
+
+// AUTH
+function doLogin(){
+  var email=document.getElementById('lock-email').value.trim();
+  var pwd=document.getElementById('lock-input').value;
+  var btn=document.getElementById('lock-btn');
+  if(!email||!pwd){showLockError('Inserisci email e password.');return;}
+  btn.disabled=true;btn.textContent='Accesso...';
+  sb.auth.signInWithPassword({email:email,password:pwd}).then(function(r){
+    btn.disabled=false;btn.textContent='Accedi';
+    if(r.error){showLockError('Email o password errata');return;}
+    currentUser=r.data.user;showApp();
+  });
+}
+function doSignUp(e){
+  e.preventDefault();
+  var email=document.getElementById('lock-email').value.trim();
+  var pwd=document.getElementById('lock-input').value;
+  if(!email||!pwd){showLockError('Inserisci email e password.');return;}
+  sb.auth.signUp({email:email,password:pwd}).then(function(r){
+    if(r.error){showLockError('Errore: '+r.error.message);return;}
+    showLockError('Account creato! Clicca Accedi.');
+  });
+}
+function doLogout(){
+  sb.auth.signOut().then(function(){
+    currentUser=null;txs=[];
+    document.getElementById('app-content').style.display='none';
+    document.getElementById('lock-screen').style.display='flex';
+    document.getElementById('lock-email').value='';
+    document.getElementById('lock-input').value='';
+    ['user-email-badge','logout-btn','hdr-badge'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    window.appStarted=false;
+var validatedDupIds=new Set(JSON.parse(localStorage.getItem('inv_valid_dups')||'[]'));
+  });
+}
+function showLockError(msg){var el=document.getElementById('lock-error');el.textContent=msg;el.style.display='';setTimeout(function(){el.style.display='none';},5000);}
+async function showApp(){
+  if(window.appStarted) return; // prevent recursive/multiple calls
+  appStarted=true;
+  document.getElementById('lock-screen').style.display='none';
+  document.getElementById('app-content').style.display='';
+  var b=document.getElementById('user-email-badge');if(b&&currentUser){b.textContent=currentUser.email;b.style.display='';}
+  var lb=document.getElementById('logout-btn');if(lb)lb.style.display='';
+  var hb=document.getElementById('hdr-badge');if(hb)hb.style.display='';
+  // Check guest access (only if migration2 was run)
+  try{
+    await linkGuestIfNeeded();
+    await checkGuestMode();
+  } catch(e){ console.log('Guest check skipped (table may not exist yet):', e.message); }
+  if(isGuestMode&&adminUserId){
+    try{
+      await loadSettings();
+      var r=await sb.from('invoices').select('*').eq('user_id',adminUserId).order('date',{ascending:true});
+      txs=(r.data||[]).map(dbToTx);
+      populateYearFilters();renderTable();renderStats('stats-a');updateCount();
+    }catch(e){console.error('Guest data load error:',e);}
+  } else {
+    await loadSettings();
+    await loadInvoices();
+  }
+  updateAmountSections();
+  showTab('carica');
+}
+
+// DB HELPERS
+function txToDb(t){
+  return {user_id:currentUser.id,date:t.date,service_month:t.serviceMonth,type:t.type,
+    invoice_num:t.invoice,counterparty:t.counterparty,category:t.category,country:t.country,
+    vat_id:t.vatId,address:t.address,description:t.description,
+    entrate_net:t.entrateNet||0,entrate_vat:t.entrateVat||0,entrate_total:t.entrateTotal||0,
+    uscite_net:t.usciteNet||0,uscite_vat:t.usciteVat||0,uscite_total:t.usciteTotal||0,notes:t.notes};
+}
+function dbToTx(r){
+  return {id:r.id,type:r.type,date:r.date,serviceMonth:r.service_month,invoice:r.invoice_num,
+    counterparty:r.counterparty,category:r.category,country:r.country,vatId:r.vat_id,
+    address:r.address,description:r.description,
+    entrateNet:parseFloat(r.entrate_net)||0,entrateVat:parseFloat(r.entrate_vat)||0,
+    entrateTotal:parseFloat(r.entrate_total)||0,usciteNet:parseFloat(r.uscite_net)||0,
+    usciteVat:parseFloat(r.uscite_vat)||0,usciteTotal:parseFloat(r.uscite_total)||0,
+    notes:r.notes,filePath:r.file_path||null,fileName:r.file_name||null};
+}
+
+// FILE STORAGE
+function uploadInvoiceFile(file,invoiceId){
+  var ext=file.name.split('.').pop();
+  var path=currentUser.id+'/'+invoiceId+'.'+ext;
+  return sb.storage.from('invoice-files').upload(path,file,{upsert:true}).then(function(r){
+    if(r.error){console.warn('Storage upload failed:',r.error.message);return null;}
+    return sb.from('invoices').update({file_path:path,file_name:file.name}).eq('id',invoiceId);
+  });
+}
+function downloadInvoiceFile(t){
+  if(!t.filePath){
+    // Try localStorage fallback
+    var stored=localStorage.getItem('inv_file_'+t.id);
+    if(stored){try{var f=JSON.parse(stored);var a=document.createElement('a');a.href='data:'+f.type+';base64,'+f.b64;a.download=f.name;a.click();return;}catch(e){}}
+    alert('Nessun file allegato a questa fattura.');return;
+  }
+  sb.storage.from('invoice-files').createSignedUrl(t.filePath,3600).then(function(r){
+    if(r.error||!r.data){alert('Errore nel recupero del file.');return;}
+    var a=document.createElement('a');a.href=r.data.signedUrl;a.download=t.fileName||'fattura';a.click();
+  });
+}
+function viewInvoiceFile(t){
+  // Try Supabase Storage first
+  if(t&&t.filePath){
+    sb.storage.from('invoice-files').createSignedUrl(t.filePath,3600).then(function(r){
+      if(r.data&&r.data.signedUrl) window.open(r.data.signedUrl,'_blank');
+      else viewFromLocalStorage(t);
+    });
+    return;
+  }
+  viewFromLocalStorage(t);
+}
+function viewFromLocalStorage(t){
+  var stored=localStorage.getItem('inv_file_'+(t&&t.id));
+  if(!stored){alert('Nessun file allegato a questa fattura.');return;}
+  try{
+    var f=JSON.parse(stored);
+    var dataUrl='data:'+f.type+';base64,'+f.b64;
+    // Open in new tab
+    var w=window.open();
+    if(f.type&&f.type.indexOf('pdf')>=0){
+      w.document.write('<iframe src="'+dataUrl+'" style="width:100%;height:100%;border:none"></iframe>');
+    } else if(f.type&&f.type.indexOf('image')>=0){
+      w.document.write('<img src="'+dataUrl+'" style="max-width:100%">');
+    } else {
+      w.location.href=dataUrl;
+    }
+  }catch(e){alert('Errore apertura file.');}
+}
+
+// DATA FUNCTIONS
+function loadInvoices(){
+  var query = sb.from('invoices').select('*');
+  // If guest with period restriction, filter server-side
+  if(isGuestMode && adminUserId){
+    query = sb.from('invoices').select('*').eq('user_id', adminUserId);
+    var p = guestPermissions;
+    if(p.period_from) query = query.gte('date', p.period_from);
+    if(p.period_to)   query = query.lte('date', p.period_to);
+  }
+  return query.order('date',{ascending:true}).then(function(r){
+    if(r.error){console.error(r.error);return;}
+    txs=(r.data||[]).map(dbToTx);
+    populateYearFilters();renderTable();renderStats('stats-a');updateCount();
+  });
+}
+function saveTransaction(){
+  var t={type:v('f-type'),date:v('f-date'),serviceMonth:v('f-service-month'),
+    invoice:v('f-invoice'),counterparty:v('f-counterparty'),category:v('f-category'),
+    country:v('f-country'),vatId:v('f-vatid'),address:v('f-address'),description:v('f-description'),
+    entrateNet:num('f-en-net'),entrateVat:num('f-en-vat'),entrateTotal:num('f-en-tot'),
+    usciteNet:num('f-us-net'),usciteVat:num('f-us-vat'),usciteTotal:num('f-us-tot'),notes:v('f-notes')};
+  if(!t.counterparty){showMsg('Inserisci il Counterparty.','error');return;}
+  sb.from('invoices').insert(txToDb(t)).select().then(function(r){
+    if(r.error){showMsg('Errore: '+r.error.message,'error');return;}
+    var newId=r.data[0].id;
+    if(driveCurrentFile){
+      var fc=driveCurrentFile;
+      uploadInvoiceFile(fc,newId);
+      toB64(fc).then(function(b64){try{localStorage.setItem('inv_file_'+newId,JSON.stringify({name:fc.name,type:fc.type||'application/octet-stream',b64:b64}));}catch(e){}});
+      if(driveIsReady()){
+        var fname=t.date+'_'+(t.invoice||'fattura').replace(/[\/\\:*?"<>|]/g,'-')+'_'+t.counterparty.slice(0,25).replace(/[\/\\:*?"<>|]/g,'-')+'.'+fc.name.split('.').pop();
+        setDriveUploadStatus(true,'Upload...',null);
+        driveUploadFile(fc,fname,function(ok,info){ok?setDriveUploadStatus(true,'Drive OK',true):setDriveUploadStatus(true,'Err: '+info,false);});
+      }
+    }
+    driveCurrentFile=null;loadInvoices();showMsg('Transazione salvata!','success');
+    setState('upload');document.getElementById('file-input').value='';
+  });
+}
+function delTx(id){
+  if(!confirm('Eliminare?'))return;
+  var t=txs.find(function(x){return x.id===id;});
+  var p=t&&t.filePath?sb.storage.from('invoice-files').remove([t.filePath]):Promise.resolve();
+  p.then(function(){
+    sb.from('invoices').delete().eq('id',id).then(function(r){
+      if(r.error){alert('Errore: '+r.error.message);return;}
+      try{localStorage.removeItem('inv_file_'+id);}catch(e){}
+      loadInvoices();
+    });
+  });
+}
+function saveEdit(){
+  var id=editingId;if(!id)return;
+  var cp=eV('e-counterparty');if(!cp){alert('Inserisci il Counterparty.');return;}
+  var t={id:id,type:eV('e-type'),date:eV('e-date'),serviceMonth:eV('e-service-month'),
+    invoice:eV('e-invoice'),counterparty:cp,category:eV('e-category'),country:eV('e-country'),
+    vatId:eV('e-vatid'),address:eV('e-address'),description:eV('e-description'),
+    entrateNet:eNum('e-en-net'),entrateVat:eNum('e-en-vat'),entrateTotal:eNum('e-en-tot'),
+    usciteNet:eNum('e-us-net'),usciteVat:eNum('e-us-vat'),usciteTotal:eNum('e-us-tot'),notes:eV('e-notes')};
+  var row=txToDb(t);delete row.user_id;
+  sb.from('invoices').update(row).eq('id',id).then(function(r){
+    if(r.error){alert('Errore: '+r.error.message);return;}
+    closeEditModal();loadInvoices();
+    var m=document.getElementById('msg-area');
+    if(m){m.innerHTML='<div class="msg msg-success">Fattura aggiornata!</div>';setTimeout(function(){m.innerHTML='';},4000);}
+  });
+}
+function clearAll(){
+  if(!confirm('Cancellare TUTTE le transazioni?'))return;
+  var paths=txs.filter(function(t){return t.filePath;}).map(function(t){return t.filePath;});
+  var p=paths.length?sb.storage.from('invoice-files').remove(paths):Promise.resolve();
+  p.then(function(){
+    sb.from('invoices').delete().eq('user_id',currentUser.id).then(function(r){
+      if(r.error){alert('Errore: '+r.error.message);return;}
+      txs=[];renderTable();renderStats('stats-a');updateCount();
+    });
+  });
+}
+
+// DUPLICATE DETECTION
+function findDuplicates(arr){
+  var dups=new Set();
+  for(var i=0;i<arr.length;i++){
+    for(var j=i+1;j<arr.length;j++){
+      var a=arr[i],b=arr[j];
+      // Skip if either is validated
+      if(validatedDupIds.has(a.id)||validatedDupIds.has(b.id)) continue;
+      // Same invoice number (non-empty)
+      if(a.invoice&&b.invoice&&a.invoice.trim()===b.invoice.trim()){
+        dups.add(a.id);dups.add(b.id);
+      }
+      // Same date + same total amount
+      var aAmt=(a.entrateTotal||0)+(a.usciteTotal||0);
+      var bAmt=(b.entrateTotal||0)+(b.usciteTotal||0);
+      if(a.date&&b.date&&a.date===b.date&&aAmt>0&&Math.abs(aAmt-bAmt)<0.01){
+        dups.add(a.id);dups.add(b.id);
+      }
+    }
+  }
+  return dups;
+}
+function validateDuplicate(id){
+  validatedDupIds.add(id);
+  try{localStorage.setItem('inv_valid_dups',JSON.stringify(Array.from(validatedDupIds)));}catch(e){}
+  renderTable();
+}
+function validateAllDuplicates(){
+  var dups=findDuplicates(txs);
+  dups.forEach(function(id){validatedDupIds.add(id);});
+  try{localStorage.setItem('inv_valid_dups',JSON.stringify(Array.from(validatedDupIds)));}catch(e){}
+  renderTable();
+}
+
+// SELECTION
+function toggleSelect(id,cb){
+  if(cb.checked)selectedIds.add(id);else selectedIds.delete(id);
+  updateSelBar();
+  var allCb=document.getElementById('cb-all');
+  if(allCb){var vis=getFilteredTxs();allCb.checked=vis.length>0&&vis.every(function(t){return selectedIds.has(t.id);});}
+}
+function toggleSelectAll(cb){
+  var arr=getFilteredTxs();
+  if(cb.checked)arr.forEach(function(t){selectedIds.add(t.id);});else arr.forEach(function(t){selectedIds.delete(t.id);});
+  document.querySelectorAll('.row-cb').forEach(function(c){c.checked=cb.checked;});
+  updateSelBar();
+}
+function clearSelection(){selectedIds.clear();renderTable();}
+function updateSelBar(){
+  var bar=document.getElementById('sel-bar');var cnt=document.getElementById('sel-count');
+  if(bar)bar.style.display=selectedIds.size>0?'flex':'none';
+  if(cnt)cnt.textContent=selectedIds.size+' selezionate';
+}
+function deleteSelected(){
+  if(!selectedIds.size)return;
+  if(!confirm('Eliminare '+selectedIds.size+' fatture?'))return;
+  var ids=Array.from(selectedIds);
+  var paths=txs.filter(function(t){return ids.indexOf(t.id)>=0&&t.filePath;}).map(function(t){return t.filePath;});
+  var p=paths.length?sb.storage.from('invoice-files').remove(paths):Promise.resolve();
+  p.then(function(){
+    var done=0;
+    ids.forEach(function(id){
+      sb.from('invoices').delete().eq('id',id).then(function(){
+        try{localStorage.removeItem('inv_file_'+id);}catch(e){}
+        done++;if(done===ids.length){selectedIds.clear();loadInvoices();}
+      });
+    });
+  });
+}
+function exportSelectedZIP(){
+  var ids=Array.from(selectedIds);
+  if(!ids.length)return;
+  _buildZIP(txs.filter(function(t){return ids.indexOf(t.id)>=0;}),'Selezione');
+}
+
+// IMPORT CSV
+function importCSV(input){
+  var file=input.files[0];if(!file)return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var lines=e.target.result.split('\n').filter(function(l){return l.trim();});
+    if(lines.length<2){alert('CSV vuoto.');return;}
+    var headers=lines[0].split(',').map(function(h){return h.replace(/"/g,'').trim().toLowerCase();});
+    var rows=[];
+    for(var i=1;i<lines.length;i++){
+      var cols=lines[i].match(/(".*?"|[^,]+)(?=,|$)/g)||[];
+      cols=cols.map(function(c){return c.replace(/^"|"$/g,'').trim();});
+      var row={};headers.forEach(function(h,j){row[h]=cols[j]||'';});
+      var t={user_id:currentUser.id,
+        date:row['date']||row['data']||'',
+        service_month:row['service month']||row['service_month']||'',
+        type:row['type']||'Received',invoice_num:row['invoice #']||row['invoice_num']||'',
+        counterparty:row['counterparty']||row['controparte']||'',
+        category:row['category']||row['categoria']||'Other',
+        country:row['country']||'',vat_id:row['vat / tax id']||'',
+        address:row['address']||'',description:row['description']||row['descrizione']||'',
+        entrate_net:parseLocalNum(row['entrate net']||row['entrate_net']||''),
+        entrate_vat:parseLocalNum(row['entrate vat']||row['entrate_vat']||''),
+        entrate_total:parseLocalNum(row['entrate total']||row['entrate_total']||''),
+        uscite_net:parseLocalNum(row['uscite net']||row['uscite_net']||''),
+        uscite_vat:parseLocalNum(row['uscite vat']||row['uscite_vat']||''),
+        uscite_total:parseLocalNum(row['uscite total']||row['uscite_total']||''),
+        notes:row['notes']||row['note']||''};
+      if(t.date&&t.counterparty)rows.push(t);
+    }
+    if(!rows.length){alert('Nessuna riga valida.');return;}
+    if(!confirm('Importare '+rows.length+' transazioni?'))return;
+    sb.from('invoices').insert(rows).then(function(r){
+      if(r.error){alert('Errore import: '+r.error.message);return;}
+      loadInvoices();showTab('registro');showMsg(rows.length+' transazioni importate!','success');
+    });
+  };
+  reader.readAsText(file,'UTF-8');input.value='';
+}
+
+// SETTINGS
+var DEFAULT_KEY='';
+var DEFAULT_GCID='889043142197-tanccu5tm1mpg2bt40lood3rele3dsns.apps.googleusercontent.com';
+var DEFAULT_GFID='1UvOst1smuek8B5uMb0PfKlCtOqci3GHn';
+
+function loadSettings(){
+  return sb.from('profile').select('*').maybeSingle().then(function(r){
+    if(r.data){settings.name=r.data.name||'';settings.vat=r.data.vat_number||'';
+      var sn=document.getElementById('s-name');if(sn)sn.value=settings.name;
+      var sv=document.getElementById('s-vat');if(sv)sv.value=settings.vat;}
+    // Pre-fill defaults if not already saved
+    if(!localStorage.getItem('inv_key'))localStorage.setItem('inv_key',DEFAULT_KEY);
+    if(!localStorage.getItem('inv_gcid'))localStorage.setItem('inv_gcid',DEFAULT_GCID);
+    if(!localStorage.getItem('inv_gfid'))localStorage.setItem('inv_gfid',DEFAULT_GFID);
+    settings.key=localStorage.getItem('inv_key')||DEFAULT_KEY;
+    settings.gclientid=localStorage.getItem('inv_gcid')||DEFAULT_GCID;
+    settings.gfolderid=localStorage.getItem('inv_gfid')||DEFAULT_GFID;
+    var sk=document.getElementById('s-key');if(sk)sk.value=settings.key;
+    var ssk=document.getElementById('s-svc-key');if(ssk)ssk.value=settings.svckey||'';
+    var gi=document.getElementById('s-gclientid');if(gi)gi.value=settings.gclientid;
+    var gf=document.getElementById('s-gfolderid');if(gf)gf.value=settings.gfolderid;
+  });
+}
+function saveSettings(){
+  settings.name     = v('s-name');
+  settings.vat      = v('s-vat');
+  settings.key      = v('s-key');
+  settings.gclientid= v('s-gclientid');
+  settings.gfolderid= v('s-gfolderid');
+  settings.svckey   = v('s-svc-key') || '';
+
+  sb.from('profile').upsert({user_id:currentUser.id, name:settings.name, vat_number:settings.vat},{onConflict:'user_id'});
+
+  // Save or clear each key from localStorage
+  if(settings.key)       localStorage.setItem('inv_key',     settings.key);
+  else                   localStorage.removeItem('inv_key');
+
+  if(settings.gclientid) localStorage.setItem('inv_gcid',    settings.gclientid);
+  else                   localStorage.removeItem('inv_gcid');
+
+  if(settings.gfolderid) localStorage.setItem('inv_gfid',    settings.gfolderid);
+  else                   localStorage.removeItem('inv_gfid');
+
+  if(settings.svckey)    localStorage.setItem('inv_svc_key', settings.svckey);
+  else                   localStorage.removeItem('inv_svc_key');
+}
+
+function saveAndConfirm(){
+  saveSettings();
+  var btn = document.getElementById('save-settings-btn');
+  if(btn){
+    var orig = btn.innerHTML;
+    btn.innerHTML = '&#10003; Salvato!';
+    btn.style.background = 'var(--green)';
+    setTimeout(function(){
+      btn.innerHTML = orig;
+      btn.style.background = '';
+    }, 2000);
+  }
+}
+
+function clearField(id){
+  var el = document.getElementById(id);
+  if(el){ el.value = ''; el.type = 'text'; el.focus(); el.type = 'password'; }
+  // Map field id to localStorage key and remove
+  var lsMap = {'s-key':'inv_key','s-gclientid':'inv_gcid','s-gfolderid':'inv_gfid','s-svc-key':'inv_svc_key'};
+  if(lsMap[id]) localStorage.removeItem(lsMap[id]);
+  // Also clear from settings object
+  var settingsMap = {'s-key':'key','s-gclientid':'gclientid','s-gfolderid':'gfolderid','s-svc-key':'svckey'};
+  if(settingsMap[id]) settings[settingsMap[id]] = '';
+  showMsg('Campo "'+id+'" cancellato.','success');
+}
+function cfg(k){return settings[k]||(k==='gclientid'?DEFAULT_GCID:k==='gfolderid'?DEFAULT_GFID:'');}
+function updateCount(){var el=document.getElementById('tx-count');if(el)el.textContent=txs.length+' transazioni';}
+
+// TABS
+function showTab(t){
+  // Guest permission check
+  if(isGuestMode&&!canSeeSection(t)){
+    showMsg('Sezione non disponibile in modalita ospite.','error');return;
+  }
+  ['carica','registro','summary','trading','utenti','settings'].forEach(function(id){
+    var el=document.getElementById('tab-'+id);if(el)el.style.display=id===t?'':'none';
+    var btn=document.getElementById('tab-btn-'+id);if(btn)btn.classList.toggle('active',id===t);
+  });
+  if(t==='registro'){renderTable();renderStats('stats-a');}
+  if(t==='summary'){renderStats('stats-b');renderCat();renderTax();renderSimulator();renderAdvisory();}
+  if(t==='trading'){loadPositions();}
+  if(t==='utenti'){loadUtenti();}
+}
+
+// PERIOD FILTERS
+function populateYearFilters(){
+  var years={};txs.forEach(function(t){var y=(t.date||'').slice(0,4);if(y)years[y]=1;});
+  var ya=Object.keys(years).sort();
+  ['year-filter','year-filter-s'].forEach(function(id){
+    var el=document.getElementById(id);if(!el)return;
+    var cur=el.value;el.innerHTML='<option value="all">Tutti gli anni</option>';
+    ya.forEach(function(y){el.innerHTML+='<option value="'+y+'">'+y+'</option>';});
+    if(cur&&cur!=='all')el.value=cur;
+  });
+}
+function togglePeriod(p,btn){
+  if(p==='all'){filterPeriods=new Set(['all']);}else{
+    filterPeriods.delete('all');
+    if(filterPeriods.has(p))filterPeriods.delete(p);else filterPeriods.add(p);
+    if(filterPeriods.size===0)filterPeriods.add('all');
+  }
+  document.querySelectorAll('#period-pills .period-pill').forEach(function(b){b.classList.toggle('active',filterPeriods.has(b.dataset.p));});
+  renderTable();
+}
+function setFilterYear(y){filterYear=y;renderTable();}
+function togglePeriodS(p,btn){
+  if(p==='all'){filterPeriodsS=new Set(['all']);}else{
+    filterPeriodsS.delete('all');
+    if(filterPeriodsS.has(p))filterPeriodsS.delete(p);else filterPeriodsS.add(p);
+    if(filterPeriodsS.size===0)filterPeriodsS.add('all');
+  }
+  document.querySelectorAll('#period-pills-s .period-pill').forEach(function(b){b.classList.toggle('active',filterPeriodsS.has(b.dataset.p));});
+  renderCat();renderTax();renderSimulator();renderStats('stats-b');renderAdvisory();
+}
+function setFilterYearS(y){filterYearS=y;renderCat();renderTax();renderSimulator();renderStats('stats-b');renderAdvisory();}
+function matchesPeriodMulti(t,periods,year){
+  var d=getRefDate(t);
+  if(year!=='all'&&d.slice(0,4)!==year)return false;
+  if(periods.has('all'))return true;
+  var m=d.slice(5,7);
+  var qM={Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
+  for(var p of periods){if(qM[p]&&qM[p].indexOf(m)>=0)return true;if(p===m)return true;}
+  return false;
+}
+function getRefDate(t){return dateRef==='serviceMonth'?(t.serviceMonth||t.date):t.date;}
+function getFilteredTxs(){return txs.filter(function(t){return(filter==='all'||t.type===filter)&&matchesPeriodMulti(t,filterPeriods,filterYear);});}
+function getFilteredSummaryTxs(){return txs.filter(function(t){return matchesPeriodMulti(t,filterPeriodsS,filterYearS);});}
+
+// TAX CALCULATIONS - Malta 2026 verified rates
+// Source: MTCA official + PWC Tax Summaries + Broadwing 2026 payroll guide
+
+// Malta Income Tax 2026 - Single rates (UPDATED from 2026 budget)
+// 0-12,000: 0% | 12,001-16,000: 15% | 16,001-60,000: 25% | 60,001+: 35%
+function maltaTaxSingle2026(c){
+  if(c<=12000)return 0;
+  if(c<=16000)return(c-12000)*0.15;
+  if(c<=60000)return 600+(c-16000)*0.25;
+  return 600+11000+(c-60000)*0.35;
+}
+
+// Malta SSC Class 2 (Self-Occupied) 2026 - CORRECTED
+// Source: MTCA 2026 rates + PWC Malta Tax Summaries 2026
+// Rate: 15% of prior year net income, min ~EUR 31.97/week, MAX EUR 83.89/week (born >= 1962)
+// Threshold for max: ~EUR 29,100 net income (83.89*52/0.15)
+function maltaSSC2026(ci){
+  if(ci<910)return 0;
+  var weekly=ci*0.15/52;
+  weekly=Math.max(31.97,Math.min(83.89,weekly));
+  return Math.round(weekly*52*100)/100;
+}
+
+function calcMaltaSE(gRev,dExp){
+  var ci=Math.max(0,gRev-dExp);
+  var tax=maltaTaxSingle2026(ci);
+  var ssc=maltaSSC2026(ci);
+  var sscWeekly=ci<910?0:Math.max(31.97,Math.min(83.89,ci*0.15/52));
+  return {label:'Malta Self-Employed',eff:ci>0?(tax+ssc)/ci*100:0,net:ci-tax-ssc,total:tax+ssc,ci:ci,
+    rows:[['Gross Revenue (net VAT)',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+      ['Reddito Imponibile',fmt(ci),'var(--orange)'],
+      ['IRPEF 2026 (0%/<12k, 15%/16k, 25%/60k, 35%)',fmt(tax),''],
+      ['SSC Class 2 (15% reddito, max 83.89/sett)',sscWeekly.toFixed(2)+'/sett = '+fmt(ssc)+'/anno',''],
+      ['Totale IRPEF + SSC',fmt(tax+ssc),'var(--orange)'],
+      ['Aliquota Effettiva',ci>0?((tax+ssc)/ci*100).toFixed(1)+'%':'0%',''],
+      ['Netto',fmt(ci-tax-ssc),'var(--green)']]};
+}
+function calcMaltaLtd(gRev,dExp){
+  var p=Math.max(0,gRev-dExp),ct=p*0.35,ref=ct*(6/7),net=ct-ref;
+  return {label:'Malta Ltd',eff:p>0?net/p*100:0,net:p-net,total:net,ci:p,
+    rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+      ['Utile Aziendale',fmt(p),'var(--orange)'],['Corporate Tax 35%',fmt(ct),''],
+      ['Rimborso Azionista 6/7','-'+fmt(ref),'var(--green)'],
+      ['Tax Netta effettiva (~5%)',fmt(net),'var(--orange)'],
+      ['Aliquota Effettiva',p>0?(net/p*100).toFixed(1)+'%':'0%',''],
+      ['Netto dopo tasse',fmt(p-net),'var(--green)']]};
+}
+function calcDubaiSE(gRev,dExp){
+  var p=Math.max(0,gRev-dExp),thr=93750,tax=Math.max(0,p-thr)*0.09;
+  return {label:'Dubai SE (UAE CT)',eff:p>0?tax/p*100:0,net:p-tax,total:tax,ci:p,
+    rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+      ['Profitto Netto',fmt(p),'var(--orange)'],['Soglia esente CT (AED 375k ~ EUR 93.750)',fmt(thr),''],
+      ['UAE Corporate Tax 9% su eccedenza',fmt(tax),'var(--orange)'],['Personal Income Tax','0%','var(--green)'],
+      ['Nessun SSC/NI obbligatorio','0 EUR','var(--green)'],
+      ['Aliquota Effettiva',p>0?(tax/p*100).toFixed(1)+'%':'0%',''],
+      ['Netto',fmt(p-tax),'var(--green)']]};
+}
+function calcDubaiFZ(gRev,dExp){
+  var p=Math.max(0,gRev-dExp);
+  return {label:'Dubai Ltd Free Zone',eff:0,net:p,total:0,ci:p,
+    rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+      ['Profitto Netto',fmt(p),'var(--orange)'],['CT Qualifying Free Zone (0%)','0 EUR','var(--green)'],
+      ['Personal Income Tax','0 EUR','var(--green)'],['SSC/NI','0 EUR','var(--green)'],
+      ['Costo annuo struttura FZ (stima)','4.000-10.000 EUR','var(--text2)'],
+      ['Aliquota Effettiva','0% (+ costo FZ)','var(--green)'],
+      ['Netto (ante costo FZ)',fmt(p),'var(--green)']]};
+}
+function calcItalyPIVA(gRev,dExp){
+  if(gRev>85000){
+    var rb=Math.max(0,gRev-dExp);
+    var irpef=0;
+    if(rb<=15000)irpef=rb*0.23;else if(rb<=28000)irpef=3450+(rb-15000)*0.25;
+    else if(rb<=50000)irpef=6700+(rb-28000)*0.35;else irpef=14400+(rb-50000)*0.43;
+    var inps=rb*0.2607,irap=rb*0.039,tot=irpef+inps+irap;
+    return {label:'IT P.IVA Ordinaria',eff:rb>0?tot/rb*100:0,net:rb-tot,total:tot,ci:rb,
+      rows:[['Gross Revenue',fmt(gRev),'var(--green)'],['Spese Deducibili',fmt(dExp),'var(--red)'],
+        ['Reddito Netto',fmt(rb),'var(--orange)'],['IRPEF progressiva',fmt(irpef),''],
+        ['INPS Gest. Separata 26%',fmt(inps),''],['IRAP 3.9%',fmt(irap),''],
+        ['Totale oneri fiscali',fmt(tot),'var(--orange)'],['Netto',fmt(rb-tot),'var(--green)']]};
+  }
+  var coeff=0.78,base=gRev*coeff,inps=base*0.2607,irpef=(base-inps*0.5)*0.15,tot=irpef+inps;
+  return {label:'IT P.IVA Forfettaria',eff:gRev>0?tot/gRev*100:0,net:gRev-tot,total:tot,ci:base,
+    rows:[['Gross Revenue (no deduzione spese)',fmt(gRev),'var(--green)'],
+      ['Coefficiente redditivita 78%',fmt(base),''],['INPS Gest. Separata 26%',fmt(inps),'var(--red)'],
+      ['Base IRPEF (ded. 50% INPS)',fmt(base-inps*0.5),''],['IRPEF Forfettaria 15%',fmt(irpef),'var(--orange)'],
+      ['Totale Tasse+Contributi',fmt(tot),'var(--orange)'],
+      ['Aliquota su fatturato',gRev>0?(tot/gRev*100).toFixed(1)+'%':'0%',''],
+      ['Netto',fmt(gRev-tot),'var(--green)']]};
+}
+function getCalc(regime,gRev,dExp){
+  if(regime==='malta-se')return calcMaltaSE(gRev,dExp);
+  if(regime==='malta-ltd')return calcMaltaLtd(gRev,dExp);
+  if(regime==='dubai-se')return calcDubaiSE(gRev,dExp);
+  if(regime==='dubai-fz')return calcDubaiFZ(gRev,dExp);
+  return calcItalyPIVA(gRev,dExp);
+}
+function setRegime(r,btn){
+  currentRegime=r;
+  document.querySelectorAll('.regime-tab').forEach(function(b){b.classList.remove('active');});
+  if(btn)btn.classList.add('active');renderTax();
+}
+function getTaxInputs(){
+  var arr=getFilteredSummaryTxs();
+  var gRev=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
+  var dExp=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
+  var lumpIn=parseFloat((document.getElementById('tax-lump-in')||{}).value)||0;
+  var lumpOut=parseFloat((document.getElementById('tax-lump-out')||{}).value)||0;
+  return {gRev:gRev+lumpIn, dExp:dExp+lumpOut, hasLump:lumpIn>0||lumpOut>0};
+}
+function renderTax(){
+  var inp=getTaxInputs();
+  var el=document.getElementById('tax-rows');if(!el)return;
+  var c=getCalc(currentRegime,inp.gRev,inp.dExp);
+  var lumpNote=inp.hasLump?'<div style="font-size:10px;color:var(--orange);margin-bottom:8px;padding:5px 10px;background:rgba(217,119,6,0.08);border-radius:4px">Simulazione con lump sum aggiuntiva attiva</div>':'';
+  el.innerHTML=lumpNote+c.rows.map(function(r){return '<div class="tax-row"><span class="tax-label">'+r[0]+'</span><span class="tax-value" style="'+(r[2]?'color:'+r[2]:'')+'">'+r[1]+'</span></div>';}).join('');
+}
+
+// SIMULATOR
+function renderSimulator(){
+  var arr=getFilteredSummaryTxs();
+  var bIn=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
+  var bOut=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
+  var eIn=parseFloat(document.getElementById('sim-extra-in').value)||0;
+  var eOut=parseFloat(document.getElementById('sim-extra-out').value)||0;
+  var gRev=bIn+eIn,dExp=bOut+eOut;
+  var regimes=[['malta-se','#4f46e5'],['malta-ltd','#0891b2'],['dubai-se','#d97706'],['dubai-fz','#16a34a'],['italy-piva','#dc2626']];
+  var el=document.getElementById('sim-results');if(!el)return;
+  el.innerHTML='<div class="sim-grid">'+regimes.map(function(rp){
+    var c=getCalc(rp[0],gRev,dExp);
+    return '<div class="sim-col">'+
+      '<div class="sim-regime" style="background:'+rp[1]+'18;color:'+rp[1]+'">'+c.label+'</div>'+
+      '<div class="sim-row"><span style="color:var(--text2)">Tasse</span><b style="color:var(--red)">'+fmt(c.total)+'</b></div>'+
+      '<div class="sim-row"><span style="color:var(--text2)">Aliquota</span><b>'+c.eff.toFixed(1)+'%</b></div>'+
+      '<div class="sim-row"><span style="color:var(--text2)">Netto</span><b style="color:var(--green)">'+fmt(c.net)+'</b></div>'+
+      '</div>';
+  }).join('')+'</div>';
+}
+
+var driveToken=null, driveTokenExpiry=0;
+var driveCurrentFile=null; // {name, blob} set when a file is picked
+
+function driveIsReady(){
+  return driveToken && Date.now()<driveTokenExpiry && cfg('gclientid') && cfg('gfolderid');
+}
+function driveReset(){driveToken=null;driveTokenExpiry=0;driveBadge('idle');}
+function driveBadge(state,txt){
+  var badge=document.getElementById('drive-badge');
+  var btxt=document.getElementById('drive-badge-txt');
+  var dot=badge?badge.querySelector('.drive-dot'):null;
+  if(!badge) return;
+  badge.className='drive-status';
+  if(dot) dot.className='drive-dot';
+  if(state==='connected'){badge.classList.add('connected');if(btxt)btxt.textContent=txt||'Connesso';}
+  else if(state==='uploading'){badge.classList.add('uploading');if(dot)dot.classList.add('pulse');if(btxt)btxt.textContent=txt||'Upload...';}
+  else if(state==='error'){badge.classList.add('error');if(btxt)btxt.textContent=txt||'Errore';}
+  else{if(btxt)btxt.textContent=txt||'Non configurato';}
+  var cb=document.getElementById('drive-connect-btn');
+  var db=document.getElementById('drive-disconnect-btn');
+  if(cb) cb.style.display=state==='connected'?'none':'';
+  if(db) db.style.display=state==='connected'?'':'none';
+}
+function driveConnect(){
+  var clientId=cfg('gclientid');
+  if(!clientId){alert('Inserisci prima il Client ID Google.');return;}
+  if(!window.google||!window.google.accounts){alert('Libreria Google non caricata. Assicurati di aprire il file via http://localhost:8080');return;}
+  window.google.accounts.oauth2.initTokenClient({
+    client_id:clientId,
+    scope:'https://www.googleapis.com/auth/drive.file',
+    callback:function(resp){
+      if(resp.error){driveBadge('error','Errore auth');document.getElementById('drive-connect-msg').textContent='Errore: '+resp.error;return;}
+      driveToken=resp.access_token;
+      driveTokenExpiry=Date.now()+(parseInt(resp.expires_in,10)||3599)*1000;
+      driveBadge('connected','Drive connesso \u2713');
+      document.getElementById('drive-connect-msg').textContent='';
+      document.getElementById('drive-setup-guide').style.display='none';
+    }
+  }).requestAccessToken();
+}
+function driveDisconnect(){
+  if(driveToken && window.google && window.google.accounts){
+    try{window.google.accounts.oauth2.revoke(driveToken);}catch(e){}
+  }
+  driveToken=null;driveTokenExpiry=0;
+  driveBadge('idle','Non configurato');
+  var db=document.getElementById('drive-disconnect-btn');
+  var cb=document.getElementById('drive-connect-btn');
+  if(db)db.style.display='none';
+  if(cb)cb.style.display='';
+  document.getElementById('drive-setup-guide').style.display='';
+}
+
+function driveUploadFile(file,invoiceName,onDone){
+  if(!driveIsReady()){if(onDone)onDone(false,'Drive non connesso o non configurato');return;}
+  var folderId=cfg('gfolderid');
+  var meta={name:invoiceName||file.name,parents:[folderId]};
+  var form=new FormData();
+  form.append('metadata',new Blob([JSON.stringify(meta)],{type:'application/json'}));
+  form.append('file',file);
+  fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{
+    method:'POST',
+    headers:{Authorization:'Bearer '+driveToken},
+    body:form
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.id){if(onDone)onDone(true,d.id);}
+    else{if(onDone)onDone(false,JSON.stringify(d.error||d));}
+  }).catch(function(e){if(onDone)onDone(false,e.message);});
+}
+
+function setDriveUploadStatus(show,msg,ok){
+  var el=document.getElementById('drive-upload-status');
+  if(!el)return;
+  if(!show){el.style.display='none';return;}
+  el.style.display='flex';
+  el.innerHTML=(ok===true?'<span style="color:var(--green)">\u2601\uFE0F '+esc(msg)+'</span>'
+    :ok===false?'<span style="color:var(--red)">\u26A0\uFE0F '+esc(msg)+'</span>'
+    :'<span style="color:var(--accent)">\u23F3 '+esc(msg)+'</span>');
+}
+function handleFile(file){
+  if(!file) return;
+  var key=cfg('key');
+  if(!key){showMsg('Inserisci la API key in Impostazioni.','error');return;}
+  driveCurrentFile=file; // capture for Drive upload
+  setState('processing');
+  toB64(file).then(function(b64){
+    var isPdf=file.type==='application/pdf';
+    var mt=isPdf?'application/pdf':(file.type||'image/jpeg');
+    var cb=isPdf
+      ?{type:'document',source:{type:'base64',media_type:mt,data:b64}}
+      :{type:'image',source:{type:'base64',media_type:mt,data:b64}};
+    var prompt='Analizza questa fattura ed estrai i dati come JSON puro (senza backtick).\n'+
+      'Struttura ESATTA:\n'+
+      '{"type":"Issued|Received","date":"YYYY-MM-DD","serviceMonth":"YYYY-MM","invoice":"","counterparty":"","category":"Revenue - Consultancy|Revenue - Other|Professional Services - Accountant|Professional Services - Consultancy|Travel - Flights|Travel - Accommodation|Travel - Local Transport|Utilities - Internet/Mobile|Utilities - Other|Equipment - Office|Equipment - Other|Other","country":"","vatId":"","address":"","description":"","entrateNet":0,"entrateVat":0,"entrateTotal":0,"usciteNet":0,"usciteVat":0,"usciteTotal":0,"notes":""}\n'+
+      'Issued=fattura emessa/attiva, Received=ricevuta/passiva. Solo uno tra entrate/uscite deve avere valori >0.';
+    return fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1200,messages:[{role:'user',content:[cb,{type:'text',text:prompt}]}]})
+    });
+  }).then(function(r){return r.json();}).then(function(data){
+    if(data.error) throw new Error(data.error.message);
+    var txt=data.content&&data.content.find(function(b){return b.type==='text';});
+    var raw=(txt?txt.text:'').replace(/```json|```/g,'').trim();
+    var d=JSON.parse(raw);
+    fillForm(d);
+    setState('form');
+  }).catch(function(err){
+    showMsg('Errore: '+err.message+'. Compila manualmente.','error');
+    fillForm({});
+    setState('form');
+  });
+}
+
+function openManualForm(){driveCurrentFile=null;fillForm({});setState('form');}
+
+function toB64(file){
+  return new Promise(function(res,rej){
+    var r=new FileReader();
+    r.onload=function(){res(r.result.split(',')[1]);};
+    r.onerror=rej;
+    r.readAsDataURL(file);
+  });
+}
+
+function fillForm(d){
+  set('f-type',d.type||'Received');
+  set('f-date',d.date||today());
+  set('f-service-month',d.serviceMonth||(d.date?d.date.slice(0,7):today().slice(0,7)));
+  set('f-invoice',d.invoice||'');
+  set('f-counterparty',d.counterparty||'');
+  var cats=Array.from(document.getElementById('f-category').options).map(function(o){return o.value;});
+  set('f-category',cats.indexOf(d.category)>=0?d.category:'Other');
+  set('f-country',d.country||'');
+  set('f-vatid',d.vatId||'\u2014');
+  set('f-address',d.address||'');
+  set('f-description',d.description||'');
+  set('f-en-net',d.entrateNet||'');
+  set('f-en-vat',d.entrateVat||'');
+  set('f-en-tot',d.entrateTotal||'');
+  set('f-us-net',d.usciteNet||'');
+  set('f-us-vat',d.usciteVat||'');
+  set('f-us-tot',d.usciteTotal||'');
+  set('f-notes',d.notes||'');
+  updateAmountSections();
+}
+
+function updateAmountSections(){
+  var t=v('f-type');
+  document.getElementById('sec-entrate').style.opacity=t==='Issued'?'1':'0.35';
+  document.getElementById('sec-uscite').style.opacity=t==='Received'?'1':'0.35';
+}
+function calcE(){var n=num('f-en-net'),vt=num('f-en-vat');if(n||vt)set('f-en-tot',(n+vt).toFixed(2));}
+function calcU(){var n=num('f-us-net'),vt=num('f-us-vat');if(n||vt)set('f-us-tot',(n+vt).toFixed(2));}
+
+function openManualForm(){driveCurrentFile=null;fillForm({});setState('form');}
+
+function toB64(file){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(r.result.split(',')[1]);};r.onerror=rej;r.readAsDataURL(file);});}
+
+function editTx(id){
+  var t=txs.find(function(x){return x.id===id;});
+  if(!t) return;
+  editingId=id;
+  eSet('e-type',t.type);
+  eSet('e-date',t.date);
+  eSet('e-service-month',t.serviceMonth);
+  eSet('e-invoice',t.invoice);
+  eSet('e-counterparty',t.counterparty);
+  var cats=Array.from(document.getElementById('e-category').options).map(function(o){return o.value;});
+  eSet('e-category',cats.indexOf(t.category)>=0?t.category:'Other');
+  eSet('e-country',t.country);
+  eSet('e-vatid',t.vatId);
+  eSet('e-address',t.address);
+  eSet('e-description',t.description);
+  eSet('e-en-net',t.entrateNet||'');
+  eSet('e-en-vat',t.entrateVat||'');
+  eSet('e-en-tot',t.entrateTotal||'');
+  eSet('e-us-net',t.usciteNet||'');
+  eSet('e-us-vat',t.usciteVat||'');
+  eSet('e-us-tot',t.usciteTotal||'');
+  eSet('e-notes',t.notes);
+  updateEditSections();
+  document.getElementById('edit-modal').style.display='flex';
+}
+
+function closeEditModal(evt){
+  if(evt && evt.target!==document.getElementById('edit-modal')) return;
+  document.getElementById('edit-modal').style.display='none';
+  editingId=null;
+}
+
+function updateEditSections(){
+  var t=eV('e-type');
+  document.getElementById('e-sec-entrate').style.opacity=t==='Issued'?'1':'0.35';
+  document.getElementById('e-sec-uscite').style.opacity=t==='Received'?'1':'0.35';
+}
+function calcEditE(){var n=eNum('e-en-net'),vt=eNum('e-en-vat');if(n||vt)eSet('e-en-tot',(n+vt).toFixed(2));}
+function calcEditU(){var n=eNum('e-us-net'),vt=eNum('e-us-vat');if(n||vt)eSet('e-us-tot',(n+vt).toFixed(2));}
+function eV(id){return document.getElementById(id).value;}
+function eSet(id,val){var el=document.getElementById(id);if(el)el.value=val;}
+function eNum(id){return parseLocalNum(eV(id));}
+function setState(s){
+  document.getElementById('state-upload').style.display=s==='upload'?'':'none';
+  document.getElementById('state-processing').style.display=s==='processing'?'':'none';
+  document.getElementById('state-form').style.display=s==='form'?'':'none';
+}
+function resetUpload(){setState('upload');document.getElementById('file-input').value='';document.getElementById('msg-area').innerHTML='';}
+function showMsg(txt,type){
+  document.getElementById('msg-area').innerHTML='<div class="msg msg-'+type+'">'+txt+'</div>';
+  setTimeout(function(){var el=document.getElementById('msg-area');if(el)el.innerHTML='';},5000);
+}
+function setTypeFilter(f,btn){
+  filter=f;
+  var btns=['ftype-all','ftype-issued','ftype-received'];
+  btns.forEach(function(id){var el=document.getElementById(id);if(el)el.classList.remove('active');});
+  if(btn)btn.classList.add('active');
+  renderTable();
+}
+function setFilter(f,btn){setTypeFilter(f,btn);}
+
+function setDateRef(ref,btn){
+  dateRef=ref;
+  var db=document.getElementById('ref-date-btn');
+  var sb=document.getElementById('ref-svc-btn');
+  if(db)db.classList.toggle('active',ref==='date');
+  if(sb)sb.classList.toggle('active',ref==='serviceMonth');
+  renderTable();
+}
+
+function setTypeFilter(f,btn){
+  filter=f;['ftype-all','ftype-issued','ftype-received'].forEach(function(id){var el=document.getElementById(id);if(el)el.classList.remove('active');});
+  if(btn)btn.classList.add('active');renderTable();
+}
+function setFilter(f,btn){setTypeFilter(f,btn);}
+function setDateRef(ref,btn){
+  dateRef=ref;var db=document.getElementById('ref-date-btn');var sb2=document.getElementById('ref-svc-btn');
+  if(db)db.classList.toggle('active',ref==='date');if(sb2)sb2.classList.toggle('active',ref==='serviceMonth');
+  renderTable();
+}
+
+function renderTable(){
+  var arr=getFilteredTxs().slice().sort(function(a,b){
+    var va=a[sortField]||'',vb=b[sortField]||'';
+    if(typeof va==='number'||typeof vb==='number')return((parseFloat(va)||0)-(parseFloat(vb)||0))*sortDir;
+    return String(va).localeCompare(String(vb))*sortDir;
+  });
+  var tbody=document.getElementById('tbody');var empty=document.getElementById('empty');
+  if(!tbody)return;
+  renderFilteredStats(arr);
+  var dups=findDuplicates(txs);
+  if(!arr.length){tbody.innerHTML='';empty.style.display='';updateSelBar();return;}
+  empty.style.display='none';
+  tbody.innerHTML=arr.map(function(t){
+    var isIn=t.type==='Issued';var sel=selectedIds.has(t.id);
+    var hasFile=t.filePath||localStorage.getItem('inv_file_'+t.id);
+    var net=((t.entrateTotal||0)-(t.usciteTotal||0));
+    var netCls=net>0?'net-pos':net<0?'net-neg':'';
+    var netStr=net!==0?(net>0?'+':'')+fmt(net):'--';
+    var isDup=dups.has(t.id);
+    var dupBadge=isDup?'<span title="Possibile duplicato" style="color:var(--orange);font-size:10px;margin-right:3px">&#9888;</span>':'';
+    var dupValidateBtn=isDup?'<button class="btn" style="font-size:9px;padding:2px 7px;background:rgba(251,146,60,0.15);color:var(--orange);border-color:var(--orange);white-space:nowrap" onclick="validateDuplicate('+t.id+')" title="Segna come non duplicato">Valida</button>':'';
+    var rowBg=isDup?'background:rgba(251,146,60,0.08)':sel?'background:var(--accent-light)':'';
+    return '<tr style="'+rowBg+'">'+
+      '<td class="cb-cell"><input type="checkbox" class="row-cb" '+(sel?'checked':'')+' onchange="toggleSelect('+t.id+',this)"></td>'+
+      '<td>'+dupBadge+'<span class="badge '+(isIn?'badge-in':'badge-out')+'">'+(isIn?'Issued':'Received')+'</span></td>'+
+      '<td style="white-space:nowrap;font-weight:500">'+formatDate(t.date)+'</td>'+
+      '<td style="color:var(--text2)">'+esc(t.serviceMonth)+'</td>'+
+      '<td style="color:var(--text2);white-space:nowrap">'+esc(t.invoice)+'</td>'+
+      '<td class="'+netCls+'">'+netStr+'</td>'+
+      '<td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.counterparty)+'</td>'+
+      '<td style="color:var(--text2);font-size:10.5px;white-space:nowrap">'+esc(t.category)+'</td>'+
+      '<td style="color:var(--text2)">'+esc(t.country)+'</td>'+
+      '<td class="'+(t.entrateNet?'amount-in':'')+'">'+fmtN(t.entrateNet)+'</td>'+
+      '<td class="'+(t.entrateVat?'amount-in':'')+'">'+fmtN(t.entrateVat)+'</td>'+
+      '<td class="'+(t.entrateTotal?'amount-in':'')+'"><b>'+fmtN(t.entrateTotal)+'</b></td>'+
+      '<td class="'+(t.usciteNet?'amount-out':'')+'">'+fmtN(t.usciteNet)+'</td>'+
+      '<td class="'+(t.usciteVat?'amount-out':'')+'">'+fmtN(t.usciteVat)+'</td>'+
+      '<td class="'+(t.usciteTotal?'amount-out':'')+'"><b>'+fmtN(t.usciteTotal)+'</b></td>'+
+      '<td style="color:var(--text2);font-size:10.5px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.notes)+'</td>'+
+      '<td style="white-space:nowrap">'+
+        dupValidateBtn+
+        (hasFile?'<button class="btn btn-edit" style="font-size:10px;padding:4px 7px" onclick="downloadInvoiceFile(txs.find(function(x){return x.id==='+t.id+'}))" title="Scarica allegato">&#128229;</button>'+
+        '<button class="btn btn-secondary" style="font-size:10px;padding:4px 7px" onclick="viewInvoiceFile(txs.find(function(x){return x.id==='+t.id+'}))" title="Visualizza allegato">&#128065;</button>':'')+ 
+        '<button class="btn btn-edit" onclick="editTx('+t.id+')" title="Modifica">&#9998;</button>'+
+        '<button class="btn btn-danger" onclick="delTx('+t.id+')">&#215;</button>'+
+      '</td></tr>';
+  }).join('');
+  // Duplicate warning banner
+  if(dups.size>0){
+    var dupCount=arr.filter(function(t){return dups.has(t.id);}).length;
+    if(dupCount>0){
+      var warn=document.getElementById('dup-warning');
+      if(!warn){warn=document.createElement('div');warn.id='dup-warning';tbody.parentElement.parentElement.insertBefore(warn,tbody.parentElement);}
+      warn.innerHTML='<div style="background:rgba(251,146,60,0.12);border:1px solid var(--orange);border-radius:var(--radius-sm);padding:8px 14px;font-size:12px;color:var(--orange);margin-bottom:8px;display:flex;align-items:center;gap:10px">'+
+        '<span>&#9888; <b>'+dupCount+' transazioni potrebbero essere duplicate</b> (stesso n. fattura o stesso importo+data). Righe evidenziate in arancione.</span>'+
+        '<button class="btn" style="font-size:10px;padding:3px 10px;background:rgba(251,146,60,0.2);color:var(--orange);border-color:var(--orange);margin-left:auto;white-space:nowrap" onclick="validateAllDuplicates()">Valida tutte</button>'+
+        '</div>';
+    }
+  } else {
+    var warn=document.getElementById('dup-warning');if(warn)warn.innerHTML='';
+  }
+  updateSelBar();
+  var allCb=document.getElementById('cb-all');
+  if(allCb)allCb.checked=arr.length>0&&arr.every(function(t){return selectedIds.has(t.id);});
+}
+
+function renderFilteredStats(arr){
+  var el=document.getElementById('stats-a');if(!el)return;
+  var tIn=arr.reduce(function(s,t){return s+(t.entrateTotal||0);},0);
+  var tOut=arr.reduce(function(s,t){return s+(t.usciteTotal||0);},0);
+  var nIn=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
+  var nOut=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
+  el.innerHTML=stat('Entrate Totali',fmt(tIn),'var(--green)')+stat('Uscite Totali',fmt(tOut),'var(--red)')+
+    stat('Saldo Netto',fmt(nIn-nOut),nIn>=nOut?'var(--green)':'var(--red)')+stat('N Fatture',arr.length,'var(--accent)');
+}
+function renderStats(id){
+  var el=document.getElementById(id);if(!el)return;
+  var arr=id==='stats-b'?getFilteredSummaryTxs():txs;
+  var tIn=arr.reduce(function(s,t){return s+(t.entrateTotal||0);},0);
+  var tOut=arr.reduce(function(s,t){return s+(t.usciteTotal||0);},0);
+  var nIn=arr.reduce(function(s,t){return s+(t.entrateNet||0);},0);
+  var nOut=arr.reduce(function(s,t){return s+(t.usciteNet||0);},0);
+  el.innerHTML=stat('Entrate Totali',fmt(tIn),'var(--green)')+stat('Uscite Totali',fmt(tOut),'var(--red)')+
+    stat('Saldo Netto',fmt(nIn-nOut),nIn>=nOut?'var(--green)':'var(--red)')+stat('N Fatture',arr.length,'var(--accent)');
+}
+function stat(label,val,color){return '<div class="stat"><div class="stat-label">'+label+'</div><div class="stat-value" style="color:'+color+'">'+val+'</div></div>';}
+
+// CATEGORY SUMMARY with expand/collapse + group filter
+var catGroupMap={
+  'Travel':['Travel - Flights','Travel - Accommodation','Travel - Local Transport','Travel - Taxi','Travel - Car Rental','Travel - Other'],
+  'Revenue':['Revenue - Consultancy','Revenue - Other','Revenue - Services'],
+  'Professional Services':['Professional Services - Accountant','Professional Services - Consultancy','Professional Services - Legal','Professional Services - Other'],
+  'Utilities':['Utilities - Internet/Mobile','Utilities - Office','Utilities - Other'],
+  'Equipment':['Equipment - Office','Equipment - Other','Equipment - Software']
+};
+
+function groupCatName(cat){
+  if(catMergeMode==='detail')return cat;
+  for(var g in catGroupMap){if(catGroupMap[g].indexOf(cat)>=0)return g;}
+  return cat;
+}
+function selectAllCats(all){
+  var chips=document.querySelectorAll('.cat-chip');
+  chips.forEach(function(c){
+    var active=all;
+    c.dataset.active=active?'1':'0';
+    c.style.background=active?'var(--accent)':'var(--surface2)';
+    c.style.color=active?'#fff':'var(--text2)';
+    c.style.borderColor=active?'var(--accent)':'var(--border)';
+  });
+  if(all){catFilterSet=null;}else{catFilterSet=new Set();}
+  renderCat();
+}
+function toggleCatChip(idx,el){
+  // idx is the index into allCatsArr, cat name stored in chip text
+  var cat=el.textContent.trim();
+  if(catFilterSet===null){
+    // was "all" - now deselect this one
+    var allChips=Array.from(document.querySelectorAll('.cat-chip'));
+    catFilterSet=new Set(allChips.map(function(c){return c.textContent.trim();}));
+    catFilterSet.delete(cat);
+    allChips.forEach(function(c){
+      var on=catFilterSet.has(c.textContent.trim());
+      c.dataset.active=on?'1':'0';
+      c.style.background=on?'var(--accent)':'var(--surface2)';
+      c.style.color=on?'#fff':'var(--text2)';
+      c.style.borderColor=on?'var(--accent)':'var(--border)';
+    });
+  } else {
+    if(catFilterSet.has(cat)){catFilterSet.delete(cat);}else{catFilterSet.add(cat);}
+    var on=catFilterSet.has(cat);
+    el.dataset.active=on?'1':'0';
+    el.style.background=on?'var(--accent)':'var(--surface2)';
+    el.style.color=on?'#fff':'var(--text2)';
+    el.style.borderColor=on?'var(--accent)':'var(--border)';
+  }
+  renderCat();
+}
+function groupCatName(cat){return cat;} // kept for compatibility
+function toggleCatSection(which){
+  if(which==='in'){
+    catEntrateExpanded=!catEntrateExpanded;
+    var sec=document.getElementById('cat-section-in');
+    var btn=document.getElementById('cat-toggle-in');
+    if(sec)sec.style.display=catEntrateExpanded?'':'none';
+    if(btn)btn.textContent=catEntrateExpanded?'Riduci':'Espandi';
+  } else {
+    catUsciteExpanded=!catUsciteExpanded;
+    var sec=document.getElementById('cat-section-out');
+    var btn=document.getElementById('cat-toggle-out');
+    if(sec)sec.style.display=catUsciteExpanded?'':'none';
+    if(btn)btn.textContent=catUsciteExpanded?'Riduci':'Espandi';
+  }
+}
+function renderCat(){
+  var arr=getFilteredSummaryTxs();
+  var allCatsArr=Array.from(new Set(arr.map(function(t){return t.category||'Other';}))).sort();
+
+  // Build filter chips
+  var chipsEl=document.getElementById('cat-filter-chips');
+  if(chipsEl){
+    chipsEl.innerHTML='';
+    allCatsArr.forEach(function(c){
+      var on=catFilterSet===null||catFilterSet.has(c);
+      var btn=document.createElement('button');
+      btn.className='cat-chip';
+      btn.textContent=c||'Other';
+      btn.dataset.active=on?'1':'0';
+      btn.style.padding='3px 10px';
+      btn.style.borderRadius='20px';
+      btn.style.border='1.5px solid '+(on?'var(--accent)':'var(--border)');
+      btn.style.background=on?'var(--accent)':'var(--surface2)';
+      btn.style.color=on?'#fff':'var(--text2)';
+      btn.style.fontSize='11px';
+      btn.style.cursor='pointer';
+      btn.style.fontWeight=on?'600':'400';
+      btn.addEventListener('click',function(){toggleCatChip(btn);});
+      chipsEl.appendChild(btn);
+    });
+  }
+
+  // Filter by catFilterSet
+  var filteredArr=catFilterSet===null?arr:arr.filter(function(t){return catFilterSet.has(t.category||'Other');});
+  var mapIn={},mapOut={};
+  filteredArr.forEach(function(t){
+    var c=t.category||'Other';
+    if(!mapIn[c])mapIn[c]={n:0,v:0,t:0};
+    if(!mapOut[c])mapOut[c]={n:0,v:0,t:0};
+    if(t.type==='Issued'){mapIn[c].n+=t.entrateNet;mapIn[c].v+=t.entrateVat;mapIn[c].t+=t.entrateTotal;}
+    else{mapOut[c].n+=t.usciteNet;mapOut[c].v+=t.usciteVat;mapOut[c].t+=t.usciteTotal;}
+  });
+  var usedCats=Array.from(new Set(Object.keys(mapIn).concat(Object.keys(mapOut)))).sort();
+  function buildRows(map,cats){
+    var tN=0,tV=0,tT=0;
+    var r=cats.filter(function(c){return map[c]&&map[c].t!==0;}).map(function(c){
+      tN+=map[c].n;tV+=map[c].v;tT+=map[c].t;
+      return '<tr><td style="color:var(--text2);font-size:11px">'+c+'</td><td>'+fmt(map[c].n)+'</td><td>'+fmt(map[c].v)+'</td><td>'+fmt(map[c].t)+'</td></tr>';
+    }).join('');
+    if(!r)return '<tr><td colspan="4" style="color:var(--text3);text-align:center;padding:14px">Nessun dato</td></tr>';
+    return r+'<tr style="font-weight:700"><td>TOTAL</td><td>'+fmt(tN)+'</td><td>'+fmt(tV)+'</td><td>'+fmt(tT)+'</td></tr>';
+  }
+  var bi=document.getElementById('cat-tbody-in');if(bi)bi.innerHTML=buildRows(mapIn,usedCats);
+  var bo=document.getElementById('cat-tbody-out');if(bo)bo.innerHTML=buildRows(mapOut,usedCats);
+}
+
+
+function toggleCatChip(idx,el){
+  // idx is the index into allCatsArr, cat name stored in chip text
+  var cat=el.textContent.trim();
+  if(catFilterSet===null){
+    // was "all" - now deselect this one
+    var allChips=Array.from(document.querySelectorAll('.cat-chip'));
+    catFilterSet=new Set(allChips.map(function(c){return c.textContent.trim();}));
+    catFilterSet.delete(cat);
+    allChips.forEach(function(c){
+      var on=catFilterSet.has(c.textContent.trim());
+      c.dataset.active=on?'1':'0';
+      c.style.background=on?'var(--accent)':'var(--surface2)';
+      c.style.color=on?'#fff':'var(--text2)';
+      c.style.borderColor=on?'var(--accent)':'var(--border)';
+    });
+  } else {
+    if(catFilterSet.has(cat)){catFilterSet.delete(cat);}else{catFilterSet.add(cat);}
+    var on=catFilterSet.has(cat);
+    el.dataset.active=on?'1':'0';
+    el.style.background=on?'var(--accent)':'var(--surface2)';
+    el.style.color=on?'#fff':'var(--text2)';
+    el.style.borderColor=on?'var(--accent)':'var(--border)';
+  }
+  renderCat();
+}
+function groupCatName(cat){return cat;} // kept for compatibility
+function toggleCatSection(which){
+  if(which==='in'){
+    catEntrateExpanded=!catEntrateExpanded;
+    var sec=document.getElementById('cat-section-in');
+    var btn=document.getElementById('cat-toggle-in');
+    if(sec)sec.style.display=catEntrateExpanded?'':'none';
+    if(btn)btn.textContent=catEntrateExpanded?'Riduci':'Espandi';
+  } else {
+    catUsciteExpanded=!catUsciteExpanded;
+    var sec=document.getElementById('cat-section-out');
+    var btn=document.getElementById('cat-toggle-out');
+    if(sec)sec.style.display=catUsciteExpanded?'':'none';
+    if(btn)btn.textContent=catUsciteExpanded?'Riduci':'Espandi';
+  }
+}
+
+function selectAllCats(all){
+  var chips=document.querySelectorAll('.cat-chip');
+  chips.forEach(function(c){
+    var active=all;
+    c.dataset.active=active?'1':'0';
+    c.style.background=active?'var(--accent)':'var(--surface2)';
+    c.style.color=active?'#fff':'var(--text2)';
+    c.style.borderColor=active?'var(--accent)':'var(--border)';
+  });
+  if(all){catFilterSet=null;}else{catFilterSet=new Set();}
+  renderCat();
+}
+function toggleCatChip(idx,el){
+  // idx is the index into allCatsArr, cat name stored in chip text
+  var cat=el.textContent.trim();
+  if(catFilterSet===null){
+    // was "all" - now deselect this one
+    var allChips=Array.from(document.querySelectorAll('.cat-chip'));
+    catFilterSet=new Set(allChips.map(function(c){return c.textContent.trim();}));
+    catFilterSet.delete(cat);
+    allChips.forEach(function(c){
+      var on=catFilterSet.has(c.textContent.trim());
+      c.dataset.active=on?'1':'0';
+      c.style.background=on?'var(--accent)':'var(--surface2)';
+      c.style.color=on?'#fff':'var(--text2)';
+      c.style.borderColor=on?'var(--accent)':'var(--border)';
+    });
+  } else {
+    if(catFilterSet.has(cat)){catFilterSet.delete(cat);}else{catFilterSet.add(cat);}
+    var on=catFilterSet.has(cat);
+    el.dataset.active=on?'1':'0';
+    el.style.background=on?'var(--accent)':'var(--surface2)';
+    el.style.color=on?'#fff':'var(--text2)';
+    el.style.borderColor=on?'var(--accent)':'var(--border)';
+  }
+  renderCat();
+}
+function groupCatName(cat){return cat;} // kept for compatibility
+function toggleCatSection(which){
+  if(which==='in'){
+    catEntrateExpanded=!catEntrateExpanded;
+    var sec=document.getElementById('cat-section-in');
+    var btn=document.getElementById('cat-toggle-in');
+    if(sec)sec.style.display=catEntrateExpanded?'':'none';
+    if(btn)btn.textContent=catEntrateExpanded?'Riduci':'Espandi';
+  } else {
+    catUsciteExpanded=!catUsciteExpanded;
+    var sec=document.getElementById('cat-section-out');
+    var btn=document.getElementById('cat-toggle-out');
+    if(sec)sec.style.display=catUsciteExpanded?'':'none';
+    if(btn)btn.textContent=catUsciteExpanded?'Riduci':'Espandi';
+  }
+}
+function renderCat(){
+  var arr=getFilteredSummaryTxs();
+  var mapIn={},mapOut={};
+  arr.forEach(function(t){
+    var c=groupCatName(t.category||'Other');
+    if(!mapIn[c])mapIn[c]={n:0,v:0,t:0};
+    if(!mapOut[c])mapOut[c]={n:0,v:0,t:0};
+    if(t.type==='Issued'){mapIn[c].n+=t.entrateNet;mapIn[c].v+=t.entrateVat;mapIn[c].t+=t.entrateTotal;}
+    else{mapOut[c].n+=t.usciteNet;mapOut[c].v+=t.usciteVat;mapOut[c].t+=t.usciteTotal;}
+  });
+  var allCats=Array.from(new Set(Object.keys(mapIn).concat(Object.keys(mapOut)))).sort();
+  function buildRows(map,cats){
+    var tN=0,tV=0,tT=0;
+    var r=cats.filter(function(c){return map[c]&&map[c].t!==0;}).map(function(c){
+      tN+=map[c].n;tV+=map[c].v;tT+=map[c].t;
+      return '<tr><td style="color:var(--text2);font-size:11px">'+c+'</td><td>'+fmt(map[c].n)+'</td><td>'+fmt(map[c].v)+'</td><td>'+fmt(map[c].t)+'</td></tr>';
+    }).join('');
+    if(!r)return '<tr><td colspan="4" style="color:var(--text3);text-align:center;padding:14px">Nessun dato</td></tr>';
+    return r+'<tr><td><b>TOTAL</b></td><td><b>'+fmt(tN)+'</b></td><td><b>'+fmt(tV)+'</b></td><td><b>'+fmt(tT)+'</b></td></tr>';
+  }
+
+  var bi=document.getElementById('cat-tbody-in');if(bi)bi.innerHTML=buildRows(mapIn,allCats);
+  var bo=document.getElementById('cat-tbody-out');if(bo)bo.innerHTML=buildRows(mapOut,allCats);
+
+  // Expand/collapse
+  var secIn=document.getElementById('cat-section-in');
+  var secOut=document.getElementById('cat-section-out');
+  var togIn=document.getElementById('cat-toggle-in');
+  var togOut=document.getElementById('cat-toggle-out');
+  if(secIn)secIn.style.display=catEntrateExpanded?'':'none';
+  if(secOut)secOut.style.display=catUsciteExpanded?'':'none';
+  if(togIn)togIn.textContent=catEntrateExpanded?'Riduci':'Espandi';
+  if(togOut)togOut.textContent=catUsciteExpanded?'Riduci':'Espandi';
+}
+
+// SMART ADVISORY - detailed with costs
+function renderAdvisory(){
+  var panel=document.getElementById('advisory-panel');
+  var content=document.getElementById('advisory-content');
+  if(!panel||!content)return;
+  var inp=getTaxInputs();
+  var gRev=inp.gRev, dExp=inp.dExp;
+  var ci=Math.max(0,gRev-dExp);
+  var tips=[];
+  if(ci===0&&gRev===0){
+    tips.push({type:'ok',title:'Nessun dato nel periodo',body:'Seleziona un periodo con transazioni.'});
+    showAdv(tips,panel,content);return;
+  }
+
+  // Malta 2026 bracket alerts
+  var brackets=[
+    {lim:12000,nextRate:0.15,prevRate:0,label:'12.000'},
+    {lim:16000,nextRate:0.25,prevRate:0.15,label:'16.000'},
+    {lim:60000,nextRate:0.35,prevRate:0.25,label:'60.000'}
+  ];
+  brackets.forEach(function(b){
+    var over=ci-b.lim;
+    if(over>0&&over<=3000){
+      var saving=over*(b.nextRate-b.prevRate);
+      tips.push({type:b.lim===60000?'danger':'warn',
+        title:'Sei appena sopra il bracket '+b.label+' EUR (aliquota '+Math.round(b.nextRate*100)+'%)',
+        body:'Reddito imponibile: <b>'+fmt(ci)+' EUR</b>, supera '+b.label+' EUR di <b>'+fmt(over)+' EUR</b>. '+
+          'Questo ti costa <b>'+fmt(saving)+' EUR extra di IRPEF</b> rispetto a restare sotto la soglia.<br>'+
+          '<b>Azione concreta:</b> Effettua almeno '+fmt(over)+' EUR di spese aziendali deducibili entro fine anno '+
+          '(es. attrezzatura informatica, abbonamenti software, formazione professionale, home office, viaggi business) '+
+          'per rientrare sotto '+b.label+' EUR e risparmiare '+fmt(saving)+' EUR di tasse.'
+      });
+    }
+    if(ci<b.lim&&ci>=b.lim-2000){
+      tips.push({type:'info',
+        title:'Prossimo al bracket '+b.label+' EUR',
+        body:'Sei a <b>'+fmt(b.lim-ci)+' EUR</b> dalla soglia dove scatta il '+Math.round(b.nextRate*100)+'% di IRPEF. '+
+          'Puoi ancora fatturare circa '+fmt(b.lim-ci)+' EUR netti prima di entrare nel bracket superiore. '+
+          'Tieni monitorato il reddito negli ultimi mesi di anno fiscale.'
+      });
+    }
+  });
+
+  // SSC Class 2 bracket (Malta) - corretto 2026
+  var sscThreshold=29100; // at this income, 15% = 83.89/week
+  if(ci>sscThreshold-2000&&ci<sscThreshold){
+    tips.push({type:'warn',
+      title:'Vicino al massimale SSC Class 2 (circa 29.000 EUR)',
+      body:'Oltre circa 29.000 EUR di reddito netto la SSC raggiunge il massimale di <b>83.89 EUR/settimana (4.362 EUR/anno)</b>. '+
+        'Attualmente paghi '+fmt(maltaSSC2026(ci))+' EUR/anno di SSC. '+
+        'Sei a '+fmt(sscThreshold-ci)+' EUR dalla soglia del massimale.'
+    });
+  }
+
+  // Regime comparison - detailed
+  if(ci>15000){
+    var se=calcMaltaSE(gRev,dExp);
+    var ltd=calcMaltaLtd(gRev,dExp);
+    var dse=calcDubaiSE(gRev,dExp);
+    var dfz=calcDubaiFZ(gRev,dExp);
+    var options=[
+      {name:'Malta Ltd',calc:ltd,
+       details:'<ul style="margin:6px 0 0 16px;font-size:11.5px">'+
+         '<li>Tasse azienda: ~5% effettivo (35% CT con rimborso 6/7 agli azionisti)</li>'+
+         '<li>Costo costituzione Ltd: circa 1.500-3.000 EUR una tantum</li>'+
+         '<li>Costo annuo contabilita + compliance: circa 3.000-6.000 EUR/anno</li>'+
+         '<li>Direttore residente (se richiesto): 2.000-5.000 EUR/anno</li>'+
+         '<li>Ideale da: circa 80.000 EUR/anno di fatturato</li>'+
+         '<li>Pro: rimborso imposta, struttura per crescita, credibilita B2B</li>'+
+         '<li>Contro: complessita gestione, costi fissi annui</li>'+
+         '</ul>'},
+      {name:'Dubai SE (Freelancer License)',calc:dse,
+       details:'<ul style="margin:6px 0 0 16px;font-size:11.5px">'+
+         '<li>UAE CT 9% solo su utile eccedente AED 375.000 (~93.750 EUR)</li>'+
+         '<li>Nessuna personal income tax, nessun SSC obbligatorio</li>'+
+         '<li>Costo Freelancer License (es. IFZA, Meydan): 4.000-7.000 EUR/anno</li>'+
+         '<li>Visto UAE: 3.000-4.000 EUR prima emissione, rinnovo ~2.000 EUR</li>'+
+         '<li>Conto bancario UAE: richiede presenza fisica, ~500-1.000 EUR setup</li>'+
+         '<li>Obbligo residenza UAE: minimo 183 giorni/anno per evitare tassazione Malta</li>'+
+         '<li>Pro: aliquota bassissima, nessun SSC, hub internazionale</li>'+
+         '<li>Contro: necessita cambio residenza effettivo, costi di vita Dubai</li>'+
+         '</ul>'},
+      {name:'Dubai Ltd Free Zone',calc:dfz,
+       details:'<ul style="margin:6px 0 0 16px;font-size:11.5px">'+
+         '<li>Corporate Tax 0% se Qualifying Free Zone Person (QFZP)</li>'+
+         '<li>Costo costituzione FZ (es. IFZA, DIFC, DMCC): 5.000-12.000 EUR</li>'+
+         '<li>Rinnovo annuo licenza: 3.000-8.000 EUR/anno</li>'+
+         '<li>Visto UAE per socio/direttore: 3.000-4.000 EUR</li>'+
+         '<li>Conto bancario UAE per la societa: 1.000-2.000 EUR setup</li>'+
+         '<li>Necessita agente registrato + segretaria societaria: ~2.000 EUR/anno</li>'+
+         '<li>Obbligo di non svolgere attivita con persone UAE (regola QFZP)</li>'+
+         '<li>Pro: 0% tasse se strutturato correttamente, massima flessibilita</li>'+
+         '<li>Contro: costi fissi elevati, complessita compliance, cambio residenza necessario</li>'+
+         '</ul>'}
+    ];
+    options.sort(function(a,b){return a.calc.total-b.calc.total;});
+    var best=options[0];
+    var saving=se.total-best.calc.total;
+    if(saving>1000){
+      tips.push({type:'info',
+        title:'Risparmio potenziale con '+best.name+': '+fmt(saving)+' EUR/anno',
+        body:'Con <b>'+best.name+'</b> pagheresti circa <b>'+fmt(best.calc.total)+' EUR/anno</b> di tasse '+
+          'invece di <b>'+fmt(se.total)+' EUR</b> (Malta SE attuale). '+
+          'Risparmio stimato: <b>'+fmt(saving)+' EUR/anno</b>.'+best.details+
+          '<div style="margin-top:8px;font-size:11px;color:var(--text3)">* Stima indicativa. Consulta un commercialista specializzato prima di procedere.</div>'
+      });
+    }
+    // Show all options comparison
+    if(options.length>1){
+      var altSaving=se.total-options[1].calc.total;
+      if(altSaving>500&&altSaving<saving){
+        tips.push({type:'info',
+          title:'Alternativa: '+options[1].name+' (risparmio '+fmt(altSaving)+' EUR/anno)',
+          body:'Con <b>'+options[1].name+'</b> pagheresti circa <b>'+fmt(options[1].calc.total)+' EUR/anno</b> di tasse.'+options[1].details+
+            '<div style="margin-top:8px;font-size:11px;color:var(--text3)">* Stima indicativa. Consulta un commercialista specializzato prima di procedere.</div>'
+        });
+      }
+    }
+  }
+
+  // Expenses optimization
+  if(gRev>20000&&dExp/gRev<0.10){
+    tips.push({type:'info',
+      title:'Spese deducibili basse ('+Math.round(dExp/gRev*100)+'%)',
+      body:'Le spese aziendali sono solo il '+Math.round(dExp/gRev*100)+'% del fatturato. '+
+        'Ogni 1.000 EUR di spese deducibili aggiuntive riduce le tasse di circa '+fmt(1000*0.25)+'-'+fmt(1000*0.35)+' EUR (aliquota corrente).<br>'+
+        '<b>Spese deducibili tipiche per freelance a Malta:</b>'+
+        '<ul style="margin:6px 0 0 16px;font-size:11.5px">'+
+        '<li>Home office: % del canone/mutuo proporzionale ai m2 usati</li>'+
+        '<li>Telefono e internet: 50-100% se uso professionale</li>'+
+        '<li>Attrezzatura IT: laptop, monitor, periferiche</li>'+
+        '<li>Software e abbonamenti professionali</li>'+
+        '<li>Viaggi e trasferte di lavoro (voli, hotel, trasporti)</li>'+
+        '<li>Formazione e corsi professionali</li>'+
+        '<li>Consulenza contabile e legale</li>'+
+        '</ul>'
+    });
+  }
+
+  // Italian forfettario warning
+  if(gRev>=80000&&gRev<=90000){
+    tips.push({type:'warn',
+      title:'Attenzione: vicino al limite forfettario italiano (85.000 EUR)',
+      body:'Superare 85.000 EUR esclude dal regime forfettario (15% flat). '+
+        'Sopra questa soglia si applica il regime ordinario: IRPEF progressiva + INPS 26% + IRAP 3.9%. '+
+        'Il salto di regime puo aumentare il carico fiscale di 10-20% sul fatturato marginale.'
+    });
+  }
+
+  if(tips.length===0){
+    tips.push({type:'ok',
+      title:'Situazione fiscale sotto controllo',
+      body:'Nessuna soglia critica imminente nel periodo selezionato. '+
+        'Continua a monitorare le spese deducibili e usa il simulatore per proiettare scenari futuri.'
+    });
+  }
+  showAdv(tips,panel,content);
+}
+function showAdv(tips,panel,content){
+  var typeMap={danger:'adv-danger',warn:'adv-warn',info:'adv-info',ok:'adv-ok'};
+  var iconMap={danger:'&#9888;',warn:'&#128161;',info:'&#128202;',ok:'&#9989;'};
+  panel.style.display='';
+  content.innerHTML=tips.map(function(t){
+    return '<div class="adv-card '+typeMap[t.type]+'">'+
+      '<div class="adv-icon">'+iconMap[t.type]+'</div>'+
+      '<div style="flex:1"><div class="adv-title">'+t.title+'</div><div>'+t.body+'</div></div></div>';
+  }).join('');
+}
+
+
+function exportXLSX(){
+  var arr=getFilteredTxs();
+  if(!arr.length){alert('Nessuna transazione nel periodo selezionato.');return;}
+  var wb=XLSX.utils.book_new();
+  var name=cfg('name'), vatN=cfg('vat');
+  var h1='Invoice Register'+(name?' - '+name:'')+(vatN?' (VAT '+vatN+')':'');
+  var periodDesc=filterYear!=='all'?filterYear:'All years';
+  if(!filterPeriods.has('all'))periodDesc+=(' - '+Array.from(filterPeriods).join(','));
+  var rows=[];
+  rows.push([h1]);
+  rows.push(['Period: '+periodDesc+'. All amounts in EUR.']);
+  rows.push([]);
+  rows.push(['Date','Service Month','Type','Invoice #','Counterparty','Category','Country','VAT / Tax ID','Address','Description','Entrate Net (EUR)','Entrate VAT (EUR)','Entrate Total (EUR)','Uscite Net (EUR)','Uscite VAT (EUR)','Uscite Total (EUR)','Notes']);
+  var sorted=[].concat(txs).sort(function(a,b){return a.date.localeCompare(b.date);});
+  sorted.forEach(function(t){
+    rows.push([t.date,t.serviceMonth,t.type,t.invoice,t.counterparty,t.category,t.country,t.vatId,t.address,t.description,
+      t.entrateNet||'',t.entrateVat||'',t.entrateTotal||'',
+      t.usciteNet||'',t.usciteVat||'',t.usciteTotal||'',t.notes]);
+  });
+  var tEN=sum('entrateNet'),tEV=sum('entrateVat'),tET=sum('entrateTotal');
+  var tUN=sum('usciteNet'),tUV=sum('usciteVat'),tUT=sum('usciteTotal');
+  rows.push([]);
+  rows.push(['','','','','','Total Issued (Revenue)','','','','',tEN,tEV,tET,'','','','']);
+  rows.push(['','','','','','Total Received (Expenses)','','','','','','','',tUN,tUV,tUT,'']);
+  rows.push(['','','','','','Net (Revenue - Expenses)','','','','','','',tET-tUT,'','','','']);
+  var ch=Math.max(0,tEN-tUN), tax=maltaTax(ch), ssc=Math.min(ch,33984)*0.15;
+  rows.push([]);
+  rows.push(['','','','','','','','','Malta Tax Estimate (Self-Employed 2026)']);
+  rows.push(['','','','','','','','','Gross Revenue (Net of VAT)','',tEN]);
+  rows.push(['','','','','','','','','Deductible Expenses (Net of VAT)','',tUN]);
+  rows.push(['','','','','','','','','Chargeable Income','',ch]);
+  rows.push(['','','','','','','','','Income Tax (Single rates 2026)','',tax]);
+  rows.push(['','','','','','','','','Class 2 SSC (15%)','',ssc]);
+  rows.push(['','','','','','','','','Total Tax + SSC','',tax+ssc]);
+  rows.push(['','','','','','','','','Net After Tax & SSC','',ch-tax-ssc]);
+  var ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[10,12,10,14,24,26,10,14,32,42,14,14,14,14,14,14,42].map(function(w){return{wch:w};});
+  XLSX.utils.book_append_sheet(wb,ws,'Invoices 2026');
+
+  // Cat summary sheet
+  var cats=['Revenue - Consultancy','Revenue - Other','Professional Services - Accountant','Professional Services - Consultancy','Travel - Flights','Travel - Accommodation','Travel - Local Transport','Utilities - Internet/Mobile','Utilities - Other','Equipment - Office','Equipment - Other','Other'];
+  var map={};cats.forEach(function(c){map[c]={n:0,v:0,t:0};});
+  arr.forEach(function(t){
+    var c=t.category||'Other';if(!map[c])map[c]={n:0,v:0,t:0};
+    if(t.type==='Issued'){map[c].n+=t.entrateNet;map[c].v+=t.entrateVat;map[c].t+=t.entrateTotal;}
+    else{map[c].n+=t.usciteNet;map[c].v+=t.usciteVat;map[c].t+=t.usciteTotal;}
+  });
+  var cr=[['Summary by Category'],['Category','Net (EUR)','VAT (EUR)','Total (EUR)']];
+  var tn=0,tv=0,tt=0;
+  cats.forEach(function(c){cr.push([c,map[c].n,map[c].v,map[c].t]);tn+=map[c].n;tv+=map[c].v;tt+=map[c].t;});
+  cr.push(['TOTAL',tn,tv,tt]);
+  var ws2=XLSX.utils.aoa_to_sheet(cr);
+  ws2['!cols']=[{wch:32},{wch:14},{wch:14},{wch:14}];
+  XLSX.utils.book_append_sheet(wb,ws2,'Category Summary');
+
+  var yr=new Date().getFullYear();
+  XLSX.writeFile(wb,'Invoice_Register_'+(name.replace(/\s+/g,'_')||'export')+'_'+yr+'.xlsx');
+}
+
+function exportCSV(){
+  if(!txs.length){alert('Nessuna transazione.');return;}
+  var h=['Date','Service Month','Type','Invoice #','Counterparty','Category','Country','VAT / Tax ID','Address','Description','Entrate Net','Entrate VAT','Entrate Total','Uscite Net','Uscite VAT','Uscite Total','Notes'];
+  var rows=txs.map(function(t){
+    return [t.date,t.serviceMonth,t.type,t.invoice,t.counterparty,t.category,t.country,t.vatId,t.address,t.description,t.entrateNet,t.entrateVat,t.entrateTotal,t.usciteNet,t.usciteVat,t.usciteTotal,t.notes]
+      .map(function(x){return '"'+String(x||'').replace(/"/g,'""')+'"';}).join(',');
+  });
+  var blob=new Blob(['\uFEFF'+[h.join(',')].concat(rows).join('\n')],{type:'text/csv;charset=utf-8;'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');a.href=url;a.download='invoice_register.csv';a.click();
+  URL.revokeObjectURL(url);
+}
+
+// helpers
+function v(id){return document.getElementById(id).value;}
+function set(id,val){var el=document.getElementById(id);if(el)el.value=val;}
+function num(id){return parseLocalNum(v(id));}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+function sum(field){return txs.reduce(function(s,t){return s+(t[field]||0);},0);}
+function fmt(n){return (n||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function fmtN(n){return n?fmt(n):'\u2014';}
+function today(){return new Date().toISOString().split('T')[0];}
+function maltaTax(c){
+  if(c<=9100)return 0;
+  if(c<=14500)return(c-9100)*.15;
+  if(c<=19500)return 810+(c-14500)*.25;
+  if(c<=60000)return 2060+(c-19500)*.25;
+  return 12235+(c-60000)*.35;
+}
+
+// ZIP
+function _buildZIP(arr,label){
+  if(!arr.length){alert('Nessuna fattura.');return;}
+  var zip=new JSZip();var folder=zip.folder('Fatture_'+label);
+  var wb=XLSX.utils.book_new();
+  var rows=[['Data','Svc Month','Tipo','Fattura #','Controparte','Categoria','Paese','Net EUR','VAT EUR','Tot EUR','Note']];
+  arr.forEach(function(t){rows.push([t.date,t.serviceMonth,t.type,t.invoice,t.counterparty,t.category,t.country,
+    t.type==='Issued'?t.entrateNet:t.usciteNet,t.type==='Issued'?t.entrateVat:t.usciteVat,
+    t.type==='Issued'?t.entrateTotal:t.usciteTotal,t.notes]);});
+  var ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[10,12,10,16,28,28,10,12,12,12,40].map(function(w){return{wch:w};});
+  XLSX.utils.book_append_sheet(wb,ws,'Registro');
+  folder.file('Registro_'+label+'.xlsx',XLSX.write(wb,{bookType:'xlsx',type:'array'}));
+  var missing=[];
+  arr.forEach(function(t){
+    var stored=localStorage.getItem('inv_file_'+t.id);
+    if(stored){try{
+      var f=JSON.parse(stored);
+      var inv=(t.invoice||'fattura').replace(/[\/\\:*?"<>|]/g,'-');
+      var cp=t.counterparty.slice(0,20).replace(/[\/\\:*?"<>|]/g,'-');
+      var bin=atob(f.b64);var bytes=new Uint8Array(bin.length);
+      for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+      folder.file(t.date+'_'+inv+'_'+cp+'.'+f.name.split('.').pop(),bytes);
+    }catch(e){missing.push(t.invoice||t.counterparty);}}
+    else missing.push(t.invoice||t.counterparty);
+  });
+  if(missing.length)folder.file('_FILE_MANCANTI.txt','File non allegati:\n'+missing.join('\n'));
+  zip.generateAsync({type:'blob'}).then(function(blob){
+    var url=URL.createObjectURL(blob);var a=document.createElement('a');
+    a.href=url;a.download='Fatture_'+label+'.zip';a.click();URL.revokeObjectURL(url);
+    showMsg('ZIP generato: '+arr.length+' fatture','success');
+  });
+}
+function exportZIP(){
+  // Use already-filtered transactions respecting period pills + year filter
+  var base=getFilteredTxs();
+  // Additional quarter filter from ZIP selector
+  var q=document.getElementById('zip-quarter')?document.getElementById('zip-quarter').value:'all';
+  var qM={Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
+  var arr=q==='all'?base:base.filter(function(t){var m=(t.date||'').slice(5,7);return qM[q]&&qM[q].indexOf(m)>=0;});
+  var label=q==='all'?(filterYear!=='all'?filterYear:'Anno'):q+(filterYear!=='all'?' '+filterYear:'');
+  _buildZIP(arr,label);
+}
+
+
+// ── MISSING FUNCTIONS RESTORED ───────────────────────────────────────────────
+
+async function refreshAllPrices(options){
+  options = options || {};
+  var btn=document.getElementById('refresh-btn');
+  if(btn){btn.disabled=true;btn.textContent='Aggiornamento...';}
+  var tickers=Array.from(new Set(positions.map(function(p){return p.ticker;})));
+  var batchSize = 4;
+  for(var i=0;i<tickers.length;i+=batchSize){
+    var batch = tickers.slice(i, i + batchSize);
+    await Promise.allSettled(batch.map(async function(ticker){
+      await fetchPrice(ticker,tradingPeriod,tradingPeriodInterval);
+      if(tradingPeriod !== '1d'){
+        await fetchPrice(ticker,'1d',PERIOD_INTERVALS['1d']);
+      }
+    }));
+    if(i + batchSize < tickers.length) await new Promise(function(r){setTimeout(r,120);});
+  }
+  if(btn){btn.disabled=false;btn.textContent='\u21BB Aggiorna prezzi';}
+  var upd=document.getElementById('last-update');
+  if(upd) upd.textContent='Aggiornato: '+new Date().toLocaleTimeString('it-IT');
+  renderPositions();
+  if(options.updateChart !== false) updatePortfolioChart();
+}
+
+function applyCustomTradingPeriod(){
+  var fromEl = document.getElementById('custom-period-from');
+  var toEl = document.getElementById('custom-period-to');
+  if(!fromEl || !toEl) return;
+  var from = fromEl.value;
+  var to = toEl.value;
+  if(!from || !to){
+    alert('Seleziona sia la data iniziale sia la data finale.');
+    return;
+  }
+  if(from > to){
+    alert('La data iniziale deve essere precedente o uguale alla data finale.');
+    return;
+  }
+  tradingCustomFrom = from;
+  tradingCustomTo = to;
+  setTradingPeriod('custom', document.querySelector('[data-range="custom"]'));
+}
+
+function syncPositionFilter(value){
+  var top = document.getElementById('pos-filter-type');
+  var table = document.getElementById('pos-filter-type-table');
+  if(top && top.value !== value) top.value = value;
+  if(table && table.value !== value) table.value = value;
+  renderPositions();
+}
+
+
+async function linkGuestIfNeeded(){
+  if(!currentUser) return;
+  try{
+    var email = currentUser.email;
+    var r = await sb.from('guest_access').select('id').eq('guest_email', email).is('guest_user_id', null);
+    if(r.data && r.data.length){
+      await sb.from('guest_access').update({guest_user_id: currentUser.id}).eq('guest_email', email).is('guest_user_id', null);
+    }
+  } catch(e){ console.log('linkGuestIfNeeded skipped:', e.message); }
+}
+
+// ══ GUEST PERMISSION SYSTEM ══════════════════════════════════════════════════
+
+async function checkGuestMode(){
+  if(!currentUser) return;
+  // Is this user a guest of someone?
+  var {data, error} = await sb.from('guest_access')
+    .select('*')
+    .eq('guest_user_id', currentUser.id)
+    .eq('active', true)
+    .maybeSingle();
+
+  if(!data) {
+    isGuestMode = false;
+    // Show user management section to admin
+    var gs = document.getElementById('guest-access-section');
+    if(gs) gs.style.display = '';
+    return;
+  }
+
+  isGuestMode = true;
+  adminUserId = data.admin_user_id;
+  guestPermissions = data.permissions || {};
+
+  // Show guest banner
+  var banner = document.getElementById('guest-banner');
+  if(banner){
+    banner.style.display = '';
+    var secs = guestPermissions.sections || {};
+    var acts = guestPermissions.actions  || {};
+    var visibleSecs = ['carica','registro','summary','trading'].filter(function(s){
+      return secs[s] !== false;
+    });
+    banner.innerHTML = '<b>Accesso ospite</b> — Stai visualizzando i dati in modalita limitata. '+
+      'Sezioni visibili: ' + visibleSecs.join(', ') + '.';
+  }
+
+  // Hide forbidden tab buttons
+  ['carica','registro','summary','trading','settings','utenti'].forEach(function(s){
+    var btn = document.getElementById('tab-btn-'+s);
+    if(btn) btn.style.display = canSeeSection(s) ? '' : 'none';
+  });
+
+  // Hide forbidden action buttons after render
+  setTimeout(applyGuestActionRestrictions, 500);
+}
+
+function canSeeSection(section){
+  if(!isGuestMode) return true;
+  var secs = guestPermissions.sections || {};
+  // Default: registro and summary visible, rest hidden
+  var defaults = {carica:false, registro:true, summary:true, trading:false, settings:false, utenti:false};
+  if(secs[section] === undefined) return defaults[section] || false;
+  return secs[section] === true;
+}
+
+function canDo(action){
+  if(!isGuestMode) return true;
+  var acts = guestPermissions.actions || {};
+  var defaults = {download:true, delete:false, edit:false, export:true, import:false};
+  if(acts[action] === undefined) return defaults[action] || false;
+  return acts[action] === true;
+}
+
+function applyGuestActionRestrictions(){
+  if(!isGuestMode) return;
+  if(!canDo('delete')){
+    document.querySelectorAll('.btn-danger').forEach(function(b){ b.style.display='none'; });
+  }
+  if(!canDo('edit')){
+    document.querySelectorAll('.btn-edit').forEach(function(b){ b.style.display='none'; });
+    var selBar = document.getElementById('sel-bar');
+    if(selBar) selBar.style.display = 'none';
+  }
+  if(!canDo('export')){
+    document.querySelectorAll('[onclick*="exportXLSX"],[onclick*="exportZIP"],[onclick*="exportSelected"]')
+      .forEach(function(b){ b.style.display='none'; });
+  }
+  if(!canDo('download')){
+    document.querySelectorAll('[onclick*="downloadInvoiceFile"],[onclick*="viewInvoiceFile"]')
+      .forEach(function(b){ b.style.display='none'; });
+  }
+  // Hide utenti tab for guests always
+  var ut = document.getElementById('tab-btn-utenti');
+  if(ut) ut.style.display = 'none';
+  var utDiv = document.getElementById('tab-utenti');
+  if(utDiv) utDiv.style.display = 'none';
+}
+
+// ── INVOICE PERIOD FILTER FOR GUESTS ─────────────────────────────────────────
+function guestFilterInvoices(arr){
+  if(!isGuestMode) return arr;
+  var p = guestPermissions;
+  if(!p.period_from && !p.period_to) return arr;
+  return arr.filter(function(t){
+    var d = t.date || '';
+    if(p.period_from && d < p.period_from) return false;
+    if(p.period_to   && d > p.period_to)   return false;
+    return true;
+  });
+}
+
+
+
+function drawSparkline(closes, width, height, color){
+  if(!closes || closes.length < 2) return '';
+  var valid = closes.filter(function(c){ return c !== null && !isNaN(c); }).slice(-30);
+  if(valid.length < 2) return '';
+  var mn = Math.min.apply(null, valid);
+  var mx = Math.max.apply(null, valid);
+  var rng = mx - mn || 1;
+  var pts = valid.map(function(c, i){
+    var x = (i / (valid.length - 1) * width).toFixed(1);
+    var y = (height - (c - mn) / rng * height).toFixed(1);
+    return x + ',' + y;
+  }).join(' ');
+  return '<svg width="'+width+'" height="'+height+'"><polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5"/></svg>';
+}
+
+
+// ── ISIN TO TICKER CONVERSION ─────────────────────────────────────────────────
+// Uses OpenFIGI API (free, no key needed) to convert ISIN → Yahoo Finance ticker
+
+var isinCache = JSON.parse(localStorage.getItem('isin_cache') || '{}');
+var isinConversionDone = false;
+var tradingSortField = 'ticker';
+var tradingSortDir = 1;
+
+async function isinToTicker(isin){
+  // Return if already cached
+  if(isinCache[isin]) return isinCache[isin];
+
+  // Manual map for common ISINs (instant, no API call needed)
+  var manual = {
+    'US0378331005':'AAPL',   'US88160R1014':'TSLA',   'US5949181045':'MSFT',
+    'US0231351067':'AMZN',   'US30303M1027':'META',   'US02079K3059':'GOOGL',
+    'US0846707026':'BRK-B',  'US92826C8394':'V',      'US57636Q1040':'MA',
+    'US1912161007':'KO',     'US4592001014':'IBM',     'US67066G1040':'NVDA',
+    'US70450Y1038':'PYPL',   'US0090661010':'ABNB',   'US4370761029':'HD',
+    'US4781601046':'JNJ',    'US91324P1021':'UNH',     'US7170811035':'PFE',
+    'US7475251036':'QCOM',   'US5128071082':'LLY',     'US1491231015':'CSCO',
+    'NL0010273215':'ASML.AS','GB0005405286':'BP.L',    'FR0000131104':'BNP.PA',
+    'DE0005140008':'DBK.DE', 'CH0012221716':'ABB.SW',  'GB00B10RZP78':'ULVR.L',
+    'IE00B4BNMY34':'IWDA.AS','IE00B5BMR087':'CSPX.L',  'IE00B3WJKG14':'EUNL.DE',
+    'LU0274208692':'VUSA.DE','IE00B3RBWM25':'VWRL.AS', 'IE00B52MJY50':'IUSA.DE',
+    'US9229087690':'VTI',    'US9219097683':'VT',      'US4642874329':'IVV',
+    'US4642872265':'IJH',    'US46432F8419':'EEM',     'IE00BWT6H894':'FLTR.L',
+    'US5949724083':'MSTR'
+  };
+  if(manual[isin]) {
+    isinCache[isin] = manual[isin];
+    saveIsinCache();
+    return manual[isin];
+  }
+
+  // Try OpenFIGI API via CORS proxy
+  try{
+    var figiBody = JSON.stringify([{idType: 'ID_ISIN', idValue: isin}]);
+    var figiUrl  = 'https://api.openfigi.com/v3/mapping';
+    var proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(figiUrl);
+    var resp = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: figiBody
+    });
+    if(resp.ok){
+      var data = await resp.json();
+      if(data[0] && data[0].data && data[0].data.length){
+        var exchMap = {'LN':'L','NA':'AS','GR':'DE','FP':'PA','SW':'SW','IM':'MI','SM':'MC','EB':'BR'};
+        for(var i=0; i<data[0].data.length; i++){
+          var t    = data[0].data[i].ticker;
+          var exch = data[0].data[i].exchCode || '';
+          if(t){
+            var suffix = exchMap[exch] ? '.'+exchMap[exch] : '';
+            var yahooTicker = t + suffix;
+            isinCache[isin] = yahooTicker;
+            saveIsinCache();
+            console.log('ISIN', isin, '->', yahooTicker, 'via OpenFIGI');
+            return yahooTicker;
+          }
+        }
+      }
+    }
+  } catch(e){ console.warn('OpenFIGI failed for', isin, e.message); }
+
+  // Fallback: use ISIN as-is (will fail price lookup but at least stores data)
+  console.warn('Could not convert ISIN:', isin);
+  return null;
+}
+
+function saveIsinCache(){
+  try{ localStorage.setItem('isin_cache', JSON.stringify(isinCache)); } catch(e){}
+}
+
+function isISIN(str){
+  return /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(str.trim());
+}
+
+
+async function testApiKey(){
+  var apiKey = (localStorage.getItem('inv_key')||'').trim();
+  if(!apiKey){ alert('Nessuna API key inserita in Impostazioni.'); return; }
+  var btn = document.getElementById('test-key-btn');
+  if(btn){ btn.disabled=true; btn.textContent='Test in corso...'; }
+  try{
+    var resp = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model:'claude-sonnet-4-6',
+        max_tokens:10,
+        messages:[{role:'user',content:'Hi'}]
+      })
+    });
+    var data = await resp.json();
+    if(resp.ok){
+      alert('✅ API Key VALIDA!\nModello: '+data.model+'\nRisposta: '+data.content[0].text);
+    } else {
+      alert('❌ API Key NON VALIDA\nErrore '+resp.status+': '+(data.error&&data.error.message||'unknown')+
+        '\n\nSoluzione: genera una nuova chiave su console.anthropic.com → API Keys → Create Key');
+    }
+  } catch(e){
+    alert('Errore di rete: '+e.message);
+  }
+  if(btn){ btn.disabled=false; btn.textContent='&#128273; Testa API Key'; }
+}
+
+// INIT — tutto dentro DOMContentLoaded per garantire che le variabili siano pronte
+document.addEventListener('DOMContentLoaded', function(){
+  updateAmountSections();
+  var customFromEl = document.getElementById('custom-period-from');
+  var customToEl = document.getElementById('custom-period-to');
+  if(customFromEl && customToEl){
+    var today = new Date();
+    var past = new Date(today.getTime() - 30*24*60*60*1000);
+    customToEl.value = today.toISOString().slice(0,10);
+    customFromEl.value = past.toISOString().slice(0,10);
+  }
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeEditModal(); });
+  var dz=document.getElementById('dropzone');
+  if(dz){
+    dz.addEventListener('dragover',  function(e){ e.preventDefault(); dz.classList.add('drag'); });
+    dz.addEventListener('dragleave', function(){ dz.classList.remove('drag'); });
+    dz.addEventListener('drop',      function(e){ e.preventDefault(); dz.classList.remove('drag'); var f=e.dataTransfer.files[0]; if(f) handleFile(f); });
+  }
+
+  // Auth — inizializzato dopo il DOM per garantire scope corretto
+  sb.auth.onAuthStateChange(function(event, session){
+    if(event==='SIGNED_IN' && session){
+      currentUser = session.user;
+      if(!window.appStarted) showApp();
+    }
+    if(event==='SIGNED_OUT'){ currentUser=null; window.appStarted=false;
+var validatedDupIds=new Set(JSON.parse(localStorage.getItem('inv_valid_dups')||'[]')); }
+  });
+
+  sb.auth.getSession().then(function(r){
+    if(r.data && r.data.session){
+      currentUser = r.data.session.user;
+      showApp();
+    } else {
+      document.getElementById('lock-screen').style.display='flex';
+      document.getElementById('app-content').style.display='none';
+    }
+  });
+});
+
+
+// ============================================================
+// UTENTI (USER MANAGEMENT) - Tab dedicato
+// ============================================================
+
+function togglePwdVisibility(){
+  var inp=document.getElementById('invite-password');
+  var eye=document.getElementById('pwd-eye');
+  if(!inp)return;
+  inp.type=inp.type==='password'?'text':'password';
+  if(eye)eye.textContent=inp.type==='password'?'\u{1F441}':'\u{1F648}';
+}
+function openInviteModal(){
+  document.getElementById('invite-email').value='';
+  document.getElementById('inv-period-from').value='';
+  document.getElementById('inv-period-to').value='';
+  // Reset checkboxes to defaults
+  document.querySelectorAll('.inv-sec').forEach(function(cb){
+    cb.checked=['registro','summary'].indexOf(cb.dataset.key)>=0;
+  });
+  document.querySelectorAll('.inv-act').forEach(function(cb){
+    cb.checked=['export','download'].indexOf(cb.dataset.key)>=0;
+  });
+  document.getElementById('invite-modal').style.display='flex';
+  setTimeout(function(){document.getElementById('invite-email').focus();},100);
+}
+function closeInviteModal(){
+  document.getElementById('invite-modal').style.display='none';
+}
+
+async function submitInvite(){
+  var email=(document.getElementById('invite-email').value||'').trim();
+  var pwd=(document.getElementById('invite-password').value||'').trim();
+  if(!email){alert('Inserisci la email.');return;}
+  if(!pwd||pwd.length<6){alert('La password deve essere di almeno 6 caratteri.');return;}
+
+  // Build permissions
+  var sections={};
+  document.querySelectorAll('.inv-sec').forEach(function(cb){sections[cb.dataset.key]=cb.checked;});
+  var actions={};
+  document.querySelectorAll('.inv-act').forEach(function(cb){actions[cb.dataset.key]=cb.checked;});
+  var periodFrom=document.getElementById('inv-period-from').value||null;
+  var periodTo=document.getElementById('inv-period-to').value||null;
+  var perms={sections:sections,actions:actions,period_from:periodFrom,period_to:periodTo};
+
+  // Check existing
+  var {data:existing}=await sb.from('guest_access').select('id').eq('admin_user_id',currentUser.id).eq('guest_email',email);
+  if(existing&&existing.length){alert('Utente gia presente con questa email.');return;}
+
+  // Create user account using a temporary Supabase client
+  // (so the admin session is not affected)
+  var tmpClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{
+    auth:{storageKey:'tmp_auth_'+Date.now(),autoRefreshToken:false,persistSession:false}
+  });
+  var {data:signUpData,error:signUpErr}=await tmpClient.auth.signUp({email:email,password:pwd});
+  if(signUpErr){
+    alert('Errore creazione account: '+signUpErr.message);return;
+  }
+  var guestUserId=signUpData&&signUpData.user?signUpData.user.id:null;
+
+  // Save to guest_access
+  var {error:gaErr}=await sb.from('guest_access').insert({
+    admin_user_id:currentUser.id,
+    guest_email:email,
+    guest_user_id:guestUserId,
+    permissions:perms,
+    active:true
+  });
+  if(gaErr){alert('Account creato ma errore salvataggio permessi: '+gaErr.message);return;}
+
+  closeInviteModal();
+  // Show credentials to admin
+  setTimeout(function(){
+    alert('Utente creato!\n\nCredenziali da comunicare:\nEmail: '+email+'\nPassword: '+pwd+'\n\nL utente accede direttamente con queste credenziali.');
+  },200);
+  loadUtenti();
+}
+
+async function loadUtenti(){
+  if(isGuestMode) return;
+  var el = document.getElementById('utenti-list');
+  if(!el) return;
+
+  var {data, error} = await sb.from('guest_access')
+    .select('*').eq('admin_user_id', currentUser.id).order('created_at');
+
+  if(!data || !data.length){
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3)">'+
+      '<div style="font-size:32px;margin-bottom:10px">&#128101;</div>'+
+      '<p>Nessun utente invitato. Clicca "+ Invita utente" per iniziare.</p></div>';
+    return;
+  }
+
+  var secLabels = {carica:'Carica fattura', registro:'Registro', summary:'Summary & Tax',
+                   trading:'Trading', settings:'Impostazioni'};
+  var actLabels = {export:'Esporta', download:'Scarica allegati', edit:'Modifica',
+                   delete:'Elimina', import:'Importa CSV'};
+
+  // Quarter presets
+  var now = new Date();
+  var yr  = now.getFullYear();
+  var quarters = [
+    {label:'Q1 '+yr, from:yr+'-01-01', to:yr+'-03-31'},
+    {label:'Q2 '+yr, from:yr+'-04-01', to:yr+'-06-30'},
+    {label:'Q3 '+yr, from:yr+'-07-01', to:yr+'-09-30'},
+    {label:'Q4 '+yr, from:yr+'-10-01', to:yr+'-12-31'},
+    {label:'Anno '+(yr-1), from:(yr-1)+'-01-01', to:(yr-1)+'-12-31'},
+    {label:'Anno '+yr,     from:yr+'-01-01',     to:yr+'-12-31'},
+    {label:'Tutti',        from:null,             to:null}
+  ];
+
+  el.innerHTML = data.map(function(g){
+    var p    = g.permissions || {};
+    var secs = p.sections || {};
+    var acts = p.actions  || {};
+    var linked = !!g.guest_user_id;
+    var statusColor = g.active ? 'var(--green)' : 'var(--text3)';
+    var statusBg    = g.active ? 'rgba(22,163,74,0.1)' : 'var(--surface2)';
+    var statusLabel = !linked ? 'In attesa' : g.active ? 'Attivo' : 'Disattivato';
+
+    function toggle(type, key, val){
+      var on = val;
+      return '<label style="position:relative;display:inline-block;width:36px;height:20px;cursor:pointer">'+
+        '<input type="checkbox" '+(on?'checked':'')+' style="opacity:0;width:0;height:0" '+
+          'data-gid="'+g.id+'" data-sec="'+type+'" data-key="'+key+'" onchange="handlePermChange(this)">'+
+        '<span style="position:absolute;inset:0;border-radius:10px;background:'+(on?'var(--accent)':'#d1d5db')+
+          ';transition:.2s"><span style="position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;'+
+          'top:2px;transition:.2s;'+(on?'right:2px':'left:2px')+'"></span></span>'+
+        '</label>';
+    }
+
+    var qPresets = quarters.map(function(q){
+      var isCurrent = (p.period_from===q.from && p.period_to===q.to) ||
+                      (!q.from && !p.period_from && !p.period_to);
+      return '<button onclick="applyPeriodPreset('+g.id+',\''+q.from+'\',\''+q.to+'\')" '+
+        'style="padding:3px 10px;border-radius:20px;font-size:10.5px;cursor:pointer;border:1.5px solid '+
+        (isCurrent?'var(--accent)':'var(--border)')+ ';background:'+(isCurrent?'var(--accent)':'var(--surface2)')+
+        ';color:'+(isCurrent?'#fff':'var(--text2)')+';margin:2px">'+q.label+'</button>';
+    }).join('');
+
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);'+
+        'padding:18px 20px;margin-bottom:14px;box-shadow:var(--shadow)">'
+      // Header
+      +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">'
+        +'<div style="font-size:30px">&#128100;</div>'
+        +'<div><div style="font-weight:700;font-size:14px">'+g.guest_email+'</div>'
+          +'<div style="font-size:11px;color:var(--text3);margin-top:2px">'
+            +(p.period_from||p.period_to
+              ? 'Periodo: '+(p.period_from||'inizio')+' → '+(p.period_to||'oggi')
+              : 'Accesso: tutti i periodi')
+          +'</div></div>'
+        +'<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;'+
+          'background:'+statusBg+';color:'+statusColor+';border:1px solid '+statusColor+
+          ';margin-left:auto">'+statusLabel+'</span>'
+      +'</div>'
+      // Permissions grid
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'
+        +'<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px 14px">'
+          +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);'+
+            'letter-spacing:.5px;margin-bottom:8px">Sezioni visibili</div>'
+          +Object.keys(secLabels).map(function(k){
+            var on = secs[k]!==undefined ? secs[k] : (k==='registro'||k==='summary');
+            return '<div style="display:flex;align-items:center;justify-content:space-between;'+
+              'padding:5px 0;font-size:12px"><span>'+secLabels[k]+'</span>'+toggle('sections',k,on)+'</div>';
+          }).join('')
+        +'</div>'
+        +'<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px 14px">'
+          +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);'+
+            'letter-spacing:.5px;margin-bottom:8px">Azioni consentite</div>'
+          +Object.keys(actLabels).map(function(k){
+            var on = acts[k]!==undefined ? acts[k] : (k==='export'||k==='download');
+            return '<div style="display:flex;align-items:center;justify-content:space-between;'+
+              'padding:5px 0;font-size:12px"><span>'+actLabels[k]+'</span>'+toggle('actions',k,on)+'</div>';
+          }).join('')
+        +'</div>'
+      +'</div>'
+      // Period filter
+      +'<div style="margin-bottom:14px;padding:12px 14px;background:var(--surface2);border-radius:var(--radius-sm)">'
+        +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);'+
+          'letter-spacing:.5px;margin-bottom:8px">Filtro periodo fatture</div>'
+        +'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">'+qPresets+'</div>'
+        +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+          +'<span style="font-size:11px;color:var(--text2)">Personalizzato:</span>'
+          +'<input type="date" value="'+(p.period_from||'')+'" '
+            +'data-gid="'+g.id+'" data-field="period_from" onchange="handlePeriodChange(this)" '
+            +'style="font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--border);'+
+            'background:var(--surface);color:var(--text)">'
+          +'<span style="color:var(--text3)">→</span>'
+          +'<input type="date" value="'+(p.period_to||'')+'" '
+            +'data-gid="'+g.id+'" data-field="period_to" onchange="handlePeriodChange(this)" '
+            +'style="font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--border);'+
+            'background:var(--surface);color:var(--text)">'
+          +'<button onclick="applyPeriodPreset('+g.id+',null,null)" '
+            +'style="font-size:10.5px;padding:3px 10px;border-radius:20px;border:1px solid var(--border);'+
+            'background:var(--surface);cursor:pointer;color:var(--text2)">Rimuovi filtro</button>'
+        +'</div>'
+      +'</div>'
+      // Action buttons
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+        +'<button class="btn '+(g.active?'btn-secondary':'btn-primary')+'" style="font-size:11px" '
+          +'onclick="toggleUtenteActive('+g.id+','+(g.active?'false':'true')+')">'
+          +(g.active?'Disattiva accesso':'Riattiva accesso')+'</button>'
+        +(!linked?'<span style="font-size:11px;color:var(--text3);display:flex;align-items:center">'+
+          'Condividi il link del sito con questo utente</span>':'')
+        +'<button class="btn btn-danger" style="font-size:11px;margin-left:auto" '
+          +'onclick="removeUtente('+g.id+')">Rimuovi</button>'
+      +'</div>'
+    +'</div>';
+  }).join('');
+}
+
+async function applyPeriodPreset(id, from, to){
+  var {data} = await sb.from('guest_access').select('permissions').eq('id',id).single();
+  if(!data) return;
+  var p = data.permissions || {};
+  p.period_from = from;
+  p.period_to   = to;
+  await sb.from('guest_access').update({permissions:p}).eq('id',id);
+  loadUtenti();
+}
+
+function handlePermChange(cb){
+  updateUtentePerm(parseInt(cb.dataset.gid), cb.dataset.sec, cb.dataset.key, cb.checked);
+}
+
+function handlePeriodChange(el){
+  updateUtentePeriod(parseInt(el.dataset.gid), el.dataset.field, el.value);
+}
+
+async function updateUtentePerm(id, section, key, val){
+  var {data} = await sb.from('guest_access').select('permissions').eq('id',id).single();
+  if(!data) return;
+  var p = data.permissions || {};
+  if(!p[section]) p[section] = {};
+  p[section][key] = val;
+  await sb.from('guest_access').update({permissions:p}).eq('id',id);
+}
+
+async function updateUtentePeriod(id, field, val){
+  var {data} = await sb.from('guest_access').select('permissions').eq('id',id).single();
+  if(!data) return;
+  var p = data.permissions || {};
+  p[field] = val || null;
+  await sb.from('guest_access').update({permissions:p}).eq('id',id);
+}
+
+async function toggleUtenteActive(id, active){
+  await sb.from('guest_access').update({active:active}).eq('id',id);
+  loadUtenti();
+}
+
+async function removeUtente(id){
+  if(!confirm('Rimuovere questo utente? Perdera immediatamente l accesso.')) return;
+  await sb.from('guest_access').delete().eq('id',id);
+  loadUtenti();
+}
+
+
+
+function handlePermChange(cb){
+  var id=parseInt(cb.dataset.gid);
+  var section=cb.dataset.sec;
+  var key=cb.dataset.key;
+  updateUtentePerm(id,section,key,cb.checked);
+}
+async function updateUtentePerm(id,section,key,val){
+  var {data}=await sb.from('guest_access').select('permissions').eq('id',id).single();
+  if(!data)return;
+  var p=data.permissions||{};
+  if(!p[section])p[section]={};
+  p[section][key]=val;
+  await sb.from('guest_access').update({permissions:p}).eq('id',id);
+  // Re-render to update toggle visuals
+  loadUtenti();
+}
+
+function handlePeriodChange(el){
+  updateUtentePeriod(parseInt(el.dataset.gid), el.dataset.field, el.value);
+}
+async function updateUtentePeriod(id,field,val){
+  var {data}=await sb.from('guest_access').select('permissions').eq('id',id).single();
+  if(!data)return;
+  var p=data.permissions||{};
+  p[field]=val||null;
+  await sb.from('guest_access').update({permissions:p}).eq('id',id);
+}
+
+async function toggleUtenteActive(id,active){
+  await sb.from('guest_access').update({active:active}).eq('id',id);
+  loadUtenti();
+}
+
+async function removeUtente(id){
+  if(!confirm('Rimuovere questo utente? Perdera immediatamente l accesso.'))return;
+  await sb.from('guest_access').delete().eq('id',id);
+  loadUtenti();
+}
+
+// Keep backward compatibility aliases
+async function inviteGuest(){ submitInvite(); }
+async function loadGuestList(){ loadUtenti(); }
+
+
+// ============================================================
+// TRADING SECTION
+// ============================================================
+
+var positions = [];
+var priceCache = {};
+var txType = 'buy';
+var tradingPeriod = '1d';
+var tradingPeriodInterval = '5m';
+var tradingCustomFrom = null;
+var tradingCustomTo = null;
+var selectedPosTickers = new Set();
+var PERIOD_LABELS = {'1d':'1 Giorno','5d':'1 Settimana','1mo':'1 Mese','3mo':'3 Mesi','6mo':'6 Mesi','1y':'1 Anno','5y':'5 Anni','custom':'Personalizzato'};
+var PERIOD_INTERVALS = {'1d':'5m','5d':'60m','1mo':'1d','3mo':'1d','6mo':'1d','1y':'1wk','5y':'1mo'};
+var LEGACY_TICKER_MAP = {'PPB.DE':'FLTR.L','MIGA.DE':'MSTR'};
+// ── FX RATES (convert all to EUR) ────────────────────────────────────────────
+var fxRates = {EUR:1, USD:1, GBP:1, CHF:1, JPY:1}; // defaults, updated live
+var fxLastFetch = 0;
+var IMPORT_META_PREFIX = '[[IMPORT_META]]';
+
+function round2(v){
+  return Math.round((parseFloat(v) || 0) * 100) / 100;
+}
+
+function getPositionImportMeta(notes){
+  if(!notes || typeof notes !== 'string') return null;
+  var idx = notes.indexOf(IMPORT_META_PREFIX);
+  if(idx < 0) return null;
+  var raw = notes.slice(idx + IMPORT_META_PREFIX.length).trim();
+  if(!raw) return null;
+  try{ return JSON.parse(raw); } catch(e){ return null; }
+}
+
+function stripPositionImportMeta(notes){
+  if(!notes || typeof notes !== 'string') return '';
+  var idx = notes.indexOf(IMPORT_META_PREFIX);
+  return (idx >= 0 ? notes.slice(0, idx) : notes).trim();
+}
+
+function mergePositionImportMeta(userNotes, meta){
+  var clean = stripPositionImportMeta(userNotes || '');
+  if(!meta) return clean;
+  var payload = IMPORT_META_PREFIX + JSON.stringify(meta);
+  return clean ? (clean + '\n' + payload) : payload;
+}
+
+function normalizeImportedCurrency(cur, isin){
+  var c = (cur || '').toUpperCase();
+  var securityIsin = (isin || '').toUpperCase();
+  if(c === '$' || c === 'DOLLAR') c = 'USD';
+  if(c === 'USD'){
+    if(/^CA/.test(securityIsin)) return 'CAD';
+    if(/^CH/.test(securityIsin)) return 'CHF';
+    if(/^AU/.test(securityIsin)) return 'AUD';
+    if(/^HK/.test(securityIsin)) return 'HKD';
+    if(/^SG/.test(securityIsin)) return 'SGD';
+  }
+  return c || 'USD';
+}
+
+function normalizeTickerSymbol(ticker){
+  var key = String(ticker || '').trim().toUpperCase();
+  return LEGACY_TICKER_MAP[key] || key;
+}
+
+function getTradingLabel(){
+  if(tradingPeriod !== 'custom') return PERIOD_LABELS[tradingPeriod] || tradingPeriod;
+  if(tradingCustomFrom && tradingCustomTo) return tradingCustomFrom + ' → ' + tradingCustomTo;
+  return PERIOD_LABELS.custom;
+}
+
+function getTradingCacheKey(ticker, range){
+  var norm = normalizeTickerSymbol(ticker);
+  if(range === 'custom'){
+    return norm + '_custom_' + (tradingCustomFrom || 'start') + '_' + (tradingCustomTo || 'end');
+  }
+  return norm + '_' + (range || tradingPeriod || '1d');
+}
+
+function setCustomPeriodControlsVisible(show){
+  var box = document.getElementById('custom-period-controls');
+  if(box) box.style.display = show ? 'flex' : 'none';
+}
+
+function filterSeriesByCustomRange(timestamps, closes){
+  if(tradingPeriod !== 'custom' || !tradingCustomFrom || !tradingCustomTo) return null;
+  var fromTs = new Date(tradingCustomFrom + 'T00:00:00').getTime();
+  var toTs = new Date(tradingCustomTo + 'T23:59:59').getTime();
+  var filtered = [];
+  for(var i=0; i<Math.min((timestamps || []).length, (closes || []).length); i++){
+    var ts = (timestamps[i] || 0) * 1000;
+    var close = closes[i];
+    if(ts >= fromTs && ts <= toTs && close !== null && !isNaN(close)){
+      filtered.push({ts: ts, close: close});
+    }
+  }
+  return filtered;
+}
+
+function buildSeriesPoints(timestamps, closes){
+  var points = [];
+  for(var i=0; i<Math.min((timestamps || []).length, (closes || []).length); i++){
+    var close = closes[i];
+    if(close !== null && !isNaN(close)){
+      points.push({ts:(timestamps[i] || 0) * 1000, close:close});
+    }
+  }
+  return points;
+}
+
+function getRangeStartTs(range, referenceTs){
+  var d = new Date(referenceTs || Date.now());
+  if(range === '5d') d.setDate(d.getDate() - 7);
+  else if(range === '1mo') d.setMonth(d.getMonth() - 1);
+  else if(range === '3mo') d.setMonth(d.getMonth() - 3);
+  else if(range === '6mo') d.setMonth(d.getMonth() - 6);
+  else if(range === '1y') d.setFullYear(d.getFullYear() - 1);
+  else if(range === '5y') d.setFullYear(d.getFullYear() - 5);
+  else if(range === '1d') d.setDate(d.getDate() - 1);
+  return d.getTime();
+}
+
+function selectSeriesForRange(range, timestamps, closes){
+  var points = buildSeriesPoints(timestamps, closes);
+  if(!points.length) return [];
+  if(range === 'custom'){
+    var custom = filterSeriesByCustomRange(timestamps, closes);
+    return custom || [];
+  }
+  if(range === '1d') return points;
+  var refTs = points[points.length - 1].ts;
+  var targetTs = getRangeStartTs(range, refTs);
+  var startIdx = 0;
+  for(var i=0; i<points.length; i++){
+    if(points[i].ts <= targetTs) startIdx = i;
+    if(points[i].ts > targetTs) break;
+  }
+  return points.slice(startIdx);
+}
+
+function getFetchRangeForPeriod(range){
+  if(range === '1d') return '5d';
+  if(range === '5d') return '1mo';
+  if(range === '1mo') return '3mo';
+  if(range === '3mo') return '6mo';
+  if(range === '6mo') return '1y';
+  if(range === '1y') return '2y';
+  if(range === '5y') return '10y';
+  if(range === 'custom') return 'max';
+  return range || '1mo';
+}
+
+function getFetchIntervalForPeriod(range){
+  if(range === '5y') return '1wk';
+  if(range === 'custom') return '1d';
+  return '1d';
+}
+
+function detectAssetType(name, ticker, isin){
+  var text = ((name || '') + ' ' + (ticker || '')).toLowerCase();
+  var code = String(isin || '').toUpperCase();
+  if(text.indexOf('etf') >= 0 || text.indexOf('ucits') >= 0 || text.indexOf('ishares') >= 0 || text.indexOf('vanguard') >= 0){
+    return 'etf';
+  }
+  if(text.indexOf('bond') >= 0 || text.indexOf('treasury') >= 0){
+    return 'bond';
+  }
+  if(text.indexOf('crypto') >= 0 || text.indexOf('bitcoin') >= 0 || text.indexOf('ethereum') >= 0){
+    return 'crypto';
+  }
+  if(text.indexOf('gold') >= 0 || text.indexOf('silver') >= 0 || text.indexOf('commodity') >= 0){
+    return 'commodity';
+  }
+  if(code.indexOf('IE00') === 0 || code.indexOf('LU') === 0){
+    if(text.indexOf('etf') >= 0 || text.indexOf('ucits') >= 0 || text.indexOf('fund') >= 0 || text.indexOf('index') >= 0){
+      return 'etf';
+    }
+  }
+  if(name || ticker) return 'stock';
+  return 'other';
+}
+
+async function fetchFXRates(){
+  if(Date.now() - fxLastFetch < 3600000) return; // refresh every hour
+  try{
+    // Use corsproxy to get rates from exchangerate-api (free, no key)
+    var url = 'https://api.exchangerate-api.com/v4/latest/EUR';
+    var resp = await fetch('https://corsproxy.io/?' + encodeURIComponent(url));
+    if(!resp.ok) throw new Error('FX fetch failed');
+    var data = await resp.json();
+    if(data.rates){
+      // We want rate TO convert FROM currency TO EUR
+      // data.rates['USD'] = how many USD per 1 EUR
+      // So to convert X USD to EUR: X / data.rates['USD']
+      fxRates = data.rates;
+      fxRates.EUR = 1;
+      fxLastFetch = Date.now();
+      console.log('FX rates updated:', {USD:fxRates.USD, GBP:fxRates.GBP, CHF:fxRates.CHF});
+    }
+  } catch(e){
+    console.warn('FX fetch failed, using fallback rates:', e.message);
+    // Fallback approximate rates (EUR base)
+    fxRates = {EUR:1, USD:1.08, GBP:0.86, CHF:0.97, JPY:163, CAD:1.47, AUD:1.65};
+  }
+}
+
+function toEUR(amount, currency){
+  if(!currency || currency === 'EUR') return amount;
+  var rate = fxRates[currency.toUpperCase()];
+  if(!rate) return amount; // unknown currency, return as-is
+  // fxRates[USD] = 1.08 means 1 EUR = 1.08 USD, so USD->EUR = amount / 1.08
+  return amount / rate;
+}
+
+function normalizeQuoteCurrency(currency){
+  var cur = String(currency || 'USD');
+  if(cur === 'GBp' || cur === 'GBX') return {currency:'GBP', divisor:100};
+  if(cur === 'ZAc') return {currency:'ZAR', divisor:100};
+  return {currency:cur, divisor:1};
+}
+
+
+
+// Trading tab handled in main showTab
+
+// ── DB: positions ─────────────────────────────────────────────────────────────
+async function convertExistingISINs(){
+  // Convert any existing positions that have ISINs as tickers
+  var toConvert = positions.filter(function(p){ return isISIN(p.ticker); });
+  if(!toConvert.length) return;
+  showMsg('Conversione ISIN per ' + toConvert.length + ' titoli...', 'success');
+  for(var i=0; i<toConvert.length; i++){
+    var p = toConvert[i];
+    var converted = await isinToTicker(p.ticker);
+    if(converted && converted !== p.ticker){
+      await sb.from('trading_positions').update({ticker: converted}).eq('id', p.id);
+      console.log('Converted', p.ticker, '->', converted);
+    }
+    await new Promise(function(r){ setTimeout(r, 200); }); // rate limit
+  }
+  // Reload after conversions
+  var uid = isGuestMode ? adminUserId : currentUser.id;
+  var {data} = await sb.from('trading_positions').select('*').eq('user_id', uid).order('created_at');
+  positions = data || [];
+  renderPositions();
+}
+
+async function loadPositions(){
+  await fetchFXRates(); // ensure FX rates are fresh
+  var uid = isGuestMode ? adminUserId : currentUser.id;
+  var {data,error} = await sb.from('trading_positions').select('*').eq('user_id', uid).order('created_at');
+  if(error){ console.error(error); return; }
+  positions = data || [];
+  for(var pi=0; pi<positions.length; pi++){
+    var pos = positions[pi];
+    var normalizedTicker = normalizeTickerSymbol(pos.ticker);
+    var normalizedType = detectAssetType(pos.name, normalizedTicker, pos.isin || pos.ticker);
+    var updateRow = {};
+    if(normalizedTicker !== pos.ticker){
+      updateRow.ticker = normalizedTicker;
+      pos.ticker = normalizedTicker;
+    }
+    if((!pos.asset_type || pos.asset_type === 'stock' || pos.asset_type === 'other') && normalizedType !== pos.asset_type){
+      updateRow.asset_type = normalizedType;
+      pos.asset_type = normalizedType;
+    }
+    if(Object.keys(updateRow).length){
+      await sb.from('trading_positions').update(updateRow).eq('id', pos.id);
+    }
+  }
+  // Auto-convert ISINs (only once per session)
+  var hasISINs = positions.some(function(p){ return isISIN(p.ticker); });
+  if(hasISINs && !isinConversionDone){
+    isinConversionDone = true;
+    await convertExistingISINs();
+    var r2 = await sb.from('trading_positions').select('*').eq('user_id', uid).order('created_at');
+    positions = r2.data || [];
+  }
+  renderPositions();
+  if(positions.length > 0){
+    refreshAllPrices().then(function(){ updatePortfolioChart(); });
+  }
+}
+
+async function savePosition(){
+  var id = document.getElementById('pos-edit-id').value;
+  var existing = id ? positions.find(function(x){ return String(x.id) === String(id); }) : null;
+  var importMeta = existing ? getPositionImportMeta(existing.notes) : null;
+  var row = {
+    user_id:   currentUser.id,
+    ticker:    document.getElementById('pos-ticker').value.trim().toUpperCase(),
+    name:      document.getElementById('pos-name').value.trim(),
+    asset_type:document.getElementById('pos-type').value,
+    quantity:  parseFloat(document.getElementById('pos-qty').value)||0,
+    avg_buy_price: parseFloat(document.getElementById('pos-avgprice').value)||0,
+    currency:  document.getElementById('pos-currency').value,
+    notes:     mergePositionImportMeta(document.getElementById('pos-notes').value.trim(), importMeta)
+  };
+  if(!row.ticker){ alert('Inserisci il Ticker Symbol.'); return; }
+  var {error} = id
+    ? await sb.from('trading_positions').update(row).eq('id', id)
+    : await sb.from('trading_positions').insert(row);
+  if(error){ alert('Errore: '+error.message); return; }
+  closePosModal();
+  await loadPositions();
+}
+
+async function deletePosition(id){
+  if(!confirm('Eliminare questa posizione e tutte le sue transazioni?')) return;
+  await sb.from('trading_transactions').delete().eq('position_id', id);
+  await sb.from('trading_positions').delete().eq('id', id);
+  await loadPositions();
+}
+
+// ── MODALS ────────────────────────────────────────────────────────────────────
+function openAddPosition(){
+  document.getElementById('pos-edit-id').value='';
+  document.getElementById('pos-ticker').value='';
+  document.getElementById('pos-name').value='';
+  document.getElementById('pos-type').value='stock';
+  document.getElementById('pos-qty').value='';
+  document.getElementById('pos-avgprice').value='';
+  document.getElementById('pos-currency').value='USD';
+  document.getElementById('pos-notes').value='';
+  document.getElementById('pos-modal-title').textContent='Aggiungi posizione';
+  var m=document.getElementById('pos-modal'); m.style.display='flex';
+}
+function openEditPosition(id){
+  var p=positions.find(function(x){return x.id===id;}); if(!p) return;
+  document.getElementById('pos-edit-id').value=p.id;
+  document.getElementById('pos-ticker').value=p.ticker;
+  document.getElementById('pos-name').value=p.name||'';
+  document.getElementById('pos-type').value=p.asset_type||'stock';
+  document.getElementById('pos-qty').value=p.quantity;
+  document.getElementById('pos-avgprice').value=p.avg_buy_price;
+  document.getElementById('pos-currency').value=p.currency||'USD';
+  document.getElementById('pos-notes').value=stripPositionImportMeta(p.notes||'');
+  document.getElementById('pos-modal-title').textContent='Modifica posizione';
+  var m=document.getElementById('pos-modal'); m.style.display='flex';
+}
+function closePosModal(){ document.getElementById('pos-modal').style.display='none'; }
+
+function openTxModal(posId){
+  document.getElementById('tx-pos-id').value=posId;
+  document.getElementById('tx-qty').value='';
+  document.getElementById('tx-price').value='';
+  document.getElementById('tx-fees').value='0';
+  document.getElementById('tx-notes').value='';
+  var today=new Date().toISOString().slice(0,10);
+  document.getElementById('tx-date').value=today;
+  setTxType('buy');
+  var p=positions.find(function(x){return x.id===posId;});
+  document.getElementById('tx-modal-title').textContent='Transazione — '+(p?p.ticker:'');
+  document.getElementById('tx-modal').style.display='flex';
+  updateTxSummary();
+}
+function closeTxModal(){ document.getElementById('tx-modal').style.display='none'; }
+function setTxType(type){
+  txType=type;
+  document.getElementById('tx-type').value=type;
+  var bb=document.getElementById('tx-buy-btn'); var sb2=document.getElementById('tx-sell-btn');
+  if(bb){bb.className=type==='buy'?'btn btn-primary':'btn btn-secondary';}
+  if(sb2){sb2.className=type==='sell'?'btn btn-primary':'btn btn-secondary';}
+  updateTxSummary();
+}
+function updateTxSummary(){
+  var qty=parseFloat(document.getElementById('tx-qty').value)||0;
+  var price=parseFloat(document.getElementById('tx-price').value)||0;
+  var fees=parseFloat(document.getElementById('tx-fees').value)||0;
+  var total=qty*price+(txType==='buy'?fees:-fees);
+  var el=document.getElementById('tx-summary');
+  if(!el) return;
+  if(qty>0&&price>0){
+    el.style.display='';
+    el.innerHTML=(txType==='buy'?'Acquisto: ':'Vendita: ')+qty+' x '+price.toFixed(2)+' + commissioni '+fees.toFixed(2)+' = <b>'+(total).toFixed(2)+'</b>';
+  } else { el.style.display='none'; }
+}
+
+async function saveTransaction2(){
+  var posId=parseInt(document.getElementById('tx-pos-id').value);
+  var qty=parseFloat(document.getElementById('tx-qty').value)||0;
+  var price=parseFloat(document.getElementById('tx-price').value)||0;
+  var fees=parseFloat(document.getElementById('tx-fees').value)||0;
+  var date=document.getElementById('tx-date').value;
+  if(!qty||!price||!date){ alert('Completa tutti i campi obbligatori.'); return; }
+  // Save transaction
+  var {error}=await sb.from('trading_transactions').insert({
+    user_id:currentUser.id, position_id:posId, type:txType,
+    quantity:qty, price:price, fees:fees, date:date,
+    notes:document.getElementById('tx-notes').value
+  });
+  if(error){ alert('Errore: '+error.message); return; }
+  // Recalculate position avg price & quantity
+  var {data:txs2}=await sb.from('trading_transactions').select('*').eq('position_id',posId).order('date');
+  if(txs2){
+    var totalQty=0, totalCost=0;
+    txs2.forEach(function(t){
+      if(t.type==='buy'){totalQty+=parseFloat(t.quantity);totalCost+=parseFloat(t.quantity)*parseFloat(t.price)+parseFloat(t.fees||0);}
+      else{totalQty-=parseFloat(t.quantity);totalCost-=parseFloat(t.quantity)*parseFloat(t.price);}
+    });
+    totalQty=Math.max(0,totalQty);
+    var newAvg=totalQty>0?totalCost/totalQty:0;
+    await sb.from('trading_positions').update({quantity:totalQty,avg_buy_price:newAvg}).eq('id',posId);
+  }
+  closeTxModal();
+  await loadPositions();
+}
+
+// ── PRICE FETCHING (Yahoo Finance) ────────────────────────────────────────────
+async function fetchPrice(ticker, range, interval){
+  ticker = normalizeTickerSymbol(ticker);
+  range  = range || tradingPeriod || '1d';
+
+  var rangeMap = {
+    '1d': {r:'1d',  i:'5m'},
+    '5d': {r:'5d',  i:'60m'},
+    '1mo':{r:'1mo', i:'1d'},
+    '3mo':{r:'3mo', i:'1d'},
+    '6mo':{r:'6mo', i:'1d'},
+    '1y': {r:'1y',  i:'1wk'},
+    '5y': {r:'5y',  i:'1mo'}
+  };
+  var rm = rangeMap[range] || {r:range, i:'1d'};
+
+  var key = ticker + '_' + range;
+  var ttl = (range === '1d') ? 60000 : 300000;
+  if(priceCache[key] && (Date.now() - priceCache[key].ts) < ttl) return priceCache[key];
+
+  var yurl = 'https://query1.finance.yahoo.com/v8/finance/chart/'
+    + encodeURIComponent(ticker)
+    + '?interval=' + rm.i + '&range=' + rm.r + '&includePrePost=false';
+
+  var proxies = [
+    'https://corsproxy.io/?' + encodeURIComponent(yurl),
+    'https://api.allorigins.win/get?url=' + encodeURIComponent(yurl)
+  ];
+
+  for(var pi=0; pi<proxies.length; pi++){
+    try{
+      var resp = await fetch(proxies[pi], {method:'GET'});
+      if(!resp.ok) continue;
+      var json = await resp.json();
+      if(json.contents) json = JSON.parse(json.contents);
+      if(!json.chart || !json.chart.result || !json.chart.result[0]) continue;
+
+      var meta = json.chart.result[0].meta;
+      var q    = json.chart.result[0].indicators.quote[0];
+
+      // Currency / GBp pence fix
+      var divisor  = (meta.currency === 'GBp' || meta.currency === 'GBX') ? 100 : 1;
+      var currency = (meta.currency === 'GBp' || meta.currency === 'GBX') ? 'GBP' : (meta.currency || 'USD');
+
+      // Current price
+      var price     = ((meta.regularMarketPrice || meta.chartPreviousClose || 0)) / divisor;
+      var prevClose = ((meta.chartPreviousClose || 0)) / divisor;
+
+      // Day change — use Yahoo official field, fallback to manual calc
+      var dayChgPct = (meta.regularMarketChangePercent != null && meta.regularMarketChangePercent !== 0)
+        ? meta.regularMarketChangePercent
+        : (prevClose > 0 ? (price - prevClose) / prevClose * 100 : 0);
+      var dayChg = (meta.regularMarketChange != null && meta.regularMarketChange !== 0)
+        ? meta.regularMarketChange / divisor
+        : (price - prevClose);
+
+      // Build valid closes series (exclude null AND zero)
+      var rawCloses = q.close || [];
+      var closes = rawCloses.map(function(c){
+        return (c === null || isNaN(c) || c === 0) ? null : c / divisor;
+      });
+      var validCloses = closes.filter(function(c){ return c !== null; });
+
+      // Period change
+      var perChgPct = 0;
+      if(range === '1d'){
+        perChgPct = dayChgPct;
+      } else if(validCloses.length >= 2){
+        var firstClose = validCloses[0];
+        perChgPct = firstClose > 0 ? (price - firstClose) / firstClose * 100 : 0;
+      } else if(prevClose > 0){
+        perChgPct = (price - prevClose) / prevClose * 100;
+      }
+
+      var hi = validCloses.length ? Math.max.apply(null, validCloses) : price;
+      var lo = validCloses.length ? Math.min.apply(null, validCloses) : price;
+
+      var result = {
+        price: price,
+        change: dayChg,
+        changePct: dayChgPct,
+        periodChange: validCloses.length ? price - validCloses[0] : dayChg,
+        periodChangePct: perChgPct,
+        high: hi, low: lo,
+        closes: closes,
+        currency: currency,
+        name: meta.shortName || meta.longName || ticker,
+        ts: Date.now()
+      };
+
+      priceCache[key]    = result;
+      priceCache[ticker] = result;
+      console.log('Price', ticker, range+':', price.toFixed(2), currency,
+        '| day:', dayChgPct.toFixed(2)+'%',
+        '| period:', perChgPct.toFixed(2)+'%',
+        '| closes:', validCloses.length);
+      return result;
+
+    } catch(e){
+      console.warn('Proxy', pi, 'failed for', ticker+':', e.message);
+    }
+  }
+  console.error('All proxies failed for:', ticker);
+  return null;
+}
+
+
+
+
+function setTradingPeriod(range,btn){
+  if(range === 'custom' && (!tradingCustomFrom || !tradingCustomTo)){
+    document.querySelectorAll('[data-range]').forEach(function(b){b.classList.remove('active');});
+    if(btn) btn.classList.add('active');
+    setCustomPeriodControlsVisible(true);
+    return;
+  }
+  tradingPeriod=range;
+  tradingPeriodInterval=PERIOD_INTERVALS[range]||'1d';
+  document.querySelectorAll('[data-range]').forEach(function(b){b.classList.remove('active');});
+  if(btn) btn.classList.add('active');
+  setCustomPeriodControlsVisible(range === 'custom');
+  var lbl=document.getElementById('compare-period-label');
+  if(lbl) lbl.textContent=getTradingLabel();
+  positions.forEach(function(p){delete priceCache[getTradingCacheKey(p.ticker, range)];});
+  refreshAllPrices({updateChart:false});
+}
+
+function handlePosSelect(cb){ togglePosSelect(cb.dataset.ticker); }
+function togglePosSelect(ticker){
+  if(selectedPosTickers.has(ticker)) selectedPosTickers.delete(ticker);
+  else selectedPosTickers.add(ticker);
+  var btn=document.getElementById('compare-btn');
+  if(btn) btn.style.display=selectedPosTickers.size>0?'':'none';
+  renderPositions();
+  updatePortfolioChart();
+}
+function deselectAllPos(){
+  selectedPosTickers.clear();
+  var btn=document.getElementById('compare-btn');
+  if(btn) btn.style.display='none';
+  renderPositions();
+  updatePortfolioChart();
+}
+
+async function updatePortfolioChart(){
+  var tickers = selectedPosTickers.size > 0
+    ? Array.from(selectedPosTickers)
+    : positions.map(function(p){ return p.ticker; });
+  tickers = tickers.filter(function(t){ return positions.find(function(p){ return p.ticker===t; }); });
+  if(!tickers.length) return;
+
+  var lbl = document.getElementById('compare-period-label');
+  if(lbl) lbl.textContent = getTradingLabel();
+  var titleEl = document.getElementById('chart-title');
+
+  var COLORS = ['#4f46e5','#16a34a','#dc2626','#d97706','#0891b2','#7c3aed','#db2777','#059669','#ea580c','#0d9488'];
+
+  // Collect data
+  var allData = tickers.map(function(t){
+    var d = priceCache[getTradingCacheKey(t, tradingPeriod)] || priceCache[normalizeTickerSymbol(t)];
+    var pos = positions.find(function(p){ return p.ticker===t; });
+    return {ticker:t, data:d, pos:pos};
+  }).filter(function(a){ return a.data && a.data.closes && a.data.closes.length > 1; });
+
+  if(!allData.length){
+    var svgEl = document.getElementById('compare-svg');
+    if(svgEl) svgEl.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="#9ca3af" font-size="13">Aggiorna i prezzi per visualizzare il grafico</text>';
+    return;
+  }
+
+  var svgEl = document.getElementById('compare-svg');
+  if(!svgEl) return;
+  var W = Math.max(300, (svgEl.parentElement ? svgEl.parentElement.offsetWidth - 40 : 700));
+  var H = 180;
+  svgEl.setAttribute('viewBox','0 0 '+W+' '+H);
+  svgEl.innerHTML = '';
+
+  // Grid lines
+  for(var gi=0; gi<=4; gi++){
+    var gy = H - (gi/4)*(H-24) - 12;
+    var gl = document.createElementNS('http://www.w3.org/2000/svg','line');
+    gl.setAttribute('x1',0);gl.setAttribute('x2',W);gl.setAttribute('y1',gy);gl.setAttribute('y2',gy);
+    gl.setAttribute('stroke','#e5e7eb');gl.setAttribute('stroke-width','1');
+    svgEl.appendChild(gl);
+  }
+
+  var showSingle = tickers.length === 1;
+
+  if(!showSingle){
+    // === AGGREGATED PORTFOLIO LINE ===
+    if(titleEl) titleEl.innerHTML = '&#128200; Portafoglio — <span id="compare-period-label">'+getTradingLabel()+'</span>';
+
+    // Find max closes length
+    var maxLen = 0;
+    allData.forEach(function(a){ var cl=a.data.closes.filter(function(c){return c!==null&&!isNaN(c);});if(cl.length>maxLen)maxLen=cl.length; });
+    if(!maxLen){ return; }
+
+    // Build weighted portfolio value at each time step
+    var portfolioSeries = [];
+    var initialPortfolio = 0;
+    for(var step=0; step<maxLen; step++){
+      var val = 0;
+      allData.forEach(function(a){
+        var cls = a.data.closes.filter(function(c){return c!==null&&!isNaN(c);});
+        // Use proportional index
+        var idx = Math.round(step/(maxLen-1)*(cls.length-1));
+        var price = cls[Math.min(idx, cls.length-1)];
+        var qty = a.pos ? parseFloat(a.pos.quantity)||1 : 1;
+        if(price) val += price * qty;
+      });
+      portfolioSeries.push(val);
+    }
+    if(portfolioSeries[0]) initialPortfolio = portfolioSeries[0];
+
+    // Normalize to % from start
+    var pctSeries = portfolioSeries.map(function(v){ return initialPortfolio>0?(v-initialPortfolio)/initialPortfolio*100:0; });
+    var minP = Math.min.apply(null,pctSeries), maxP = Math.max.apply(null,pctSeries);
+    var rngP = (maxP-minP)||1; minP -= rngP*0.1; maxP += rngP*0.1; rngP = maxP-minP;
+
+    // Zero line
+    var zy = H-(-minP/rngP)*(H-24)-12;
+    var zl = document.createElementNS('http://www.w3.org/2000/svg','line');
+    zl.setAttribute('x1',0);zl.setAttribute('x2',W);zl.setAttribute('y1',zy);zl.setAttribute('y2',zy);
+    zl.setAttribute('stroke','#9ca3af');zl.setAttribute('stroke-width','1.5');zl.setAttribute('stroke-dasharray','4');
+    svgEl.appendChild(zl);
+
+    // Draw fill area under/over zero
+    var finalPct = pctSeries[pctSeries.length-1];
+    var fillColor = finalPct >= 0 ? '#16a34a' : '#dc2626';
+    var pts = pctSeries.map(function(p,i){
+      var x = (i/(pctSeries.length-1)*W).toFixed(1);
+      var y = (H-((p-minP)/rngP)*(H-24)-12).toFixed(1);
+      return x+','+y;
+    });
+    var firstX = '0', lastX = W.toFixed(1);
+    var zeroY2 = Math.min(H, Math.max(0, zy)).toFixed(1);
+    var fillPts = pts.join(' ')+' '+lastX+','+zeroY2+' '+firstX+','+zeroY2;
+    var area = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    area.setAttribute('points',fillPts);
+    area.setAttribute('fill',fillColor);area.setAttribute('fill-opacity','0.12');
+    svgEl.appendChild(area);
+
+    // Main line
+    var poly = document.createElementNS('http://www.w3.org/2000/svg','polyline');
+    poly.setAttribute('points',pts.join(' '));
+    poly.setAttribute('fill','none');poly.setAttribute('stroke',fillColor);
+    poly.setAttribute('stroke-width','2.5');poly.setAttribute('stroke-linejoin','round');
+    svgEl.appendChild(poly);
+
+    // End dot
+    var lastPt = pts[pts.length-1].split(',');
+    var dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    dot.setAttribute('cx',lastPt[0]);dot.setAttribute('cy',lastPt[1]);
+    dot.setAttribute('r','4');dot.setAttribute('fill',fillColor);
+    svgEl.appendChild(dot);
+
+    // Pct label at end
+    var lbTxt = document.createElementNS('http://www.w3.org/2000/svg','text');
+    lbTxt.setAttribute('x',parseFloat(lastPt[0])+6);lbTxt.setAttribute('y',parseFloat(lastPt[1])+4);
+    lbTxt.setAttribute('fill',fillColor);lbTxt.setAttribute('font-size','11');lbTxt.setAttribute('font-weight','700');
+    lbTxt.textContent=(finalPct>=0?'+':'')+finalPct.toFixed(2)+'%';
+    svgEl.appendChild(lbTxt);
+
+    // Legend
+    var leg = document.getElementById('compare-legend');
+    if(leg) leg.innerHTML='<span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:3px;background:'+fillColor+';display:inline-block;border-radius:2px"></span><b>Portfolio aggregato</b><span style="color:'+fillColor+'">'+(finalPct>=0?'+':'')+finalPct.toFixed(2)+'%</span></span>';
+
+    // Stats: individual breakdown
+    var statsEl = document.getElementById('compare-stats');
+    if(statsEl) statsEl.innerHTML = allData.map(function(a,i){
+      var cls = a.data.closes.filter(function(c){return c!==null&&!isNaN(c);});
+      var chg = a.data.periodChangePct;
+      var pos = a.pos;
+      var qty = pos ? parseFloat(pos.quantity)||0 : 0;
+      var avg = pos ? parseFloat(pos.avg_buy_price)||0 : 0;
+      var val = qty * a.data.price;
+      var pnl = avg>0 ? val - qty*avg : null;
+      var shortName = (a.data.name||pos&&pos.name||a.ticker).substring(0,6);
+      return '<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:8px 10px;border-left:3px solid '+COLORS[i%COLORS.length]+'">'
+        +'<div style="font-weight:700;font-size:11px">'+shortName+'</div>'
+        +'<div style="font-size:10.5px;color:'+(chg>=0?'var(--green)':'var(--red)')+'">'+( chg>=0?'+':'')+chg.toFixed(2)+'%</div>'
+        +(pnl!==null?'<div style="font-size:10.5px;color:'+(pnl>=0?'var(--green)':'var(--red)')+'">P&L: '+(pnl>=0?'+':'')+pnl.toFixed(0)+'</div>':'')
+        +'</div>';
+    }).join('');
+
+  } else {
+    // === SINGLE TICKER LINE ===
+    var a = allData[0];
+    var cls = a.data.closes.filter(function(c){return c!==null&&!isNaN(c);});
+    var shortName = (a.data.name||a.pos&&a.pos.name||a.ticker).substring(0,6);
+    if(titleEl) titleEl.innerHTML = '&#128200; '+shortName+' — <span id="compare-period-label">'+getTradingLabel()+'</span>';
+    var first = cls[0], last = cls[cls.length-1];
+    var chgPct = first>0?(last-first)/first*100:0;
+    var color = chgPct>=0?'#16a34a':'#dc2626';
+    var mn=Math.min.apply(null,cls), mx=Math.max.apply(null,cls), rng=(mx-mn)||1;
+    mn-=rng*0.05; mx+=rng*0.05; rng=mx-mn;
+    var pts = cls.map(function(c,i){
+      return (i/(cls.length-1)*W).toFixed(1)+','+(H-((c-mn)/rng)*(H-24)-12).toFixed(1);
+    }).join(' ');
+    var poly = document.createElementNS('http://www.w3.org/2000/svg','polyline');
+    poly.setAttribute('points',pts);poly.setAttribute('fill','none');
+    poly.setAttribute('stroke',color);poly.setAttribute('stroke-width','2.5');poly.setAttribute('stroke-linejoin','round');
+    svgEl.appendChild(poly);
+    var leg = document.getElementById('compare-legend');
+    if(leg) leg.innerHTML='<span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:3px;background:'+color+';display:inline-block;border-radius:2px"></span><b>'+shortName+'</b><span style="color:'+color+'">'+(chgPct>=0?'+':'')+chgPct.toFixed(2)+'%</span></span>';
+    var statsEl = document.getElementById('compare-stats');
+    if(statsEl) statsEl.innerHTML='<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 12px;border-left:3px solid '+color+'">'
+      +'<b>'+a.ticker+'</b><br><span style="font-size:11px">'+a.data.price.toFixed(2)+' '+(a.data.currency||'')+'</span><br>'
+      +'<span style="font-size:11px;color:'+color+'">'+(chgPct>=0?'+':'')+chgPct.toFixed(2)+'%</span></div>';
+  }
+}
+
+// Alias for backward compat
+async function openCompareChart(){ await updatePortfolioChart(); }
+
+
+// ── AI RECOMMENDATIONS ────────────────────────────────────────────────────────
+
+// ── RENDER POSITIONS (table view) ────────────────────────────────────────────
+function renderPositions(){
+  var filterType = (document.getElementById('pos-filter-type')||{}).value || 'all';
+  var arr = filterType === 'all' ? positions : positions.filter(function(p){ return p.asset_type === filterType; });
+  var tbody    = document.getElementById('pos-tbody');
+  var empty    = document.getElementById('pos-empty');
+  var recPanel = document.getElementById('ai-rec-panel');
+
+  if(!arr.length){
+    if(tbody) tbody.innerHTML = '';
+    if(empty) empty.style.display = '';
+    if(recPanel) recPanel.style.display = 'none';
+    renderTradingStats([]);
+    return;
+  }
+  if(empty) empty.style.display = 'none';
+  if(recPanel) recPanel.style.display = '';
+
+  // Apply sort
+  arr=arr.slice().sort(function(a,b){
+    var da=priceCache[getTradingCacheKey(a.ticker, tradingPeriod)]||priceCache[normalizeTickerSymbol(a.ticker)];
+    var db=priceCache[getTradingCacheKey(b.ticker, tradingPeriod)]||priceCache[normalizeTickerSymbol(b.ticker)];
+    var dayA=priceCache[getTradingCacheKey(a.ticker, '1d')]||da;
+    var dayB=priceCache[getTradingCacheKey(b.ticker, '1d')]||db;
+    function gv(p,d,f){
+      var qty=parseFloat(p.quantity)||0, avg=parseFloat(p.avg_buy_price)||0;
+      var live = f || d;
+      var priceEur = live&&live.price ? toEUR(live.price, (live.currency || p.currency || 'USD')) : 0;
+      var avgEur = toEUR(avg, (p.currency || 'USD'));
+      var val=live&&live.price ? toEUR(qty*live.price, (live.currency || p.currency || 'USD')) : 0;
+      var cost=toEUR(qty*avg, (p.currency || 'USD'));
+      var pnl=val-cost, pnlp=cost>0?pnl/cost*100:0;
+      var periodPnl = d && d.periodChange !== null && d.periodChange !== undefined ? toEUR(d.periodChange * qty, (d.currency || p.currency || 'USD')) : 0;
+      return {ticker:p.ticker,name:p.name||'',type:p.asset_type||'',
+        price:priceEur,day:f?f.changePct:0,period:d?d.periodChangePct:0,
+        periodpnl: periodPnl, qty:qty,avg:avgEur,value:val,pnl:pnl,pnlpct:pnlp,high:d?d.high:0,low:d?d.low:0};
+    }
+    var va=gv(a,da,dayA)[tradingSortField||'ticker'];
+    var vb=gv(b,db,dayB)[tradingSortField||'ticker'];
+    if(typeof va==='string') return va.localeCompare(vb)*tradingSortDir;
+    return ((va||0)-(vb||0))*tradingSortDir;
+  });
+  if(!tbody){ renderTradingStats(arr); return; }
+
+  // Apply sort
+  arr = arr.slice().sort(function(a,b){
+    var da = priceCache[getTradingCacheKey(a.ticker, tradingPeriod)] || priceCache[normalizeTickerSymbol(a.ticker)];
+    var db = priceCache[getTradingCacheKey(b.ticker, tradingPeriod)] || priceCache[normalizeTickerSymbol(b.ticker)];
+    var dayA = priceCache[getTradingCacheKey(a.ticker, '1d')] || da;
+    var dayB = priceCache[getTradingCacheKey(b.ticker, '1d')] || db;
+    var qa = parseFloat(a.quantity)||0, qb = parseFloat(b.quantity)||0;
+    var aa = toEUR(parseFloat(a.avg_buy_price)||0, (a.currency || 'USD'));
+    var ab = toEUR(parseFloat(b.avg_buy_price)||0, (b.currency || 'USD'));
+    function val(p,d){ return d&&d.price ? toEUR((parseFloat(p.quantity)||0)*d.price, (d.currency || p.currency || 'USD')) : 0; }
+    function cost(p){ return toEUR((parseFloat(p.quantity)||0)*(parseFloat(p.avg_buy_price)||0), (p.currency || 'USD')); }
+    function pnl(p,d){ return d&&d.price ? val(p,d)-cost(p) : 0; }
+    function pnlPct(p,d){ var c=cost(p); return c>0?pnl(p,d)/c*100:0; }
+    function periodPnl(p,d){ return d&&d.periodChange !== null && d.periodChange !== undefined ? toEUR((parseFloat(p.quantity)||0)*d.periodChange, (d.currency || p.currency || 'USD')) : 0; }
+    var map = {
+      ticker: [a.ticker, b.ticker],
+      name:   [a.name||'', b.name||''],
+      type:   [a.asset_type||'', b.asset_type||''],
+      price:  [dayA&&dayA.price?toEUR(dayA.price, (dayA.currency || a.currency || 'USD')):(da&&da.price?toEUR(da.price, (da.currency || a.currency || 'USD')):0), dayB&&dayB.price?toEUR(dayB.price, (dayB.currency || b.currency || 'USD')):(db&&db.price?toEUR(db.price, (db.currency || b.currency || 'USD')):0)],
+      day:    [dayA?dayA.changePct:0, dayB?dayB.changePct:0],
+      period: [da?da.periodChangePct:0, db?db.periodChangePct:0],
+      periodpnl: [periodPnl(a,da), periodPnl(b,db)],
+      qty:    [qa, qb],
+      avg:    [aa, ab],
+      value:  [val(a,dayA||da), val(b,dayB||db)],
+      pnl:    [pnl(a,dayA||da), pnl(b,dayB||db)],
+      pnlpct: [pnlPct(a,dayA||da), pnlPct(b,dayB||db)],
+      high:   [da?da.high:0, db?db.high:0],
+      low:    [da?da.low:0, db?db.low:0]
+    };
+    var va = map[tradingSortField] ? map[tradingSortField][0] : a.ticker;
+    var vb = map[tradingSortField] ? map[tradingSortField][1] : b.ticker;
+    if(typeof va === 'string') return va.localeCompare(vb) * tradingSortDir;
+    return (va - vb) * tradingSortDir;
+  });
+
+  function fmtPct(v){
+    if(v === null || v === undefined || isNaN(v)) return '<span style="color:var(--text3)">—</span>';
+    var cls = v >= 0 ? 'pnl-pos' : 'pnl-neg';
+    return '<span class="'+cls+'">'+(v>=0?'+':'')+v.toFixed(2)+'%</span>';
+  }
+  function fmtAmt(v){
+    if(v === null || v === undefined || isNaN(v)) return '<span style="color:var(--text3)">—</span>';
+    var cls = v >= 0 ? 'pnl-pos' : 'pnl-neg';
+    return '<span class="'+cls+'">'+(v>=0?'+':'')+v.toFixed(2)+'</span>';
+  }
+
+  tbody.innerHTML = arr.map(function(p){
+    var meta = getPositionImportMeta(p.notes);
+    var data = priceCache[getTradingCacheKey(p.ticker, tradingPeriod)] || priceCache[normalizeTickerSymbol(p.ticker)];
+    var dayData = priceCache[getTradingCacheKey(p.ticker, '1d')] || data;
+    var qty  = parseFloat(p.quantity) || 0;
+    var avg  = parseFloat(p.avg_buy_price) || 0;
+    var curr = dayData ? dayData.price : (data ? data.price : null);
+    var baseCur = (meta && meta.importedCurrency) || p.currency || 'USD';
+    var liveCur = (dayData && dayData.currency) || (data && data.currency) || baseCur;
+    var displayPriceEur = curr !== null ? toEUR(curr, liveCur) : null;
+    var displayAvgEur = toEUR(avg, baseCur);
+    var cost = meta && meta.importedInvestedValue > 0 ? toEUR(meta.importedInvestedValue, baseCur) : toEUR(qty * avg, baseCur);
+    var liveValueEur = curr !== null ? toEUR(qty * curr, liveCur) : null;
+    var importedValueEur = meta && meta.importedCurrentValue > 0 ? toEUR(meta.importedCurrentValue, baseCur) : null;
+    var val  = liveValueEur !== null ? liveValueEur : (importedValueEur !== null ? importedValueEur : cost);
+    var pnl  = val !== null ? val - cost : null;
+    var pnlPct  = cost > 0 && pnl !== null ? pnl / cost * 100 : null;
+    var dayPct  = dayData ? dayData.changePct : null;
+    var perPct  = data ? data.periodChangePct : null;
+    var perPnl  = data && data.periodChange !== null && data.periodChange !== undefined ? toEUR(data.periodChange * qty, (data.currency || liveCur || 'USD')) : null;
+    var sel = selectedPosTickers.has(p.ticker);
+    var badgeCls = 'pos-badge pos-badge-'+(p.asset_type||'other');
+    var displayName = (p.name || (data && data.name) || p.ticker || '').trim();
+
+    return '<tr class="'+(sel?'pos-selected':'')+'" style="'+(sel?'background:rgba(79,70,229,0.06)':'')+'">'
+      +'<td style="width:32px;padding:8px 10px"><input type="checkbox" '+(sel?'checked':'')+' data-ticker="'+p.ticker+'" onchange="handlePosSelect(this)" style="accent-color:var(--accent)"></td>'
+      +'<td class="ticker-cell" style="max-width:280px;white-space:normal;line-height:1.35">'+esc(displayName)+'</td>'
+      +'<td><span class="'+badgeCls+'">'+(p.asset_type||'other')+'</span></td>'
+      +'<td><b>'+(displayPriceEur!==null?displayPriceEur.toFixed(2):'<span style="color:var(--text3)">N/D</span>')+'</b>&nbsp;<small style="color:var(--text3)">EUR</small></td>'
+      +'<td>'+fmtPct(dayPct)+'</td>'
+      +'<td>'+fmtPct(perPct)+'</td>'
+      +'<td>'+fmtAmt(perPnl)+'</td>'
+      +'<td>'+qty.toLocaleString('it-IT',{maximumFractionDigits:6})+'</td>'
+      +'<td>'+displayAvgEur.toFixed(2)+'</td>'
+      +'<td><b>'+val.toFixed(2)+'</b></td>'
+      +'<td>'+fmtAmt(pnl)+'</td>'
+      +'<td>'+fmtPct(pnlPct)+'</td>'
+      +'<td style="color:var(--text3)">'+(data?data.high.toFixed(2):'—')+'</td>'
+      +'<td style="color:var(--text3)">'+(data?data.low.toFixed(2):'—')+'</td>'
+      +'<td style="white-space:nowrap">'
+        +'<button class="btn btn-primary" style="font-size:10px;padding:3px 8px" onclick="openTxModal('+p.id+')">+Tx</button> '
+        +'<button class="btn btn-edit" style="font-size:10px;padding:3px 7px" onclick="openEditPosition('+p.id+')">&#9998;</button> '
+        +'<button class="btn btn-danger" style="font-size:10px;padding:3px 7px" onclick="deletePosition('+p.id+')">&#215;</button>'
+      +'</td>'
+    +'</tr>';
+  }).join('');
+
+  renderTradingStats(arr);
+  updatePortfolioChart();
+}
+
+
+function setTradingSort(field){
+  if(tradingSortField === field) tradingSortDir = -tradingSortDir;
+  else { tradingSortField = field; tradingSortDir = 1; }
+  // Update header arrows
+  document.querySelectorAll('.pos-th-sort').forEach(function(th){
+    th.classList.remove('asc','desc');
+    if(th.dataset.field === field) th.classList.add(tradingSortDir===1?'asc':'desc');
+  });
+  renderPositions();
+}
+
+function renderTradingStats(arr){
+  var totalValue = 0, totalCost = 0, priced = 0, unpriced = 0;
+  arr.forEach(function(p){
+    var meta = getPositionImportMeta(p.notes);
+    var data = priceCache[getTradingCacheKey(p.ticker, tradingPeriod)] || priceCache[normalizeTickerSymbol(p.ticker)];
+    var qty  = parseFloat(p.quantity) || 0;
+    var avg  = parseFloat(p.avg_buy_price) || 0;
+    var positionCur = (meta && meta.importedCurrency) || p.currency || 'USD';
+    if(meta && meta.importedInvestedValue > 0){
+      totalCost += toEUR(meta.importedInvestedValue, positionCur);
+    } else if(avg > 0){
+      totalCost += toEUR(qty * avg, positionCur);
+    }
+    if(meta && meta.importedCurrentValue > 0){
+      totalValue += toEUR(meta.importedCurrentValue, positionCur);
+      priced++;
+    } else if(data && data.price){
+      totalValue += toEUR(qty * data.price, (data && data.currency) || positionCur);
+      priced++;
+    } else {
+      if(avg > 0) totalValue += toEUR(qty * avg, positionCur);
+      unpriced++;
+    }
+  });
+  var totalPnl    = totalCost > 0 ? totalValue - totalCost : 0;
+  var totalPnlPct = totalCost > 0 ? totalPnl / totalCost * 100 : 0;
+  var el = document.getElementById('trading-stats');
+  if(el) el.innerHTML =
+    stat('Investito (EUR)', totalCost > 0 ? totalCost.toFixed(0) : 'N/D', 'var(--text2)') +
+    stat('Valore Attuale (EUR)', totalValue.toFixed(0), 'var(--accent)') +
+    stat('P&L (EUR)', totalCost>0 ? (totalPnl>=0?'+':'')+totalPnl.toFixed(0)+' ('+(totalPnlPct>=0?'+':'')+totalPnlPct.toFixed(1)+'%)' : 'Aggiorna prezzi', totalPnl>=0?'var(--green)':'var(--red)') +
+    stat('Posizioni', arr.length, 'var(--accent)');
+}
+
+function toggleAllPositions(cb){
+  var ft  = (document.getElementById('pos-filter-type')||{}).value || 'all';
+  var arr = ft === 'all' ? positions : positions.filter(function(p){ return p.asset_type === ft; });
+  if(cb.checked) arr.forEach(function(p){ selectedPosTickers.add(p.ticker); });
+  else           selectedPosTickers.clear();
+  var btn = document.getElementById('compare-btn');
+  if(btn) btn.style.display = selectedPosTickers.size > 1 ? '' : 'none';
+  renderPositions();
+  updatePortfolioChart();
+}
+
+async function generateRecommendations(){
+  var el = document.getElementById('ai-rec-content');
+  if(!el) return;
+  el.innerHTML = '<div class="ai-thinking">&#129504; Analisi AI in corso — analisi portafoglio, trend e nuove opportunita...</div>';
+
+  var apiKey = (localStorage.getItem('inv_key')||'').trim();
+  if(!apiKey || !apiKey.startsWith('sk-ant-')){
+    el.innerHTML = '<div style="color:var(--orange);font-size:12px;padding:14px;background:rgba(217,119,6,0.08);border-radius:8px;border:1px solid rgba(217,119,6,0.3)">'+
+      '<b>&#128273; API Key Anthropic mancante o non valida</b><br>'+
+      'Per usare l\'analisi AI devi inserire una API key valida:<br>'+
+      '<ol style="margin:8px 0 0 16px;line-height:2">'+
+      '<li>Vai su <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--accent)">console.anthropic.com</a></li>'+
+      '<li>Clicca <b>Create Key</b></li>'+
+      '<li>Copia la chiave (inizia con sk-ant-...)</li>'+
+      '<li>Incollala in <b>Impostazioni → API Key Anthropic</b></li>'+
+      '<li>Clicca <b>Salva impostazioni</b></li>'+
+      '</ol></div>';
+    return;
+  }
+  if(!apiKey){ el.innerHTML='<div style="color:var(--red)">API key Anthropic mancante nelle Impostazioni.</div>'; return; }
+
+  // Build portfolio context with all available price data
+  var portfolio = positions.map(function(p){
+    var d   = priceCache[p.ticker+'_'+tradingPeriod] || priceCache[p.ticker] || {};
+    var qty = parseFloat(p.quantity)      || 0;
+    var avg = parseFloat(p.avg_buy_price) || 0;
+    var cur = d.price || null;
+    var invested = qty * avg;
+    var value    = cur ? qty * cur : null;
+    var pnlPct   = (cur && avg > 0) ? (cur - avg) / avg * 100 : null;
+    // Get closes for different periods from cache
+    var d1  = priceCache[p.ticker+'_1d']  || {};
+    var d1m = priceCache[p.ticker+'_1mo'] || {};
+    var d3m = priceCache[p.ticker+'_3mo'] || {};
+    var d1y = priceCache[p.ticker+'_1y']  || {};
+    return {
+      ticker:    p.ticker,
+      name:      d.name || p.name || p.ticker,
+      type:      p.asset_type || 'stock',
+      qty:       qty,
+      avgCost:   avg > 0 ? avg.toFixed(2) : null,
+      price:     cur ? cur.toFixed(2) : null,
+      currency:  d.currency || p.currency || 'USD',
+      invested:  invested > 0 ? invested.toFixed(0) : null,
+      value:     value ? value.toFixed(0) : null,
+      pnlPct:    pnlPct !== null ? pnlPct.toFixed(1)+'%' : null,
+      change1d:  d1.changePct  !== undefined ? d1.changePct.toFixed(2)+'%'  : null,
+      change1mo: d1m.periodChangePct !== undefined ? d1m.periodChangePct.toFixed(2)+'%' : null,
+      change3mo: d3m.periodChangePct !== undefined ? d3m.periodChangePct.toFixed(2)+'%' : null,
+      change1y:  d1y.periodChangePct !== undefined ? d1y.periodChangePct.toFixed(2)+'%' : null,
+      high:      d.high ? d.high.toFixed(2) : null,
+      low:       d.low  ? d.low.toFixed(2)  : null
+    };
+  }).filter(function(p){ return p.qty > 0; });
+
+  // Compute portfolio totals for context
+  var totalInvested = 0, totalValue = 0;
+  portfolio.forEach(function(p){
+    if(p.invested) totalInvested += parseFloat(p.invested);
+    if(p.value)    totalValue    += parseFloat(p.value);
+  });
+
+  var prompt =
+    'Sei un consulente finanziario esperto in investimenti di medio-lungo periodo con strategia buy & hold.\n\n'+
+    'PORTAFOGLIO ATTUALE:\n'+
+    'Investito totale: '+totalInvested.toFixed(0)+' EUR\n'+
+    'Valore attuale: '+totalValue.toFixed(0)+' EUR\n'+
+    'Posizioni ('+portfolio.length+'):\n'+
+    JSON.stringify(portfolio, null, 1)+'\n\n'+
+    'STRATEGIA INVESTITORE: buy & hold, orizzonte 5-15 anni, focus su crescita capitale e qualita aziendale.\n\n'+
+    'COMPITO: Analizza il portafoglio e rispondi SOLO con un JSON object (nessun testo fuori dal JSON):\n'+
+    '{\n'+
+    '  "portfolio_analysis": "breve analisi qualitativa del portafoglio (3-4 frasi: diversificazione, concentrazione settoriale, qualita)",\n'+
+    '  "recommendations": [\n'+
+    '    {\n'+
+    '      "ticker": "AAPL",\n'+
+    '      "action": "buy_more|sell|hold|reduce",\n'+
+    '      "priority": "high|medium|low",\n'+
+    '      "title": "titolo breve",\n'+
+    '      "reason": "motivazione 2-3 frasi basata su trend, fondamentali e strategia buy&hold",\n'+
+    '      "target_action": "Azione concreta suggerita (es: aumenta posizione del 20%, vendi 30%, mantieni)"\n'+
+    '    }\n'+
+    '  ],\n'+
+    '  "new_opportunities": [\n'+
+    '    {\n'+
+    '      "ticker": "VGT",\n'+
+    '      "name": "Vanguard IT ETF",\n'+
+    '      "type": "etf",\n'+
+    '      "reason": "perche si adatta alla strategia e completa il portafoglio",\n'+
+    '      "priority": "high|medium|low"\n'+
+    '    }\n'+
+    '  ]\n'+
+    '}\n'+
+    'Per new_opportunities suggerisci 3-5 titoli/ETF NON presenti nel portafoglio che si adattano alla strategia buy&hold. Includi almeno 2 ETF diversificati.';
+
+  try{
+    var response = await fetch('https://api.anthropic.com/v1/messages',{
+      method: 'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 3000,
+        messages:[{role:'user', content:prompt}]
+      })
+    });
+
+    if(!response.ok){
+      var errData = await response.json().catch(function(){ return {}; });
+      var errMsg = errData.error&&errData.error.message ? errData.error.message : response.statusText;
+      console.error('API Error:', response.status, errMsg, 'key starts:', apiKey.substring(0,15));
+      throw new Error('API '+response.status+': '+errMsg);
+    }
+
+    var data = await response.json();
+    if(!data.content || !data.content[0]) throw new Error('Risposta API vuota');
+
+    var text = data.content[0].text;
+    // Extract JSON object from response
+    var jsonMatch = text.match(/\{[\s\S]*\}/);
+    if(!jsonMatch) throw new Error('Nessun JSON nella risposta');
+    var result = JSON.parse(jsonMatch[0]);
+
+    var actionStyle = {
+      buy_more: {cls:'rec-buy',   icon:'&#128200;', color:'var(--green)', label:'AUMENTA'},
+      sell:     {cls:'rec-sell',  icon:'&#128201;', color:'var(--red)',   label:'VENDI'},
+      hold:     {cls:'rec-hold',  icon:'&#9866;',   color:'#854d0e',     label:'MANTIENI'},
+      reduce:   {cls:'rec-watch', icon:'&#128201;', color:'var(--orange)',label:'RIDUCI'}
+    };
+    var prioIcon = {high:'&#128308;', medium:'&#128992;', low:'&#9899;'};
+
+    var html = '<div style="font-size:10.5px;color:var(--text3);margin-bottom:14px">'+
+      'Analisi generata da Claude AI con strategia buy &amp; hold. Non costituisce consulenza finanziaria professionale.</div>';
+
+    // Portfolio analysis
+    if(result.portfolio_analysis){
+      html += '<div style="background:var(--accent-light);border:1px solid var(--border2);border-radius:var(--radius);'+
+        'padding:14px 16px;margin-bottom:16px;font-size:12.5px;line-height:1.7;color:var(--text)">'+
+        '<div style="font-weight:700;margin-bottom:6px;color:var(--accent)">&#128202; Analisi Portafoglio</div>'+
+        result.portfolio_analysis+'</div>';
+    }
+
+    // Recommendations for existing positions
+    if(result.recommendations && result.recommendations.length){
+      html += '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px;'+
+        'color:var(--text2);margin-bottom:8px">Posizioni attuali</div>';
+      html += result.recommendations.map(function(r){
+        var st = actionStyle[r.action] || actionStyle.hold;
+        return '<div class="rec-card '+st.cls+'" style="margin-bottom:8px">'+
+          '<div class="rec-icon">'+st.icon+'</div>'+
+          '<div style="flex:1">'+
+            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">'+
+              '<span style="font-weight:800;font-size:13px">'+r.ticker+'</span>'+
+              '<span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:20px;'+
+                'background:'+st.color+';color:#fff">'+st.label+'</span>'+
+              (prioIcon[r.priority]||'')+
+              '<span style="font-size:12px;font-weight:600;color:'+st.color+'">'+r.title+'</span>'+
+            '</div>'+
+            '<div style="font-size:12px;margin-bottom:5px;line-height:1.6">'+r.reason+'</div>'+
+            '<div style="font-size:11.5px;font-weight:600;color:'+st.color+';background:rgba(0,0,0,0.04);'+
+              'padding:6px 10px;border-radius:4px">&#8594; '+r.target_action+'</div>'+
+          '</div>'+
+        '</div>';
+      }).join('');
+    }
+
+    // New opportunities
+    if(result.new_opportunities && result.new_opportunities.length){
+      html += '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px;'+
+        'color:var(--text2);margin:16px 0 8px">&#10024; Nuove opportunita da valutare</div>';
+      html += result.new_opportunities.map(function(r){
+        return '<div class="rec-card rec-watch" style="margin-bottom:8px">'+
+          '<div class="rec-icon">&#11088;</div>'+
+          '<div style="flex:1">'+
+            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">'+
+              '<span style="font-weight:800;font-size:13px">'+r.ticker+'</span>'+
+              '<span style="font-size:10px;background:var(--surface2);padding:1px 7px;border-radius:20px">'+
+                (r.type||'').toUpperCase()+'</span>'+
+              (prioIcon[r.priority]||'')+
+              '<span style="font-size:12px;color:var(--text2)">'+r.name+'</span>'+
+            '</div>'+
+            '<div style="font-size:12px;line-height:1.6">'+r.reason+'</div>'+
+          '</div>'+
+        '</div>';
+      }).join('');
+    }
+
+    el.innerHTML = html;
+
+  } catch(e){
+    el.innerHTML = '<div style="color:var(--red);font-size:12px;padding:14px;background:rgba(220,38,38,0.06);'+
+      'border-radius:var(--radius-sm);border:1px solid rgba(220,38,38,0.2)">'+
+      '<b>Errore analisi AI:</b> '+e.message+'<br><small style="color:var(--text3)">'+
+      'Verifica che i prezzi siano aggiornati e che la API key sia corretta in Impostazioni.</small></div>';
+  }
+}
+
+
+
+// ── IMPORT PORTFOLIO FILE (XLS / PDF) ────────────────────────────────────────
+async function importPortfolioFile(input){
+  var file = input.files[0];
+  if(!file){ input.value=''; return; }
+  var ext = file.name.split('.').pop().toLowerCase();
+  console.log('Import started:', file.name, 'ext:', ext, 'size:', file.size);
+  try{
+    if(ext === 'pdf'){
+      await importPortfolioPDF(file);
+    } else if(ext === 'xlsx' || ext === 'xls' || ext === 'csv'){
+      await importPortfolioXLS(file);
+    } else {
+      alert('Formato non supportato. Usa XLS, XLSX, CSV o PDF.');
+    }
+  } catch(e){
+    console.error('Import error:', e);
+    alert('Errore durante import: ' + e.message);
+  }
+  input.value = '';
+}
+
+async function importPortfolioXLS(file){
+  function detectDelimiter(text){
+    var sample = text.split(/\r?\n/).filter(function(line){ return line.trim(); }).slice(0, 5);
+    var candidates = [',',';','\t'];
+    var best = ',', bestScore = -1;
+    candidates.forEach(function(delim){
+      var score = sample.reduce(function(acc, line){
+        var parts = splitDelimitedLine(line, delim);
+        return acc + (parts.length > 1 ? parts.length : 0);
+      }, 0);
+      if(score > bestScore){ best = delim; bestScore = score; }
+    });
+    return best;
+  }
+
+  function splitDelimitedLine(line, delimiter){
+    var out = [];
+    var cur = '';
+    var inQuotes = false;
+    for(var i=0; i<line.length; i++){
+      var ch = line[i];
+      if(ch === '"'){
+        if(inQuotes && line[i+1] === '"'){
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if(ch === delimiter && !inQuotes){
+        out.push(cur);
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur);
+    return out.map(function(part){ return part.trim(); });
+  }
+
+  function parseDelimitedText(text){
+    var delimiter = detectDelimiter(text);
+    var lines = text.split(/\r?\n/).filter(function(line){ return line.trim(); });
+    if(!lines.length) return [];
+    var headers = splitDelimitedLine(lines[0], delimiter).map(function(h){
+      return h.replace(/^"|"$/g,'').trim();
+    });
+    return lines.slice(1).map(function(line){
+      var values = splitDelimitedLine(line, delimiter).map(function(v){
+        return v.replace(/^"|"$/g,'').trim();
+      });
+      var obj = {};
+      headers.forEach(function(h, i){ obj[h] = values[i] || ''; });
+      return obj;
+    });
+  }
+
+  function normalizeHeader(value){
+    return String(value || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g,'')
+      .replace(/[^a-z0-9]+/g,' ')
+      .trim();
+  }
+
+  function parseNum(raw){
+    if(raw === null || raw === undefined) return {n:0, cur:null};
+    var original = String(raw).replace(/\u00A0/g,' ').trim();
+    if(!original) return {n:0, cur:null};
+
+    var cur = null;
+    var symMap = {'€':'EUR','$':'USD','£':'GBP','¥':'JPY','CHF':'CHF'};
+    Object.keys(symMap).some(function(sym){
+      if(original.indexOf(sym) >= 0){ cur = symMap[sym]; return true; }
+      return false;
+    });
+    var codeMatch = original.match(/\b(EUR|USD|GBP|JPY|CHF|CAD|AUD|HKD|SGD)\b/i);
+    if(codeMatch && !cur) cur = codeMatch[1].toUpperCase();
+
+    var s = original
+      .replace(/\s+/g,'')
+      .replace(/'/g,'')
+      .replace(/[^0-9,.\-]/g,'');
+    if(!s || s === '-' || s === ',' || s === '.') return {n:0, cur:cur};
+
+    var lastComma = s.lastIndexOf(',');
+    var lastDot   = s.lastIndexOf('.');
+    if(lastComma >= 0 && lastDot >= 0){
+      if(lastComma > lastDot){
+        s = s.replace(/\./g,'').replace(/,/g,'.');
+      } else {
+        s = s.replace(/,/g,'');
+      }
+    } else if(lastComma >= 0){
+      var commaDecimals = s.length - lastComma - 1;
+      s = commaDecimals > 0 && commaDecimals <= 4 ? s.replace(/,/g,'.') : s.replace(/,/g,'');
+    } else if(lastDot >= 0){
+      var dotDecimals = s.length - lastDot - 1;
+      if(!(dotDecimals > 0 && dotDecimals <= 4)){
+        s = s.replace(/\./g,'');
+      }
+    }
+    return {n: parseFloat(s)||0, cur: cur};
+  }
+
+  // Read file
+  var arrayBuf = await new Promise(function(resolve, reject){
+    var r = new FileReader();
+    r.onload  = function(e){ resolve(e.target.result); };
+    r.onerror = function(){ reject(new Error('Lettura fallita')); };
+    r.readAsArrayBuffer(file);
+  });
+
+  if(typeof XLSX === 'undefined'){ alert('Libreria XLSX non caricata. Ricarica la pagina.'); return; }
+
+  var wb, ws, rows;
+  try{
+    var data = new Uint8Array(arrayBuf);
+    var ext  = file.name.split('.').pop().toLowerCase();
+    if(ext === 'csv'){
+      var text = new TextDecoder().decode(data);
+      rows = parseDelimitedText(text);
+    } else {
+      wb = XLSX.read(data, {type:'array'});
+      for(var si=0; si<wb.SheetNames.length; si++){
+        ws = wb.Sheets[wb.SheetNames[si]];
+        rows = XLSX.utils.sheet_to_json(ws, {defval:'', raw:false});
+        if(rows && rows.length) break;
+      }
+    }
+  } catch(err){ alert('Errore lettura: '+err.message); return; }
+
+  if(!rows || !rows.length){ alert('File vuoto.'); return; }
+
+  // --- COLUMN DETECTION ---
+  // Find each column by checking all header names (case-insensitive, partial match)
+  var headers = [];
+  rows.slice(0, 20).forEach(function(row){
+    Object.keys(row || {}).forEach(function(key){
+      if(headers.indexOf(key) === -1) headers.push(key);
+    });
+  });
+  var normalizedHeaders = headers.map(function(header){
+    return {raw: header, norm: normalizeHeader(header)};
+  });
+  console.log('Headers nel file:', headers);
+
+  function findCol(keywords){
+    for(var ki=0; ki<keywords.length; ki++){
+      var kw = normalizeHeader(keywords[ki]);
+      for(var hi=0; hi<normalizedHeaders.length; hi++){
+        if(normalizedHeaders[hi].norm.indexOf(kw) >= 0) return normalizedHeaders[hi].raw;
+      }
+    }
+    return null;
+  }
+
+  // Map each column — ORDER MATTERS: more specific keywords first
+  var COL = {
+    isin:          findCol(['isin','ticker','symbol','codice','strumento']),
+    name:          findCol(['name','nome','company','descrizione','issuer']),
+    qty:           findCol(['quantity','qty','quantita','shares','units','pezzi']),
+    investedPrice: findCol(['invested price','avg price','average price','prezzo medio',
+                            'buy price','unit price','purchase price','entry price',
+                            'prezzo carico','prezzo unitario','carico']),
+    investedValue: findCol(['invested value','valore investito','book value',
+                            'total invested','costo totale','total cost','importo investito']),
+    currentValue:  findCol(['current value','valore corrente','market value','last value','valore attuale']),
+    currency:      findCol(['currency','valuta','ccy','divisa','currency code'])
+  };
+
+  console.log('Colonne rilevate:', COL);
+
+  if(!COL.isin){ alert('Colonna ISIN/Ticker non trovata.\nColonne presenti: '+headers.join(', ')); return; }
+  if(!COL.qty){  alert('Colonna Quantity non trovata.\nColonne presenti: '+headers.join(', ')); return; }
+
+  var rawRows = [];
+  rows.forEach(function(row){
+    var isinRaw = String(row[COL.isin]||'').trim().toUpperCase();
+    if(!isinRaw || isinRaw.length < 2) return;
+
+    var qtyP   = parseNum(row[COL.qty]);
+    var invP   = parseNum(row[COL.investedPrice]);
+    var invV   = parseNum(row[COL.investedValue]);
+    var curV   = parseNum(row[COL.currentValue]);
+
+    var qty    = qtyP.n;
+    var avgPx  = invP.n;  // Invested Price = avg price per share
+
+    // Fallback: if no avg price col, compute from invested value / qty
+    if(avgPx === 0 && invV.n > 0 && qty > 0){
+      avgPx = invV.n / qty;
+    }
+
+    // Currency: prefer explicit col, then from price cell, then invested value cell
+    var rawCurrency = (COL.currency ? String(row[COL.currency]||'').trim().toUpperCase() : null)
+      || invP.cur || invV.cur || curV.cur || 'USD';
+    var currency = normalizeImportedCurrency(rawCurrency, isinRaw);
+
+    if(qty === 0) return; // skip rows with no quantity
+
+    rawRows.push({
+      rawTicker: isinRaw,
+      name:      COL.name ? String(row[COL.name]||'').trim() : '',
+      qty:       qty,
+      avgPx:     avgPx,
+      currency:  currency,
+      investedValue: round2(invV.n),
+      currentValue: round2(curV.n)
+    });
+  });
+
+  if(!rawRows.length){ alert('Nessuna riga valida. Controlla le intestazioni.'); return; }
+
+  // --- CONVERT ISINs ---
+  showMsg('Conversione ISIN: '+rawRows.length+' titoli...','success');
+  var toUpsert = [];
+  var isinFailed = [];
+
+  for(var ri=0; ri<rawRows.length; ri++){
+    var rr   = rawRows[ri];
+    var tick = rr.rawTicker;
+    if(isISIN(tick)){
+      var conv = await isinToTicker(tick);
+      if(conv){ tick = conv; }
+      else     { isinFailed.push(rr.rawTicker+' ('+rr.name+')'); }
+    }
+    toUpsert.push({
+      user_id:       currentUser.id,
+      ticker:        tick,
+      name:          rr.name,
+      asset_type:    detectAssetType(rr.name, tick, rr.rawTicker),
+      quantity:      rr.qty,
+      avg_buy_price: Math.round(rr.avgPx * 100) / 100,
+      currency:      rr.currency,
+      notes:         mergePositionImportMeta('', {
+        importedInvestedValue: rr.investedValue,
+        importedCurrentValue: rr.currentValue,
+        importedCurrency: rr.currency
+      })
+    });
+  }
+
+  // --- PREVIEW & CONFIRM ---
+  var preview = toUpsert.slice(0,6).map(function(r){
+    return r.ticker+' | qty: '+r.qty+' | avg: '+r.avg_buy_price+' '+r.currency;
+  }).join('\n');
+  var failNote = isinFailed.length ? '\n\nISIN non convertiti ('+isinFailed.length+'):\n'+isinFailed.slice(0,4).join('\n') : '';
+
+  if(!confirm('Importare '+toUpsert.length+' posizioni?\n\n'+preview+
+              (toUpsert.length>6?'\n...':'')+failNote)) return;
+
+  // --- UPSERT ---
+  var errors=[], updated=0, inserted=0;
+  for(var i=0; i<toUpsert.length; i++){
+    var row = toUpsert[i];
+    var existing = positions.find(function(p){ return p.ticker===row.ticker; });
+    var res;
+    if(existing){
+      var existingMeta = getPositionImportMeta(existing.notes);
+      res = await sb.from('trading_positions').update({
+        quantity:      row.quantity,
+        avg_buy_price: row.avg_buy_price,
+        name:          row.name || existing.name,
+        currency:      row.currency || existing.currency,
+        notes:         mergePositionImportMeta(stripPositionImportMeta(existing.notes || ''), getPositionImportMeta(row.notes) || existingMeta)
+      }).eq('id', existing.id);
+      if(!res.error) updated++;
+    } else {
+      res = await sb.from('trading_positions').insert(row);
+      if(!res.error) inserted++;
+    }
+    if(res.error) errors.push(row.ticker+': '+res.error.message);
+  }
+
+  var msg = inserted+' nuovi, '+updated+' aggiornati.';
+  if(errors.length) alert('Import con errori.\n'+msg+'\n\n'+errors.slice(0,4).join('\n'));
+  else showMsg('Import riuscito: '+msg,'success');
+  await loadPositions();
+}
+
+async function importPortfolioPDF(file){
+  // Read PDF as base64 and send to Claude for extraction
+  var b64 = await new Promise(function(res,rej){
+    var r = new FileReader();
+    r.onload = function(){ res(r.result.split(',')[1]); };
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+
+  showMsg('Analisi PDF in corso con AI...','success');
+
+  var apiKey = localStorage.getItem('inv_key') || DEFAULT_KEY;
+  var resp = await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'x-api-key':apiKey,
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true'
+    },
+    body: JSON.stringify({
+      model:'claude-sonnet-4-6',
+      max_tokens:2000,
+      messages:[{
+        role:'user',
+        content:[
+          {type:'document', source:{type:'base64', media_type:'application/pdf', data:b64}},
+          {type:'text', text:'Estrai da questo documento le posizioni di portafoglio. Rispondi SOLO con JSON array, nessun testo fuori. Formato: [{"ticker":"AAPL","name":"Apple Inc","asset_type":"stock","quantity":10,"avg_buy_price":150.00,"currency":"USD"}]. Se il documento e un rendiconto bancario/broker, estrai tutti i titoli con quantita e prezzo medio o valore unitario. Se manca un campo usa null.'}
+        ]
+      }]
+    })
+  });
+
+  if(!resp.ok){ alert('Errore API: '+resp.status); return; }
+  var data = await resp.json();
+  if(!data.content||!data.content[0]){ alert('Risposta API non valida.'); return; }
+
+  var text = data.content[0].text;
+  var match = text.match(/\[[\s\S]*\]/);
+  if(!match){ alert('Nessun dato estratto dal PDF. Prova con un file XLS.'); return; }
+
+  var parsed;
+  try{ parsed = JSON.parse(match[0]); } catch(e){ alert('Errore parsing risposta AI.'); return; }
+
+  if(!parsed.length){ alert('Nessuna posizione trovata nel PDF.'); return; }
+
+  var preview = parsed.slice(0,5).map(function(r){ return (r.ticker||'?')+' x'+(r.quantity||0)+' @ '+(r.avg_buy_price||0); }).join('\n');
+  if(!confirm('Importare '+parsed.length+' posizioni dal PDF?\n\n'+preview+(parsed.length>5?'\n...':''))) return;
+
+  var errors = [];
+  for(var i=0; i<parsed.length; i++){
+    var row = parsed[i];
+    if(!row.ticker) continue;
+    row.user_id = currentUser.id;
+    row.ticker  = String(row.ticker).toUpperCase();
+    row.quantity = parseFloat(row.quantity) || 0;
+    row.avg_buy_price = parseFloat(row.avg_buy_price) || 0;
+    row.asset_type = row.asset_type || 'stock';
+    row.currency   = row.currency   || 'USD';
+
+    var existing = positions.find(function(p){ return p.ticker === row.ticker; });
+    var res = existing
+      ? await sb.from('trading_positions').update({quantity:row.quantity,avg_buy_price:row.avg_buy_price,name:row.name||existing.name}).eq('id',existing.id)
+      : await sb.from('trading_positions').insert(row);
+    if(res.error) errors.push(row.ticker+': '+res.error.message);
+  }
+
+  if(errors.length) alert('Errori:\n'+errors.slice(0,5).join('\n'));
+  else showMsg(parsed.length+' posizioni importate dal PDF!','success');
+  await loadPositions();
+}
