@@ -1456,6 +1456,28 @@ function exportCSV(){
 }
 
 // helpers
+function parseLocalNum(s){
+  s = String(s || '').trim().replace(/[€$£\s]/g, '');
+  if (!s) return 0;
+  var hasDot   = s.indexOf('.') >= 0;
+  var hasComma = s.indexOf(',') >= 0;
+  if (hasDot && hasComma) {
+    // e.g. "1.234,56" (IT) or "1,234.56" (EN)
+    if (s.lastIndexOf('.') > s.lastIndexOf(',')) {
+      s = s.replace(/,/g, '');          // EN: remove thousands comma
+    } else {
+      s = s.replace(/\./g, '').replace(',', '.'); // IT: remove thousands dot, swap decimal
+    }
+  } else if (hasComma) {
+    var parts = s.split(',');
+    // If only 2 decimal digits after comma -> decimal separator
+    s = (parts.length === 2 && parts[1].length <= 2)
+      ? s.replace(',', '.')
+      : s.replace(/,/g, '');
+  }
+  var n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
 function v(id){return document.getElementById(id).value;}
 function set(id,val){var el=document.getElementById(id);if(el)el.value=val;}
 function num(id){return parseLocalNum(v(id));}
