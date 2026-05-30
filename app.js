@@ -956,7 +956,7 @@ function driveConnect(silent){
   if(!window.google||!window.google.accounts){if(!silent)alert('Libreria Google non caricata.');return;}
   window.google.accounts.oauth2.initTokenClient({
     client_id:clientId,
-    scope:'https://www.googleapis.com/auth/drive.file',
+    scope:'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly',
     prompt: silent ? 'none' : '',
     callback:function(resp){
       if(resp.error){
