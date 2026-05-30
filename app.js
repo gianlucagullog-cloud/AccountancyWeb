@@ -468,17 +468,21 @@ function initVerifica(){
   var inp = document.getElementById('verifica-folder-id');
   if(inp && !inp.value && cfg('gfolderid')) inp.value = cfg('gfolderid');
 
-  // Populate year dropdown from DB invoices
+  // Populate year dropdown — always rebuild
   var yearSel = document.getElementById('verifica-year');
-  if(yearSel && yearSel.options.length === 1){
+  if(yearSel){
+    var curY = new Date().getFullYear();
+    // Collect years from DB
     var years = {};
     txs.forEach(function(t){ var y=(t.date||'').slice(0,4); if(y) years[y]=1; });
-    Object.keys(years).sort().reverse().forEach(function(y){
-      var o = document.createElement('option'); o.value=y; o.textContent=y; yearSel.appendChild(o);
+    // Always include a fallback range (current-3 → current+1) so the dropdown is never empty
+    for(var y = curY-3; y <= curY+1; y++) years[String(y)] = 1;
+    // Rebuild options
+    yearSel.innerHTML = '<option value="">Tutti gli anni</option>';
+    Object.keys(years).sort().reverse().forEach(function(yr){
+      var o = document.createElement('option'); o.value=yr; o.textContent=yr; yearSel.appendChild(o);
     });
-    // Default: current year
-    var curY = String(new Date().getFullYear());
-    if(years[curY]) yearSel.value = curY;
+    yearSel.value = String(curY);
   }
 
   // Default quarter to current quarter
@@ -488,6 +492,9 @@ function initVerifica(){
   // Default month to current month
   var mSel = document.getElementById('verifica-month');
   if(mSel){ mSel.value = String(new Date().getMonth()+1); }
+
+  // Sync visibility of period sub-selectors
+  toggleVerificaPeriod();
 
   // Update drive badge in verifica tab
   var badge = document.getElementById('drive-badge-verifica');

@@ -1209,30 +1209,33 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
       <span id="drive-badge-verifica" class="drive-status" style="font-size:12px"></span>
     </div>
 
-    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px;padding:16px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border)">
+    <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:20px;padding:16px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border)">
 
       <!-- Row 1: Folder URL -->
       <div>
         <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">📁 Cartella Drive</label>
-        <input type="text" id="verifica-folder-id" placeholder="Es. https://drive.google.com/drive/folders/1aBcDeFgHiJkLmNo — lascia vuoto per usare quella in Impostazioni" style="width:100%;font-size:13px">
+        <input type="text" id="verifica-folder-id" placeholder="Incolla URL Drive o solo l'ID — lascia vuoto per usare quella in Impostazioni" style="width:100%;font-size:13px;box-sizing:border-box">
       </div>
 
-      <!-- Row 2: Period filters -->
+      <!-- Row 2: Filters + button -->
       <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
+
         <div>
           <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">📅 Anno</label>
-          <select id="verifica-year" style="font-size:13px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+          <select id="verifica-year" style="font-size:13px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);min-width:110px">
             <option value="">Tutti gli anni</option>
           </select>
         </div>
+
         <div>
-          <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Tipo periodo</label>
-          <select id="verifica-period-type" onchange="toggleVerificaPeriod()" style="font-size:13px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+          <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Periodo</label>
+          <select id="verifica-period-type" onchange="toggleVerificaPeriod()" style="font-size:13px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);min-width:130px">
             <option value="all">Tutto l'anno</option>
             <option value="quarter">Trimestre</option>
             <option value="month">Mese</option>
           </select>
         </div>
+
         <div id="verifica-quarter-wrap" style="display:none">
           <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Trimestre</label>
           <select id="verifica-quarter" style="font-size:13px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
@@ -1242,6 +1245,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
             <option value="4">Q4 — Ott/Nov/Dic</option>
           </select>
         </div>
+
         <div id="verifica-month-wrap" style="display:none">
           <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Mese</label>
           <select id="verifica-month" style="font-size:13px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
@@ -1251,11 +1255,12 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
             <option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
           </select>
         </div>
-        <button class="btn btn-primary" onclick="runDriveVerifica()" id="verifica-btn" style="white-space:nowrap;padding:9px 22px;margin-left:auto">
+
+        <button class="btn btn-primary" onclick="runDriveVerifica()" id="verifica-btn" style="white-space:nowrap;padding:9px 22px">
           🔍 Avvia verifica
         </button>
-      </div>
 
+      </div>
     </div>
 
     <div id="verifica-status" style="display:none;margin-bottom:16px;padding:10px 14px;border-radius:8px;font-size:13px"></div>
