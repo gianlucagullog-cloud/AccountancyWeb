@@ -464,9 +464,8 @@ function showTab(t){
 // ============================================================
 
 function initVerifica(){
-  // Pre-fill folder id from settings if empty
-  var inp = document.getElementById('verifica-folder-id');
-  if(inp && !inp.value && cfg('gfolderid')) inp.value = cfg('gfolderid');
+  // Never pre-fill the folder field — leave it empty so the user can freely paste any URL.
+  // The configured folder in Settings is used as silent fallback inside runDriveVerifica.
 
   // Populate year dropdown — always rebuild
   var yearSel = document.getElementById('verifica-year');
@@ -612,22 +611,50 @@ async function runDriveVerifica(){
     var periodLabel = getVerificaPeriodLabel();
     showStatus('🗃️ Confronto ' + filteredTxs.length + ' fatture (periodo: ' + periodLabel + ')...', 'info');
 
-    // DB invoices that have a fileName (were uploaded to Drive)
-    var dbWithFile = filteredTxs.filter(function(t){ return t.fileName; });
-    var dbFileNames = dbWithFile.map(function(t){ return t.fileName.toLowerCase(); });
+    // Smart fuzzy matching: invoice ↔ Drive file
+    // Tries (in order): exact fileName, invoice number, date+counterparty fragment
+    function normalize(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
 
-    // Drive file names (lowercase for comparison)
-    var driveFileNames = driveFiles.map(function(f){ return f.name.toLowerCase(); });
+    function txMatchesDriveFile(tx, driveFile){
+      var fn = normalize(driveFile.name);
+      // 1. Exact fileName stored by the app
+      if(tx.fileName && normalize(tx.fileName) === normalize(driveFile.name)) return true;
+      // 2. Invoice number present in filename (strongest fuzzy signal, min 4 chars)
+      if(tx.invoice){
+        var inv = normalize(tx.invoice);
+        if(inv.length >= 4 && fn.indexOf(inv) >= 0) return true;
+      }
+      // 3. Date (YYYYMMDD) + counterparty fragment both present in filename
+      if(tx.date && tx.counterparty){
+        var datePart = tx.date.replace(/-/g,''); // 20260401
+        var cpPart   = normalize(tx.counterparty).slice(0,8);
+        if(fn.indexOf(datePart) >= 0 && cpPart.length >= 3 && fn.indexOf(cpPart) >= 0) return true;
+      }
+      // 4. Date alone + counterparty first word (fallback)
+      if(tx.date && tx.counterparty){
+        var dateDash = tx.date; // 2026-04-01
+        var firstWord = normalize(tx.counterparty.split(' ')[0]);
+        var fnRaw = driveFile.name.toLowerCase();
+        if(fnRaw.indexOf(dateDash) >= 0 && firstWord.length >= 4 && fnRaw.indexOf(firstWord) >= 0) return true;
+      }
+      return false;
+    }
 
-    // DB invoices with NO drive file
-    var missingFromDrive = filteredTxs.filter(function(t){
-      if(!t.fileName) return true;
-      return driveFileNames.indexOf(t.fileName.toLowerCase()) === -1;
+    // For each DB invoice, find the first Drive file that matches
+    var matchedDriveFileIds = new Set();
+    var missingFromDrive = filteredTxs.filter(function(tx){
+      for(var i=0; i<driveFiles.length; i++){
+        if(txMatchesDriveFile(tx, driveFiles[i])){
+          matchedDriveFileIds.add(driveFiles[i].id);
+          return false; // matched → not missing
+        }
+      }
+      return true; // no match → missing
     });
 
     // Drive files with no matching DB invoice
     var orphanInDrive = driveFiles.filter(function(f){
-      return dbFileNames.indexOf(f.name.toLowerCase()) === -1;
+      return !matchedDriveFileIds.has(f.id);
     });
 
     // 3. Render results
