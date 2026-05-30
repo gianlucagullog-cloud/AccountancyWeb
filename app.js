@@ -467,11 +467,68 @@ function initVerifica(){
   // Pre-fill folder id from settings if empty
   var inp = document.getElementById('verifica-folder-id');
   if(inp && !inp.value && cfg('gfolderid')) inp.value = cfg('gfolderid');
+
+  // Populate year dropdown from DB invoices
+  var yearSel = document.getElementById('verifica-year');
+  if(yearSel && yearSel.options.length === 1){
+    var years = {};
+    txs.forEach(function(t){ var y=(t.date||'').slice(0,4); if(y) years[y]=1; });
+    Object.keys(years).sort().reverse().forEach(function(y){
+      var o = document.createElement('option'); o.value=y; o.textContent=y; yearSel.appendChild(o);
+    });
+    // Default: current year
+    var curY = String(new Date().getFullYear());
+    if(years[curY]) yearSel.value = curY;
+  }
+
+  // Default quarter to current quarter
+  var qSel = document.getElementById('verifica-quarter');
+  if(qSel){ qSel.value = String(Math.ceil((new Date().getMonth()+1)/3)); }
+
+  // Default month to current month
+  var mSel = document.getElementById('verifica-month');
+  if(mSel){ mSel.value = String(new Date().getMonth()+1); }
+
   // Update drive badge in verifica tab
   var badge = document.getElementById('drive-badge-verifica');
   if(badge) badge.innerHTML = driveIsReady()
     ? '<span style="color:var(--green)">&#9679; Drive connesso</span>'
     : '<span style="color:var(--orange)">&#9679; Drive non connesso — vai in Impostazioni</span>';
+}
+
+function toggleVerificaPeriod(){
+  var type = document.getElementById('verifica-period-type').value;
+  document.getElementById('verifica-quarter-wrap').style.display = type==='quarter' ? '' : 'none';
+  document.getElementById('verifica-month-wrap').style.display  = type==='month'   ? '' : 'none';
+}
+
+function getVerificaFilteredTxs(){
+  var year  = document.getElementById('verifica-year').value;
+  var ptype = document.getElementById('verifica-period-type').value;
+  var qtr   = parseInt(document.getElementById('verifica-quarter').value, 10);
+  var month = parseInt(document.getElementById('verifica-month').value, 10);
+
+  return txs.filter(function(t){
+    var d = t.date || '';
+    if(!d) return true; // no date = always include
+    var ty = d.slice(0,4);
+    var tm = parseInt(d.slice(5,7), 10);
+    if(year && ty !== year) return false;
+    if(ptype === 'quarter' && Math.ceil(tm/3) !== qtr) return false;
+    if(ptype === 'month'   && tm !== month) return false;
+    return true;
+  });
+}
+
+function getVerificaPeriodLabel(){
+  var year  = document.getElementById('verifica-year').value || 'tutti gli anni';
+  var ptype = document.getElementById('verifica-period-type').value;
+  var qLabels = {1:'Q1 (Gen-Mar)',2:'Q2 (Apr-Giu)',3:'Q3 (Lug-Set)',4:'Q4 (Ott-Dic)'};
+  var mLabels = {1:'Gennaio',2:'Febbraio',3:'Marzo',4:'Aprile',5:'Maggio',6:'Giugno',
+                 7:'Luglio',8:'Agosto',9:'Settembre',10:'Ottobre',11:'Novembre',12:'Dicembre'};
+  if(ptype==='quarter') return qLabels[parseInt(document.getElementById('verifica-quarter').value)] + ' ' + year;
+  if(ptype==='month')   return mLabels[parseInt(document.getElementById('verifica-month').value)]   + ' ' + year;
+  return year;
 }
 
 async function driveListFiles(folderId, token){
@@ -543,19 +600,21 @@ async function runDriveVerifica(){
 
     showStatus('🗃️ Confronto con le fatture nel database...', 'info');
 
-    // 2. Build sets for comparison
+    // 2. Build sets for comparison using period-filtered invoices
+    var filteredTxs = getVerificaFilteredTxs();
+    var periodLabel = getVerificaPeriodLabel();
+    showStatus('🗃️ Confronto ' + filteredTxs.length + ' fatture (periodo: ' + periodLabel + ')...', 'info');
+
     // DB invoices that have a fileName (were uploaded to Drive)
-    var dbWithFile = txs.filter(function(t){ return t.fileName; });
+    var dbWithFile = filteredTxs.filter(function(t){ return t.fileName; });
     var dbFileNames = dbWithFile.map(function(t){ return t.fileName.toLowerCase(); });
 
     // Drive file names (lowercase for comparison)
     var driveFileNames = driveFiles.map(function(f){ return f.name.toLowerCase(); });
 
     // DB invoices with NO drive file
-    var missingFromDrive = txs.filter(function(t){
-      // Invoice has no fileName at all → never linked to Drive
+    var missingFromDrive = filteredTxs.filter(function(t){
       if(!t.fileName) return true;
-      // Invoice has fileName but file is not in the folder
       return driveFileNames.indexOf(t.fileName.toLowerCase()) === -1;
     });
 
@@ -568,7 +627,7 @@ async function runDriveVerifica(){
     resultsEl.style.display = '';
 
     // Summary cards
-    var totalDb = txs.length;
+    var totalDb = filteredTxs.length;
     var totalDrive = driveFiles.length;
     var matched = totalDb - missingFromDrive.length;
     document.getElementById('verifica-summary').innerHTML =
@@ -619,8 +678,8 @@ async function runDriveVerifica(){
     var tot = missingFromDrive.length + orphanInDrive.length;
     showStatus(
       tot === 0
-        ? '✅ Nessuna discrepanza trovata. Database e Drive sono allineati.'
-        : '⚠️ Trovate ' + tot + ' discrepanze tra database e Drive.',
+        ? '✅ Nessuna discrepanza trovata per il periodo: ' + periodLabel + '.'
+        : '⚠️ Trovate ' + tot + ' discrepanze — periodo: ' + periodLabel + '.',
       tot === 0 ? 'ok' : 'error'
     );
 
