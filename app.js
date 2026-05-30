@@ -446,7 +446,7 @@ function showTab(t){
   if(isGuestMode&&!canSeeSection(t)){
     showMsg('Sezione non disponibile in modalita ospite.','error');return;
   }
-  ['carica','registro','summary','trading','utenti','settings'].forEach(function(id){
+  ['carica','registro','summary','trading','utenti','settings','verifica'].forEach(function(id){
     var el=document.getElementById('tab-'+id);if(el)el.style.display=id===t?'':'none';
     var btn=document.getElementById('tab-btn-'+id);if(btn)btn.classList.toggle('active',id===t);
   });
@@ -454,7 +454,203 @@ function showTab(t){
   if(t==='summary'){renderStats('stats-b');renderCat();renderTax();renderSimulator();renderAdvisory();}
   if(t==='trading'){loadPositions();}
   if(t==='utenti'){loadUtenti();}
+  if(t==='verifica'){initVerifica();}
 }
+
+
+
+// ============================================================
+// VERIFICA DRIVE — confronto DB vs cartella Drive
+// ============================================================
+
+function initVerifica(){
+  // Pre-fill folder id from settings if empty
+  var inp = document.getElementById('verifica-folder-id');
+  if(inp && !inp.value && cfg('gfolderid')) inp.value = cfg('gfolderid');
+  // Update drive badge in verifica tab
+  var badge = document.getElementById('drive-badge-verifica');
+  if(badge) badge.innerHTML = driveIsReady()
+    ? '<span style="color:var(--green)">&#9679; Drive connesso</span>'
+    : '<span style="color:var(--orange)">&#9679; Drive non connesso — vai in Impostazioni</span>';
+}
+
+async function driveListFiles(folderId, token){
+  var allFiles = [];
+  var pageToken = null;
+  do {
+    var url = 'https://www.googleapis.com/drive/v3/files'
+      + '?q=' + encodeURIComponent("'" + folderId + "' in parents and trashed=false")
+      + '&fields=nextPageToken,files(id,name,size,modifiedTime)'
+      + '&pageSize=1000'
+      + (pageToken ? '&pageToken='+pageToken : '');
+    var resp = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+    if(!resp.ok){
+      var err = await resp.json().catch(function(){return {};});
+      throw new Error('Drive API error: ' + (err.error&&err.error.message || resp.status));
+    }
+    var data = await resp.json();
+    allFiles = allFiles.concat(data.files || []);
+    pageToken = data.nextPageToken || null;
+  } while(pageToken);
+  return allFiles;
+}
+
+function parseDriveFolderId(input){
+  if(!input) return '';
+  // If it looks like a URL, extract the folder ID
+  var m = input.match(/\/folders\/([a-zA-Z0-9_-]{10,})/);
+  if(m) return m[1];
+  // Otherwise assume it's already a raw ID
+  return input.replace(/[^a-zA-Z0-9_-]/g,'');
+}
+
+async function runDriveVerifica(){
+  var btn = document.getElementById('verifica-btn');
+  var statusEl = document.getElementById('verifica-status');
+  var resultsEl = document.getElementById('verifica-results');
+
+  // Reset UI
+  resultsEl.style.display = 'none';
+  statusEl.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = '⏳ Verifica in corso...';
+
+  function showStatus(msg, type){
+    statusEl.style.display = '';
+    statusEl.style.background = type==='error' ? 'rgba(220,53,69,.1)' : type==='ok' ? 'rgba(25,135,84,.1)' : 'rgba(0,0,0,.05)';
+    statusEl.style.color = type==='error' ? 'var(--red)' : type==='ok' ? 'var(--green)' : 'var(--text)';
+    statusEl.style.border = '1px solid ' + (type==='error' ? 'rgba(220,53,69,.25)' : type==='ok' ? 'rgba(25,135,84,.25)' : 'var(--border)');
+    statusEl.textContent = msg;
+  }
+
+  try {
+    // Checks
+    if(!driveIsReady()){
+      showStatus('❌ Drive non connesso. Vai in Impostazioni e clicca "Connetti Google Drive".', 'error');
+      btn.disabled = false; btn.textContent = '🔍 Avvia verifica'; return;
+    }
+    var folderRaw = (document.getElementById('verifica-folder-id').value || '').trim();
+    var folderId = parseDriveFolderId(folderRaw) || cfg('gfolderid');
+    if(!folderId){
+      showStatus('❌ Inserisci un Folder ID oppure configuralo in Impostazioni.', 'error');
+      btn.disabled = false; btn.textContent = '🔍 Avvia verifica'; return;
+    }
+
+    showStatus('📂 Recupero file dalla cartella Drive...', 'info');
+
+    // 1. Get Drive files
+    var driveFiles = await driveListFiles(folderId, driveToken);
+
+    showStatus('🗃️ Confronto con le fatture nel database...', 'info');
+
+    // 2. Build sets for comparison
+    // DB invoices that have a fileName (were uploaded to Drive)
+    var dbWithFile = txs.filter(function(t){ return t.fileName; });
+    var dbFileNames = dbWithFile.map(function(t){ return t.fileName.toLowerCase(); });
+
+    // Drive file names (lowercase for comparison)
+    var driveFileNames = driveFiles.map(function(f){ return f.name.toLowerCase(); });
+
+    // DB invoices with NO drive file
+    var missingFromDrive = txs.filter(function(t){
+      // Invoice has no fileName at all → never linked to Drive
+      if(!t.fileName) return true;
+      // Invoice has fileName but file is not in the folder
+      return driveFileNames.indexOf(t.fileName.toLowerCase()) === -1;
+    });
+
+    // Drive files with no matching DB invoice
+    var orphanInDrive = driveFiles.filter(function(f){
+      return dbFileNames.indexOf(f.name.toLowerCase()) === -1;
+    });
+
+    // 3. Render results
+    resultsEl.style.display = '';
+
+    // Summary cards
+    var totalDb = txs.length;
+    var totalDrive = driveFiles.length;
+    var matched = totalDb - missingFromDrive.length;
+    document.getElementById('verifica-summary').innerHTML =
+      verifCard('📊 Fatture nel DB', totalDb, 'var(--accent)') +
+      verifCard('📂 File su Drive', totalDrive, 'var(--text2)') +
+      verifCard('✅ Abbinate', matched, 'var(--green)') +
+      verifCard('⚠️ Discrepanze', missingFromDrive.length + orphanInDrive.length,
+        (missingFromDrive.length + orphanInDrive.length) > 0 ? 'var(--red)' : 'var(--green)');
+
+    // Missing from Drive
+    var missingCount = document.getElementById('verifica-missing-count');
+    var missingList  = document.getElementById('verifica-missing-list');
+    missingCount.textContent = missingFromDrive.length;
+    if(missingFromDrive.length === 0){
+      missingList.innerHTML = '<p style="color:var(--green);font-size:13px;margin:0">✅ Tutte le fatture hanno un file su Drive.</p>';
+    } else {
+      missingList.innerHTML = verifTable(
+        ['Data','N. Fattura','Controparte','Categoria','Totale'],
+        missingFromDrive.map(function(t){
+          return [
+            t.date||'—',
+            t.invoice||'—',
+            esc(t.counterparty||'—'),
+            esc(t.category||'—'),
+            '<span style="font-weight:600">' + fmt(t.entrateTotal||t.usciteTotal||0) + ' €</span>'
+          ];
+        })
+      );
+    }
+
+    // Orphans on Drive
+    var orphanCount = document.getElementById('verifica-orphan-count');
+    var orphanList  = document.getElementById('verifica-orphan-list');
+    orphanCount.textContent = orphanInDrive.length;
+    if(orphanInDrive.length === 0){
+      orphanList.innerHTML = '<p style="color:var(--green);font-size:13px;margin:0">✅ Nessun file orfano su Drive.</p>';
+    } else {
+      orphanList.innerHTML = verifTable(
+        ['Nome file','Dimensione','Ultima modifica'],
+        orphanInDrive.map(function(f){
+          var kb = f.size ? (parseInt(f.size)/1024).toFixed(0)+' KB' : '—';
+          var dt = f.modifiedTime ? f.modifiedTime.slice(0,10) : '—';
+          return [esc(f.name), kb, dt];
+        })
+      );
+    }
+
+    var tot = missingFromDrive.length + orphanInDrive.length;
+    showStatus(
+      tot === 0
+        ? '✅ Nessuna discrepanza trovata. Database e Drive sono allineati.'
+        : '⚠️ Trovate ' + tot + ' discrepanze tra database e Drive.',
+      tot === 0 ? 'ok' : 'error'
+    );
+
+  } catch(err) {
+    showStatus('❌ Errore: ' + err.message, 'error');
+    console.error('Verifica Drive error:', err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 Avvia verifica';
+  }
+}
+
+function verifCard(label, value, color){
+  return '<div style="flex:1;min-width:120px;padding:14px 16px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);text-align:center">'
+    + '<div style="font-size:22px;font-weight:700;color:'+color+'">'+value+'</div>'
+    + '<div style="font-size:11px;color:var(--text2);margin-top:2px">'+label+'</div>'
+    + '</div>';
+}
+
+function verifTable(headers, rows){
+  var h = headers.map(function(h){ return '<th style="text-align:left;padding:8px 10px;font-size:11px;color:var(--text2);font-weight:600;border-bottom:1px solid var(--border)">'+h+'</th>'; }).join('');
+  var body = rows.map(function(row, i){
+    var bg = i%2===0 ? 'var(--surface)' : 'var(--surface2)';
+    var cells = row.map(function(c){ return '<td style="padding:8px 10px;font-size:12.5px;border-bottom:1px solid var(--border)">'+c+'</td>'; }).join('');
+    return '<tr style="background:'+bg+'">'+cells+'</tr>';
+  }).join('');
+  return '<div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">'
+    + '<table style="width:100%;border-collapse:collapse"><thead><tr>'+h+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+}
+
 
 // PERIOD FILTERS
 function populateYearFilters(){

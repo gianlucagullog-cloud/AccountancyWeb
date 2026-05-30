@@ -626,6 +626,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
   <button class="tab" id="tab-btn-summary" onclick="showTab('summary')">Summary &amp; Tax</button>
   <button class="tab" id="tab-btn-trading" onclick="showTab('trading')">&#128200; Trading</button>
   <button class="tab" id="tab-btn-utenti" onclick="showTab('utenti')">&#128101; Utenti</button>
+  <button class="tab" id="tab-btn-verifica" onclick="showTab('verifica')">🔍 Verifica Drive</button>
   <button class="tab" id="tab-btn-settings" onclick="showTab('settings')">Impostazioni</button>
 </div>
 
@@ -1193,6 +1194,57 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
       <span style="color:var(--text2);font-size:10.5px" id="tx-count"></span>
     </div>
 
+  </div>
+</div>
+
+
+<!-- VERIFICA DRIVE -->
+<div id="tab-verifica" style="display:none">
+  <div class="form-card">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+      <div>
+        <h3 style="margin:0 0 4px">🔍 Verifica Drive</h3>
+        <p style="margin:0;font-size:12px;color:var(--text2)">Confronta le fatture nel database con i file nella cartella Google Drive</p>
+      </div>
+      <span id="drive-badge-verifica" class="drive-status" style="font-size:12px"></span>
+    </div>
+
+    <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:20px;padding:14px 16px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border)">
+      <div style="flex:1;min-width:240px">
+        <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Folder ID cartella Drive (lascia vuoto per usare quella configurata in Impostazioni)</label>
+        <input type="text" id="verifica-folder-id" placeholder="Es. https://drive.google.com/drive/folders/1aBcDeFgHiJkLmNo oppure solo l'ID — lascia vuoto per usare quella in Impostazioni" style="width:100%;font-size:13px">
+      </div>
+      <button class="btn btn-primary" onclick="runDriveVerifica()" id="verifica-btn" style="white-space:nowrap;padding:10px 22px">
+        🔍 Avvia verifica
+      </button>
+    </div>
+
+    <div id="verifica-status" style="display:none;margin-bottom:16px;padding:10px 14px;border-radius:8px;font-size:13px"></div>
+
+    <div id="verifica-results" style="display:none">
+      <!-- Riepilogo -->
+      <div id="verifica-summary" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px"></div>
+
+      <!-- Fatture DB senza file Drive -->
+      <div id="verifica-missing-block" style="margin-bottom:24px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-size:16px">🗃️</span>
+          <h4 style="margin:0;font-size:14px">Fatture nel DB <strong>senza file</strong> su Drive</h4>
+          <span id="verifica-missing-count" style="background:var(--red);color:#fff;border-radius:20px;font-size:11px;padding:1px 8px;font-weight:600"></span>
+        </div>
+        <div id="verifica-missing-list"></div>
+      </div>
+
+      <!-- File Drive senza fattura DB -->
+      <div id="verifica-orphan-block">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-size:16px">📂</span>
+          <h4 style="margin:0;font-size:14px">File su Drive <strong>non presenti</strong> nel DB</h4>
+          <span id="verifica-orphan-count" style="background:var(--orange);color:#fff;border-radius:20px;font-size:11px;padding:1px 8px;font-weight:600"></span>
+        </div>
+        <div id="verifica-orphan-list"></div>
+      </div>
+    </div>
   </div>
 </div>
 
