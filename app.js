@@ -98,6 +98,7 @@ async function showApp(){
     await loadInvoices();
   }
   updateAmountSections();
+  driveAutoConnect();
   showTab('carica');
 }
 
@@ -660,28 +661,58 @@ function driveBadge(state,txt){
   if(cb) cb.style.display=state==='connected'?'none':'';
   if(db) db.style.display=state==='connected'?'':'none';
 }
-function driveConnect(){
+function driveConnect(silent){
   var clientId=cfg('gclientid');
-  if(!clientId){alert('Inserisci prima il Client ID Google.');return;}
-  if(!window.google||!window.google.accounts){alert('Libreria Google non caricata. Assicurati di aprire il file via http://localhost:8080');return;}
+  if(!clientId){if(!silent)alert('Inserisci prima il Client ID Google.');return;}
+  if(!window.google||!window.google.accounts){if(!silent)alert('Libreria Google non caricata.');return;}
   window.google.accounts.oauth2.initTokenClient({
     client_id:clientId,
     scope:'https://www.googleapis.com/auth/drive.file',
+    prompt: silent ? 'none' : '',
     callback:function(resp){
-      if(resp.error){driveBadge('error','Errore auth');document.getElementById('drive-connect-msg').textContent='Errore: '+resp.error;return;}
+      if(resp.error){
+        if(!silent){driveBadge('error','Errore auth');document.getElementById('drive-connect-msg').textContent='Errore: '+resp.error;}
+        return;
+      }
       driveToken=resp.access_token;
       driveTokenExpiry=Date.now()+(parseInt(resp.expires_in,10)||3599)*1000;
+      // Persist token in localStorage for same-browser fast restore
+      try{
+        localStorage.setItem('inv_drive_token',driveToken);
+        localStorage.setItem('inv_drive_expiry',String(driveTokenExpiry));
+      }catch(e){}
       driveBadge('connected','Drive connesso \u2713');
-      document.getElementById('drive-connect-msg').textContent='';
-      document.getElementById('drive-setup-guide').style.display='none';
+      if(!silent){
+        document.getElementById('drive-connect-msg').textContent='';
+        document.getElementById('drive-setup-guide').style.display='none';
+      }
     }
   }).requestAccessToken();
+}
+
+function driveAutoConnect(){
+  // 1) Fast path: restore valid token from localStorage (same browser)
+  try{
+    var savedToken=localStorage.getItem('inv_drive_token');
+    var savedExpiry=parseInt(localStorage.getItem('inv_drive_expiry')||'0',10);
+    if(savedToken && Date.now()<savedExpiry-60000){
+      driveToken=savedToken;
+      driveTokenExpiry=savedExpiry;
+      driveBadge('connected','Drive connesso \u2713');
+      return;
+    }
+  }catch(e){}
+  // 2) Silent OAuth re-auth (works if user previously authorized on this browser/device)
+  setTimeout(function(){
+    driveConnect(true);
+  }, 1500); // wait for Google lib to load
 }
 function driveDisconnect(){
   if(driveToken && window.google && window.google.accounts){
     try{window.google.accounts.oauth2.revoke(driveToken);}catch(e){}
   }
   driveToken=null;driveTokenExpiry=0;
+  try{localStorage.removeItem('inv_drive_token');localStorage.removeItem('inv_drive_expiry');}catch(e){}
   driveBadge('idle','Non configurato');
   var db=document.getElementById('drive-disconnect-btn');
   var cb=document.getElementById('drive-connect-btn');
