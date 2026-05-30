@@ -1217,6 +1217,18 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
         <input type="text" id="verifica-folder-id" placeholder="Incolla qui l'URL della cartella Drive da verificare (es. https://drive.google.com/drive/folders/...) — se vuoto usa quella in Impostazioni" style="width:100%;font-size:13px;box-sizing:border-box">
       </div>
 
+      <!-- Row 1b: Source selector -->
+      <div style="display:flex;gap:8px">
+        <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:2px solid var(--accent);background:var(--surface);cursor:pointer;font-size:13px;font-weight:500">
+          <input type="radio" name="verifica-source" id="verifica-src-registro" value="registro" checked onchange="updateVerificaSourceLabel()">
+          🗂️ Solo fatture con file allegato (Registro)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-size:13px;font-weight:500">
+          <input type="radio" name="verifica-source" id="verifica-src-db" value="db" onchange="updateVerificaSourceLabel()">
+          🗃️ Tutte le fatture nel DB
+        </label>
+      </div>
+
       <!-- Row 2: Filters + button -->
       <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
 

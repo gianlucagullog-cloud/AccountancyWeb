@@ -508,15 +508,34 @@ function toggleVerificaPeriod(){
   document.getElementById('verifica-month-wrap').style.display  = type==='month'   ? '' : 'none';
 }
 
+function getVerificaSource(){
+  var el = document.querySelector('input[name="verifica-source"]:checked');
+  return el ? el.value : 'registro';
+}
+
+function updateVerificaSourceLabel(){
+  var labels = document.querySelectorAll('input[name="verifica-source"]');
+  labels.forEach(function(inp){
+    var lbl = inp.closest('label');
+    if(!lbl) return;
+    lbl.style.border = inp.checked ? '2px solid var(--accent)' : '1px solid var(--border)';
+  });
+}
+
 function getVerificaFilteredTxs(){
-  var year  = document.getElementById('verifica-year').value;
-  var ptype = document.getElementById('verifica-period-type').value;
-  var qtr   = parseInt(document.getElementById('verifica-quarter').value, 10);
-  var month = parseInt(document.getElementById('verifica-month').value, 10);
+  var year   = document.getElementById('verifica-year').value;
+  var ptype  = document.getElementById('verifica-period-type').value;
+  var qtr    = parseInt(document.getElementById('verifica-quarter').value, 10);
+  var month  = parseInt(document.getElementById('verifica-month').value, 10);
+  var source = getVerificaSource();
 
   return txs.filter(function(t){
+    // Source filter
+    if(source === 'registro' && !t.fileName && !t.filePath) return false;
+
+    // Period filter
     var d = t.date || '';
-    if(!d) return true; // no date = always include
+    if(!d) return true;
     var ty = d.slice(0,4);
     var tm = parseInt(d.slice(5,7), 10);
     if(year && ty !== year) return false;
@@ -665,7 +684,7 @@ async function runDriveVerifica(){
     var totalDrive = driveFiles.length;
     var matched = totalDb - missingFromDrive.length;
     document.getElementById('verifica-summary').innerHTML =
-      verifCard('📊 Fatture nel DB', totalDb, 'var(--accent)') +
+      verifCard(getVerificaSource()==='registro' ? '🗂️ Fatture con file' : '🗃️ Fatture nel DB', totalDb, 'var(--accent)') +
       verifCard('📂 File su Drive', totalDrive, 'var(--text2)') +
       verifCard('✅ Abbinate', matched, 'var(--green)') +
       verifCard('⚠️ Discrepanze', missingFromDrive.length + orphanInDrive.length,
