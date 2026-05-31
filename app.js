@@ -583,14 +583,66 @@ async function driveListFiles(folderId, token){
 }
 
 
-async function importFromDrive(fileId, fileName){
+
+function uploadDbToDriveBtn(btn){
+  var txId    = btn.getAttribute('data-tid');
+  var folder  = btn.getAttribute('data-folder');
+  btn.disabled = true; btn.textContent = '⏳ Upload...';
+  uploadDbToDrive(txId, folder, btn);
+}
+
+async function uploadDbToDrive(txId, folderId, btn){
+  try{
+    var t = txs.find(function(x){ return x.id == txId; });
+    if(!t || !t.filePath) throw new Error('File non trovato nel DB');
+    if(!driveIsReady()) throw new Error('Drive non connesso');
+
+    // 1. Get signed URL from Supabase storage
+    var signedResult = await sb.storage.from('invoice-files').createSignedUrl(t.filePath, 300);
+    if(signedResult.error) throw new Error(signedResult.error.message);
+    var signedUrl = signedResult.data.signedUrl;
+
+    // 2. Download the file
+    var fileResp = await fetch(signedUrl);
+    if(!fileResp.ok) throw new Error('Download da Supabase fallito: '+fileResp.status);
+    var blob = await fileResp.blob();
+
+    // 3. Build filename: use stored fileName or generate one
+    var fname = t.fileName || (t.date+'_'+(t.invoice||'fattura')+'_'+(t.counterparty||'').slice(0,25)+'.pdf');
+
+    // 4. Upload to Drive folder
+    var meta = JSON.stringify({ name: fname, parents: [folderId] });
+    var form = new FormData();
+    form.append('metadata', new Blob([meta],{type:'application/json'}));
+    form.append('file', blob, fname);
+    var upResp = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+      { method:'POST', headers:{ Authorization:'Bearer '+driveToken }, body: form }
+    );
+    if(!upResp.ok){ var e=await upResp.json(); throw new Error(e.error&&e.error.message||upResp.status); }
+
+    btn.textContent = '✅ Caricato';
+    btn.style.color = 'var(--green)';
+    btn.style.borderColor = 'var(--green)';
+    showMsg('📤 '+fname+' caricato su Drive!','success');
+  } catch(err){
+    btn.disabled = false; btn.textContent = '📤 Carica su Drive';
+    showMsg('Errore upload Drive: '+err.message,'error');
+  }
+}
+
+function importFromDriveBtn(btn){
+  var fileId   = btn.getAttribute('data-fid');
+  var fileName = btn.getAttribute('data-fname');
+  btn.disabled = true; btn.textContent = '⏳ Download...';
+  importFromDrive(fileId, fileName, btn);
+}
+
+async function importFromDrive(fileId, fileName, btn){
   if(!driveIsReady()){
     showMsg('Drive non connesso. Vai in Impostazioni.','error'); return;
   }
   // Visual feedback on the button
-  var btn = document.getElementById('import-btn-'+fileId);
-  if(btn){ btn.disabled=true; btn.textContent='⏳ Download...'; }
-
   try{
     // Download file content from Drive
     var url = 'https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media';
@@ -609,7 +661,7 @@ async function importFromDrive(fileId, fileName){
 
   } catch(err){
     showMsg('Errore importazione: '+err.message,'error');
-    if(btn){ btn.disabled=false; btn.textContent='📥 Importa'; }
+    if(btn){ btn.disabled=false; btn.textContent='📥 Importa nel DB'; }
   }
 }
 
@@ -733,15 +785,23 @@ async function runDriveVerifica(){
     if(missingFromDrive.length === 0){
       missingList.innerHTML = '<p style="color:var(--green);font-size:13px;margin:0">✅ Tutte le fatture hanno un file su Drive.</p>';
     } else {
-      missingList.innerHTML = verifTable(
-        ['Data','N. Fattura','Controparte','Categoria','Totale'],
+      missingList.innerHTML = verifTableWithActions(
+        ['Data','N. Fattura','Controparte','Categoria','Totale',''],
         missingFromDrive.map(function(t){
+          var hasFile = !!t.filePath;
+          var uploadBtn = hasFile
+            ? '<button data-tid="'+t.id+'" data-folder="'+folderId+'" onclick="uploadDbToDriveBtn(this)" '
+              + 'style="padding:4px 12px;font-size:12px;border-radius:6px;border:1px solid var(--green);'
+              + 'background:transparent;color:var(--green);cursor:pointer;white-space:nowrap;font-weight:500">'
+              + '📤 Carica su Drive</button>'
+            : '<span style="font-size:11px;color:var(--text2)">Nessun file</span>';
           return [
             t.date||'—',
             t.invoice||'—',
             esc(t.counterparty||'—'),
             esc(t.category||'—'),
-            '<span style="font-weight:600">' + fmt(t.entrateTotal||t.usciteTotal||0) + ' €</span>'
+            '<span style="font-weight:600">'+fmt(t.entrateTotal||t.usciteTotal||0)+' €</span>',
+            uploadBtn
           ];
         })
       );
@@ -759,14 +819,19 @@ async function runDriveVerifica(){
         orphanInDrive.map(function(f){
           var kb = f.size ? (parseInt(f.size)/1024).toFixed(0)+' KB' : '—';
           var dt = f.modifiedTime ? f.modifiedTime.slice(0,10) : '—';
-          var btn = '<button id="import-btn-'+f.id+'" onclick="importFromDrive(\''+f.id+'\',\''+esc(f.name).replace(/'/g,'\\\'')+'\');" '
+          var btn = '<button data-fid="'+f.id+'" data-fname="'+esc(f.name)+'" onclick="importFromDriveBtn(this)" '
             + 'style="padding:4px 12px;font-size:12px;border-radius:6px;border:1px solid var(--accent);'
             + 'background:transparent;color:var(--accent);cursor:pointer;white-space:nowrap;font-weight:500">'
-            + '📥 Importa</button>';
+            + '📥 Importa nel DB</button>';
           return [esc(f.name), kb, dt, btn];
         })
       );
     }
+
+    // Update section titles based on source mode
+    var srcLabel = getVerificaSource()==='registro' ? 'Registro' : 'DB';
+    var mt = document.getElementById('verifica-missing-title');
+    if(mt) mt.innerHTML = 'Fatture nel <strong>'+srcLabel+'</strong> senza file su Drive';
 
     var tot = missingFromDrive.length + orphanInDrive.length;
     showStatus(
