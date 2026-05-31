@@ -832,6 +832,8 @@ async function runDriveVerifica(){
     var srcLabel = getVerificaSource()==='registro' ? 'Registro' : 'DB';
     var mt = document.getElementById('verifica-missing-title');
     if(mt) mt.innerHTML = 'Fatture nel <strong>'+srcLabel+'</strong> senza file su Drive';
+    var ot = document.getElementById('verifica-orphan-title');
+    if(ot) ot.innerHTML = 'File su Drive <strong>non presenti</strong> nel '+srcLabel;
 
     var tot = missingFromDrive.length + orphanInDrive.length;
     showStatus(
@@ -3570,23 +3572,34 @@ function toggleAllPositions(cb){
 async function generateRecommendations(){
   var el = document.getElementById('ai-rec-content');
   if(!el) return;
-  el.innerHTML = '<div class="ai-thinking">&#129504; Analisi AI in corso — analisi portafoglio, trend e nuove opportunita...</div>';
 
+  // Scroll into view so the user sees feedback immediately
+  el.scrollIntoView({ behavior:'smooth', block:'nearest' });
+
+  // Check API key
   var apiKey = (localStorage.getItem('inv_key')||'').trim();
   if(!apiKey || !apiKey.startsWith('sk-ant-')){
     el.innerHTML = '<div style="color:var(--orange);font-size:12px;padding:14px;background:rgba(217,119,6,0.08);border-radius:8px;border:1px solid rgba(217,119,6,0.3)">'+
-      '<b>&#128273; API Key Anthropic mancante o non valida</b><br>'+
-      'Per usare l\'analisi AI devi inserire una API key valida:<br>'+
-      '<ol style="margin:8px 0 0 16px;line-height:2">'+
-      '<li>Vai su <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--accent)">console.anthropic.com</a></li>'+
-      '<li>Clicca <b>Create Key</b></li>'+
-      '<li>Copia la chiave (inizia con sk-ant-...)</li>'+
-      '<li>Incollala in <b>Impostazioni → API Key Anthropic</b></li>'+
-      '<li>Clicca <b>Salva impostazioni</b></li>'+
-      '</ol></div>';
+      '<b>&#128273; API Key mancante o non valida</b><br>Vai in <b>Impostazioni</b>, incolla la tua API key Anthropic (inizia con sk-ant-...) e clicca Salva.</div>';
     return;
   }
-  if(!apiKey){ el.innerHTML='<div style="color:var(--red)">API key Anthropic mancante nelle Impostazioni.</div>'; return; }
+
+  // Check positions
+  if(!positions || positions.length === 0){
+    el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:14px">Nessuna posizione in portafoglio. Aggiungi delle posizioni nel tab Trading per ricevere l'analisi AI.</div>';
+    return;
+  }
+
+  // If priceCache is empty, refresh prices first
+  var hasPrices = positions.some(function(p){ return priceCache[p.ticker] || priceCache[p.ticker+'_'+tradingPeriod]; });
+  el.innerHTML = '<div class="ai-thinking">'+
+    (hasPrices ? '&#129504; Analisi AI in corso...' : '&#9203; Caricamento prezzi in corso, poi analisi AI...')+'</div>';
+
+  if(!hasPrices){
+    try{ await refreshAllPrices(); } catch(e){ console.warn('Price refresh failed:', e); }
+  }
+
+  el.innerHTML = '<div class="ai-thinking">&#129504; Analisi AI in corso — portafoglio, trend e opportunita...</div>';
 
   // Build portfolio context with all available price data
   var portfolio = positions.map(function(p){
@@ -3761,10 +3774,20 @@ async function generateRecommendations(){
     el.innerHTML = html;
 
   } catch(e){
-    el.innerHTML = '<div style="color:var(--red);font-size:12px;padding:14px;background:rgba(220,38,38,0.06);'+
-      'border-radius:var(--radius-sm);border:1px solid rgba(220,38,38,0.2)">'+
-      '<b>Errore analisi AI:</b> '+e.message+'<br><small style="color:var(--text3)">'+
-      'Verifica che i prezzi siano aggiornati e che la API key sia corretta in Impostazioni.</small></div>';
+    console.error('generateRecommendations error:', e);
+    el.innerHTML = '<div style="color:var(--red);font-size:13px;padding:16px;background:rgba(220,38,38,0.06);'+
+      'border-radius:8px;border:1px solid rgba(220,38,38,0.2)">'+
+      '<b>&#10060; Errore analisi AI</b><br>'+
+      '<span style="font-family:monospace;font-size:12px;color:var(--text2)">'+e.message+'</span><br>'+
+      '<div style="margin-top:10px;font-size:12px;color:var(--text2)">Possibili cause:'+
+      '<ul style="margin:4px 0 0 16px">'+
+      '<li>API key non valida o scaduta → controlla in Impostazioni</li>'+
+      '<li>Prezzi non caricati → apri il tab Trading e attendi il caricamento</li>'+
+      '<li>Nessuna connessione internet</li>'+
+      '</ul></div>'+
+      '<button onclick="generateRecommendations()" style="margin-top:10px;padding:6px 14px;font-size:12px;'+
+      'border-radius:6px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer">'+
+      '&#8635; Riprova</button></div>';
   }
 }
 
