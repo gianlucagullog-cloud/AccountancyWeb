@@ -3586,7 +3586,7 @@ async function generateRecommendations(){
 
   // Check positions
   if(!positions || positions.length === 0){
-    el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:14px">Nessuna posizione in portafoglio. Aggiungi delle posizioni nel tab Trading per ricevere l'analisi AI.</div>';
+    el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:14px">Nessuna posizione in portafoglio. Aggiungi delle posizioni nel tab Trading per ricevere l\'analisi AI.</div>';
     return;
   }
 
