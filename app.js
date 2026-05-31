@@ -718,8 +718,31 @@ async function runDriveVerifica(){
     var periodLabel = getVerificaPeriodLabel();
     showStatus('🗃️ Confronto ' + filteredTxs.length + ' fatture (periodo: ' + periodLabel + ')...', 'info');
 
+    // Filter Drive files by the same period
+    // Try to extract date from filename (YYYY-MM-DD prefix), fall back to modifiedTime
+    function getDriveFileDate(f){
+      var m = f.name.match(/^(\d{4}-\d{2}-\d{2})/);
+      if(m) return m[1];
+      return f.modifiedTime ? f.modifiedTime.slice(0,10) : '';
+    }
+    function driveFileInPeriod(f){
+      var year  = document.getElementById('verifica-year').value;
+      var ptype = document.getElementById('verifica-period-type').value;
+      var qtr   = parseInt(document.getElementById('verifica-quarter').value, 10);
+      var month = parseInt(document.getElementById('verifica-month').value, 10);
+      if(!year && ptype === 'all') return true; // no filter
+      var d = getDriveFileDate(f);
+      if(!d) return true; // can't determine date, always include
+      var ty = d.slice(0,4);
+      var tm = parseInt(d.slice(5,7), 10);
+      if(year && ty !== year) return false;
+      if(ptype === 'quarter' && Math.ceil(tm/3) !== qtr) return false;
+      if(ptype === 'month'   && tm !== month) return false;
+      return true;
+    }
+    var filteredDriveFiles = driveFiles.filter(driveFileInPeriod);
+
     // Smart fuzzy matching: invoice ↔ Drive file
-    // Tries (in order): exact fileName, invoice number, date+counterparty fragment
     function normalize(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
 
     function txMatchesDriveFile(tx, driveFile){
@@ -733,13 +756,13 @@ async function runDriveVerifica(){
       }
       // 3. Date (YYYYMMDD) + counterparty fragment both present in filename
       if(tx.date && tx.counterparty){
-        var datePart = tx.date.replace(/-/g,''); // 20260401
+        var datePart = tx.date.replace(/-/g,'');
         var cpPart   = normalize(tx.counterparty).slice(0,8);
         if(fn.indexOf(datePart) >= 0 && cpPart.length >= 3 && fn.indexOf(cpPart) >= 0) return true;
       }
       // 4. Date alone + counterparty first word (fallback)
       if(tx.date && tx.counterparty){
-        var dateDash = tx.date; // 2026-04-01
+        var dateDash = tx.date;
         var firstWord = normalize(tx.counterparty.split(' ')[0]);
         var fnRaw = driveFile.name.toLowerCase();
         if(fnRaw.indexOf(dateDash) >= 0 && firstWord.length >= 4 && fnRaw.indexOf(firstWord) >= 0) return true;
@@ -747,20 +770,20 @@ async function runDriveVerifica(){
       return false;
     }
 
-    // For each DB invoice, find the first Drive file that matches
+    // For each DB/Registro invoice, find the first period-filtered Drive file that matches
     var matchedDriveFileIds = new Set();
     var missingFromDrive = filteredTxs.filter(function(tx){
-      for(var i=0; i<driveFiles.length; i++){
-        if(txMatchesDriveFile(tx, driveFiles[i])){
-          matchedDriveFileIds.add(driveFiles[i].id);
-          return false; // matched → not missing
+      for(var i=0; i<filteredDriveFiles.length; i++){
+        if(txMatchesDriveFile(tx, filteredDriveFiles[i])){
+          matchedDriveFileIds.add(filteredDriveFiles[i].id);
+          return false;
         }
       }
-      return true; // no match → missing
+      return true;
     });
 
-    // Drive files with no matching DB invoice
-    var orphanInDrive = driveFiles.filter(function(f){
+    // Drive files (period-filtered) with no matching invoice
+    var orphanInDrive = filteredDriveFiles.filter(function(f){
       return !matchedDriveFileIds.has(f.id);
     });
 
@@ -769,11 +792,11 @@ async function runDriveVerifica(){
 
     // Summary cards
     var totalDb = filteredTxs.length;
-    var totalDrive = driveFiles.length;
+    var totalDrive = filteredDriveFiles.length;
     var matched = totalDb - missingFromDrive.length;
     document.getElementById('verifica-summary').innerHTML =
       verifCard(getVerificaSource()==='registro' ? '🗂️ Fatture con file' : '🗃️ Fatture nel DB', totalDb, 'var(--accent)') +
-      verifCard('📂 File su Drive', totalDrive, 'var(--text2)') +
+      verifCard('📂 File su Drive', filteredDriveFiles.length, 'var(--text2)') +
       verifCard('✅ Abbinate', matched, 'var(--green)') +
       verifCard('⚠️ Discrepanze', missingFromDrive.length + orphanInDrive.length,
         (missingFromDrive.length + orphanInDrive.length) > 0 ? 'var(--red)' : 'var(--green)');
