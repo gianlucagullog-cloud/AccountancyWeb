@@ -1218,15 +1218,18 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
       </div>
 
       <!-- Row 1b: Source selector -->
-      <div style="display:flex;gap:8px">
-        <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:2px solid var(--accent);background:var(--surface);cursor:pointer;font-size:13px;font-weight:500">
-          <input type="radio" name="verifica-source" id="verifica-src-registro" value="registro" checked onchange="updateVerificaSourceLabel()">
-          🗂️ Solo fatture con file allegato (Registro)
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-size:13px;font-weight:500">
-          <input type="radio" name="verifica-source" id="verifica-src-db" value="db" onchange="updateVerificaSourceLabel()">
-          🗃️ Tutte le fatture nel DB
-        </label>
+      <div>
+        <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:6px">Confronta con</label>
+        <div style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface)">
+          <label id="verifica-src-label-registro" style="display:flex;align-items:center;gap:6px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:500;background:var(--accent);color:#fff;transition:all .15s">
+            <input type="radio" name="verifica-source" value="registro" checked onchange="updateVerificaSourceLabel()" style="display:none">
+            🗂️ Registro (con file)
+          </label>
+          <label id="verifica-src-label-db" style="display:flex;align-items:center;gap:6px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:500;transition:all .15s">
+            <input type="radio" name="verifica-source" value="db" onchange="updateVerificaSourceLabel()" style="display:none">
+            🗃️ Tutto il DB
+          </label>
+        </div>
       </div>
 
       <!-- Row 2: Filters + button -->

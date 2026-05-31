@@ -514,12 +514,17 @@ function getVerificaSource(){
 }
 
 function updateVerificaSourceLabel(){
-  var labels = document.querySelectorAll('input[name="verifica-source"]');
-  labels.forEach(function(inp){
-    var lbl = inp.closest('label');
-    if(!lbl) return;
-    lbl.style.border = inp.checked ? '2px solid var(--accent)' : '1px solid var(--border)';
-  });
+  var checked = getVerificaSource();
+  var lblReg = document.getElementById('verifica-src-label-registro');
+  var lblDb  = document.getElementById('verifica-src-label-db');
+  if(!lblReg || !lblDb) return;
+  if(checked === 'registro'){
+    lblReg.style.background = 'var(--accent)'; lblReg.style.color = '#fff';
+    lblDb.style.background  = '';              lblDb.style.color  = '';
+  } else {
+    lblDb.style.background  = 'var(--accent)'; lblDb.style.color  = '#fff';
+    lblReg.style.background = '';              lblReg.style.color = '';
+  }
 }
 
 function getVerificaFilteredTxs(){
@@ -575,6 +580,37 @@ async function driveListFiles(folderId, token){
     pageToken = data.nextPageToken || null;
   } while(pageToken);
   return allFiles;
+}
+
+
+async function importFromDrive(fileId, fileName){
+  if(!driveIsReady()){
+    showMsg('Drive non connesso. Vai in Impostazioni.','error'); return;
+  }
+  // Visual feedback on the button
+  var btn = document.getElementById('import-btn-'+fileId);
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Download...'; }
+
+  try{
+    // Download file content from Drive
+    var url = 'https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media';
+    var resp = await fetch(url, { headers:{ Authorization:'Bearer '+driveToken } });
+    if(!resp.ok) throw new Error('Errore download Drive: '+resp.status);
+
+    var blob = await resp.blob();
+    // Determine mime type
+    var mime = blob.type || (fileName.match(/\.pdf$/i) ? 'application/pdf' : 'image/jpeg');
+    var file = new File([blob], fileName, { type: mime });
+
+    // Switch to upload tab and process the file
+    showTab('carica');
+    showMsg('📥 File scaricato da Drive: '+fileName,'success');
+    handleFile(file);
+
+  } catch(err){
+    showMsg('Errore importazione: '+err.message,'error');
+    if(btn){ btn.disabled=false; btn.textContent='📥 Importa'; }
+  }
 }
 
 function parseDriveFolderId(input){
@@ -718,12 +754,16 @@ async function runDriveVerifica(){
     if(orphanInDrive.length === 0){
       orphanList.innerHTML = '<p style="color:var(--green);font-size:13px;margin:0">✅ Nessun file orfano su Drive.</p>';
     } else {
-      orphanList.innerHTML = verifTable(
-        ['Nome file','Dimensione','Ultima modifica'],
+      orphanList.innerHTML = verifTableWithActions(
+        ['Nome file','Dimensione','Ultima modifica',''],
         orphanInDrive.map(function(f){
           var kb = f.size ? (parseInt(f.size)/1024).toFixed(0)+' KB' : '—';
           var dt = f.modifiedTime ? f.modifiedTime.slice(0,10) : '—';
-          return [esc(f.name), kb, dt];
+          var btn = '<button id="import-btn-'+f.id+'" onclick="importFromDrive(\''+f.id+'\',\''+esc(f.name).replace(/'/g,'\\\'')+'\');" '
+            + 'style="padding:4px 12px;font-size:12px;border-radius:6px;border:1px solid var(--accent);'
+            + 'background:transparent;color:var(--accent);cursor:pointer;white-space:nowrap;font-weight:500">'
+            + '📥 Importa</button>';
+          return [esc(f.name), kb, dt, btn];
         })
       );
     }
@@ -750,6 +790,21 @@ function verifCard(label, value, color){
     + '<div style="font-size:22px;font-weight:700;color:'+color+'">'+value+'</div>'
     + '<div style="font-size:11px;color:var(--text2);margin-top:2px">'+label+'</div>'
     + '</div>';
+}
+
+function verifTableWithActions(headers, rows){
+  var h = headers.map(function(hd){ return '<th style="text-align:left;padding:8px 10px;font-size:11px;color:var(--text2);font-weight:600;border-bottom:1px solid var(--border)">'+hd+'</th>'; }).join('');
+  var body = rows.map(function(row, i){
+    var bg = i%2===0 ? 'var(--surface)' : 'var(--surface2)';
+    var cells = row.map(function(c, ci){
+      // Last column: raw HTML (button)
+      var isLast = ci === row.length-1;
+      return '<td style="padding:6px 10px;font-size:12.5px;border-bottom:1px solid var(--border);'+(isLast?'width:100px;text-align:right':'')+'">'+c+'</td>';
+    }).join('');
+    return '<tr style="background:'+bg+'">'+cells+'</tr>';
+  }).join('');
+  return '<div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">'
+    + '<table style="width:100%;border-collapse:collapse"><thead><tr>'+h+'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 
 function verifTable(headers, rows){
@@ -1010,10 +1065,16 @@ function driveAutoConnect(){
       return;
     }
   }catch(e){}
-  // 2) Silent OAuth re-auth (works if user previously authorized on this browser/device)
-  setTimeout(function(){
-    driveConnect(true);
-  }, 1500); // wait for Google lib to load
+  // 2) Wait for Google Identity Services lib, then silent re-auth
+  var attempts=0;
+  function trySilent(){
+    if(window.google && window.google.accounts && window.google.accounts.oauth2){
+      driveConnect(true);
+    } else if(attempts++ < 10){
+      setTimeout(trySilent, 800);
+    }
+  }
+  setTimeout(trySilent, 500);
 }
 function driveDisconnect(){
   if(driveToken && window.google && window.google.accounts){
