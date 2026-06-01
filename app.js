@@ -129,17 +129,38 @@ function uploadInvoiceFile(file,invoiceId){
     return sb.from('invoices').update({file_path:path,file_name:file.name}).eq('id',invoiceId);
   });
 }
-function downloadInvoiceFile(t){
-  if(!t.filePath){
-    // Try localStorage fallback
-    var stored=localStorage.getItem('inv_file_'+t.id);
-    if(stored){try{var f=JSON.parse(stored);var a=document.createElement('a');a.href='data:'+f.type+';base64,'+f.b64;a.download=f.name;a.click();return;}catch(e){}}
-    alert('Nessun file allegato a questa fattura.');return;
+async function downloadInvoiceFile(t){
+  // 1. Try localStorage (files saved in browser before Supabase storage was implemented)
+  var stored = localStorage.getItem('inv_file_'+t.id);
+  if(stored){
+    try{
+      var f=JSON.parse(stored);
+      var a=document.createElement('a');a.href='data:'+f.type+';base64,'+f.b64;
+      a.download=f.name;a.click();return;
+    }catch(e){}
   }
-  sb.storage.from('invoice-files').createSignedUrl(t.filePath,3600).then(function(r){
-    if(r.error||!r.data){alert('Errore nel recupero del file.');return;}
-    var a=document.createElement('a');a.href=r.data.signedUrl;a.download=t.fileName||'fattura';a.click();
-  });
+
+  // 2. Try Supabase Storage via filePath
+  if(t.filePath){
+    try{
+      var r = await sb.storage.from('invoice-files').createSignedUrl(t.filePath, 3600);
+      if(r.data && r.data.signedUrl){
+        var a=document.createElement('a');a.href=r.data.signedUrl;
+        a.download=t.fileName||'fattura';a.click();return;
+      }
+      // File not found in storage — show helpful message
+      var errMsg = r.error ? r.error.message : 'File non trovato';
+      showMsg('⚠️ File non trovato in archivio ('+errMsg+'). '
+        +'Il file potrebbe essere stato caricato prima della funzione di archiviazione. '
+        +'Ricaricalo tramite il pulsante di modifica ✏️ oppure importalo da Drive.', 'error');
+      return;
+    }catch(e){
+      showMsg('Errore download: '+e.message,'error');return;
+    }
+  }
+
+  // 3. No file at all
+  showMsg('Nessun file allegato a questa fattura. Usa il pulsante ✏️ per allegarne uno, oppure importalo dalla funzione Verifica Drive.','error');
 }
 function viewInvoiceFile(t){
   // Try Supabase Storage first
