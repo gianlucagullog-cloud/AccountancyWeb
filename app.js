@@ -3814,10 +3814,7 @@ async function generateRecommendations(){
 
   if(!hasPrices){
     el.innerHTML = '<div class="ai-thinking">&#9203; Caricamento prezzi in corso...</div>';
-    try{
-      var priceTimeout = new Promise(function(_,rej){ setTimeout(function(){ rej(new Error('timeout')); }, 20000); });
-      await Promise.race([refreshAllPrices(), priceTimeout]);
-    } catch(e){ console.warn('Price refresh failed/timeout:', e); }
+    try{ await refreshAllPrices(); } catch(e){ console.warn('Price refresh failed:', e); }
   }
 
   el.innerHTML = '<div class="ai-thinking">&#129504; Analisi AI in corso — portafoglio, trend e opportunita...</div>';
@@ -3894,32 +3891,24 @@ async function generateRecommendations(){
     '    }\n'+
     '  ]\n'+
     '}\n'+
-    'Per new_opportunities suggerisci 3-5 titoli/ETF NON presenti nel portafoglio che si adattano alla strategia buy&hold. Includi almeno 2 ETF diversificati.\n'+
-    'IMPORTANTE: Mantieni ogni campo di testo sotto i 200 caratteri. Il JSON deve essere completo e valido.';
+    'Per new_opportunities suggerisci SOLO 2 titoli/ETF non presenti nel portafoglio.\n'+
+    'IMPORTANTE: testo brevissimo (max 80 caratteri per campo). JSON completo e valido, niente testo fuori dal JSON.';
 
   try{
-    var abortCtrl = new AbortController();
-    var abortTimer = setTimeout(function(){ abortCtrl.abort(); }, 90000);
-    var response;
-    try {
-      response = await fetch('https://api.anthropic.com/v1/messages',{
-        method: 'POST',
-        signal: abortCtrl.signal,
-        headers:{
-          'Content-Type':'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version':'2023-06-01',
-          'anthropic-dangerous-direct-browser-access':'true'
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 4096,
-          messages:[{role:'user', content:prompt}]
-        })
-      });
-    } finally {
-      clearTimeout(abortTimer);
-    }
+    var response = await fetch('https://api.anthropic.com/v1/messages',{
+      method: 'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2000,
+        messages:[{role:'user', content:prompt}]
+      })
+    });
 
     if(!response.ok){
       var errData = await response.json().catch(function(){ return {}; });
@@ -4005,13 +3994,7 @@ async function generateRecommendations(){
 
   } catch(e){
     console.error('generateRecommendations error:', e);
-    var isTimeout = e.name === 'AbortError';
-    var isCors = e.message && e.message.toLowerCase().indexOf('fetch') >= 0 && !isTimeout;
-    var hint = isTimeout
-      ? 'La richiesta ha impiegato più di 60 secondi. Controlla la connessione e riprova.'
-      : isCors
-        ? 'Errore di rete (possibile blocco CORS o firewall). Prova da un altro browser o rete.'
-        : e.message;
+    var hint = e.message || 'Errore sconosciuto';
     el.innerHTML = '<div style="color:var(--red);font-size:13px;padding:16px;background:rgba(220,38,38,0.06);'+
       'border-radius:8px;border:1px solid rgba(220,38,38,0.2)">'+
       '<b>&#10060; Errore analisi AI</b><br>'+
