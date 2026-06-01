@@ -3813,7 +3813,11 @@ async function generateRecommendations(){
     (hasPrices ? '&#129504; Analisi AI in corso...' : '&#9203; Caricamento prezzi in corso, poi analisi AI...')+'</div>';
 
   if(!hasPrices){
-    try{ await refreshAllPrices(); } catch(e){ console.warn('Price refresh failed:', e); }
+    el.innerHTML = '<div class="ai-thinking">&#9203; Caricamento prezzi in corso...</div>';
+    try{
+      var priceTimeout = new Promise(function(_,rej){ setTimeout(function(){ rej(new Error('timeout')); }, 20000); });
+      await Promise.race([refreshAllPrices(), priceTimeout]);
+    } catch(e){ console.warn('Price refresh failed/timeout:', e); }
   }
 
   el.innerHTML = '<div class="ai-thinking">&#129504; Analisi AI in corso — portafoglio, trend e opportunita...</div>';
@@ -3895,7 +3899,7 @@ async function generateRecommendations(){
 
   try{
     var abortCtrl = new AbortController();
-    var abortTimer = setTimeout(function(){ abortCtrl.abort(); }, 60000);
+    var abortTimer = setTimeout(function(){ abortCtrl.abort(); }, 90000);
     var response;
     try {
       response = await fetch('https://api.anthropic.com/v1/messages',{
