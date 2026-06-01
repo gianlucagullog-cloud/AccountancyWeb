@@ -3861,38 +3861,13 @@ async function generateRecommendations(){
   });
 
   var prompt =
-    'Sei un consulente finanziario esperto in investimenti di medio-lungo periodo con strategia buy & hold.\n\n'+
-    'PORTAFOGLIO ATTUALE:\n'+
-    'Investito totale: '+totalInvested.toFixed(0)+' EUR\n'+
-    'Valore attuale: '+totalValue.toFixed(0)+' EUR\n'+
-    'Posizioni ('+portfolio.length+'):\n'+
-    JSON.stringify(portfolio, null, 1)+'\n\n'+
-    'STRATEGIA INVESTITORE: buy & hold, orizzonte 5-15 anni, focus su crescita capitale e qualita aziendale.\n\n'+
-    'COMPITO: Analizza il portafoglio e rispondi SOLO con un JSON object (nessun testo fuori dal JSON):\n'+
-    '{\n'+
-    '  "portfolio_analysis": "breve analisi qualitativa del portafoglio (3-4 frasi: diversificazione, concentrazione settoriale, qualita)",\n'+
-    '  "recommendations": [\n'+
-    '    {\n'+
-    '      "ticker": "AAPL",\n'+
-    '      "action": "buy_more|sell|hold|reduce",\n'+
-    '      "priority": "high|medium|low",\n'+
-    '      "title": "titolo breve",\n'+
-    '      "reason": "motivazione 2-3 frasi basata su trend, fondamentali e strategia buy&hold",\n'+
-    '      "target_action": "Azione concreta suggerita (es: aumenta posizione del 20%, vendi 30%, mantieni)"\n'+
-    '    }\n'+
-    '  ],\n'+
-    '  "new_opportunities": [\n'+
-    '    {\n'+
-    '      "ticker": "VGT",\n'+
-    '      "name": "Vanguard IT ETF",\n'+
-    '      "type": "etf",\n'+
-    '      "reason": "perche si adatta alla strategia e completa il portafoglio",\n'+
-    '      "priority": "high|medium|low"\n'+
-    '    }\n'+
-    '  ]\n'+
-    '}\n'+
-    'Per new_opportunities suggerisci SOLO 2 titoli/ETF non presenti nel portafoglio.\n'+
-    'IMPORTANTE: testo brevissimo (max 80 caratteri per campo). JSON completo e valido, niente testo fuori dal JSON.';
+    'Sei un consulente finanziario, strategia buy & hold 5-15 anni.\n\n'+
+    'PORTAFOGLIO: investito '+totalInvested.toFixed(0)+' EUR, valore '+totalValue.toFixed(0)+' EUR\n'+
+    'Posizioni:\n'+
+    portfolio.map(function(p){ return p.ticker+(p.price?' @'+p.price:'')+(p.pnlPct?' '+p.pnlPct:'')+(p.change1d?' 1d:'+p.change1d:''); }).join('\n')+'\n\n'+
+    'Rispondi SOLO con JSON valido e completo (niente testo fuori):\n'+
+    '{"portfolio_analysis":"2 frasi max","recommendations":[{"ticker":"X","action":"buy_more|sell|hold|reduce","priority":"high|medium|low","title":"max 40 car","reason":"max 80 car","target_action":"max 60 car"}],"new_opportunities":[{"ticker":"X","name":"X","type":"etf|stock","reason":"max 60 car","priority":"high|medium|low"}]}\n'+
+    'Limiti OBBLIGATORI: max 3 recommendations, max 2 new_opportunities, ogni stringa max 80 caratteri.';
 
   try{
     var response = await fetch('https://api.anthropic.com/v1/messages',{
@@ -3924,7 +3899,21 @@ async function generateRecommendations(){
     // Extract JSON object from response
     var jsonMatch = text.match(/\{[\s\S]*\}/);
     if(!jsonMatch) throw new Error('Nessun JSON nella risposta');
-    var result = JSON.parse(jsonMatch[0]);
+    var result;
+    try {
+      result = JSON.parse(jsonMatch[0]);
+    } catch(parseErr) {
+      // JSON troncato: tenta di recuperare chiudendo brackets aperti
+      var raw = jsonMatch[0];
+      var opens = (raw.match(/\[/g)||[]).length - (raw.match(/\]/g)||[]).length;
+      var braces = (raw.match(/\{/g)||[]).length - (raw.match(/\}/g)||[]).length;
+      // Rimuovi eventuale virgola finale prima di chiudere
+      raw = raw.replace(/,\s*$/, '');
+      for(var i=0; i<opens; i++) raw += ']';
+      for(var j=0; j<braces; j++) raw += '}';
+      try { result = JSON.parse(raw); }
+      catch(e2) { throw new Error('JSON Parse error: '+parseErr.message); }
+    }
 
     var actionStyle = {
       buy_more: {cls:'rec-buy',   icon:'&#128200;', color:'var(--green)', label:'AUMENTA'},
