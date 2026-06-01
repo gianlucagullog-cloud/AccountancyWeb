@@ -710,9 +710,25 @@ async function runDriveVerifica(){
 
     // 1. Get Drive files
     var rawDriveFiles = await driveListFiles(folderId, driveToken);
-    // Deduplicate by file ID (same file can appear multiple times in sub-folders or shortcuts)
-    var seenIds = new Set();
-    var driveFiles = rawDriveFiles.filter(function(f){
+    // ── Detect duplicates BEFORE deduplication ──────────────────────────────
+    var nameGroups = {};
+    rawDriveFiles.forEach(function(f){
+      var key = f.name.trim().toLowerCase();
+      if(!nameGroups[key]) nameGroups[key] = [];
+      nameGroups[key].push(f);
+    });
+    var duplicateGroups = Object.values(nameGroups).filter(function(g){ return g.length > 1; });
+
+    // ── Deduplicate: keep most recently modified copy ─────────────────────
+    var seenIds   = new Set();
+    var bestByName = {};
+    rawDriveFiles.forEach(function(f){
+      var key = f.name.trim().toLowerCase();
+      if(!bestByName[key] || (f.modifiedTime||'') > (bestByName[key].modifiedTime||'')){
+        bestByName[key] = f;
+      }
+    });
+    var driveFiles = Object.values(bestByName).filter(function(f){
       if(seenIds.has(f.id)) return false;
       seenIds.add(f.id);
       return true;
@@ -780,6 +796,11 @@ async function runDriveVerifica(){
         var fnRaw = driveFile.name.toLowerCase();
         if(fnRaw.indexOf(dateDash) >= 0 && firstWord.length >= 4 && fnRaw.indexOf(firstWord) >= 0) return true;
       }
+      // 5. Counterparty name fragment anywhere in filename (last resort, min 6 chars)
+      if(tx.counterparty){
+        var cp6 = normalize(tx.counterparty).slice(0,10);
+        if(cp6.length >= 6 && fn.indexOf(cp6) >= 0) return true;
+      }
       return false;
     }
 
@@ -804,15 +825,50 @@ async function runDriveVerifica(){
     resultsEl.style.display = '';
 
     // Summary cards
+    var totalDupes = duplicateGroups.reduce(function(s,g){return s+g.length-1;},0);
     var totalDb = filteredTxs.length;
     var totalDrive = filteredDriveFiles.length;
     var matched = totalDb - missingFromDrive.length;
     document.getElementById('verifica-summary').innerHTML =
       verifCard(getVerificaSource()==='registro' ? '🗂️ Fatture con file' : '🗃️ Fatture nel DB', totalDb, 'var(--accent)') +
       verifCard('📂 File su Drive', filteredDriveFiles.length, 'var(--text2)') +
+      (totalDupes > 0 ? verifCard('🔁 Duplicati Drive', totalDupes, '#6f42c1') : '') +
       verifCard('✅ Abbinate', matched, 'var(--green)') +
       verifCard('⚠️ Discrepanze', missingFromDrive.length + orphanInDrive.length,
         (missingFromDrive.length + orphanInDrive.length) > 0 ? 'var(--red)' : 'var(--green)');
+
+    // ── Render duplicates section ───────────────────────────────────────────
+    var dupesBlock = document.getElementById('verifica-dupes-block');
+    var dupesList  = document.getElementById('verifica-dupes-list');
+    var dupesCount = document.getElementById('verifica-dupes-count');
+    if(dupesBlock && dupesList && dupesCount){
+      var totalDupes = duplicateGroups.reduce(function(s,g){return s+g.length-1;},0);
+      dupesCount.textContent = totalDupes;
+      if(duplicateGroups.length === 0){
+        dupesBlock.style.display = 'none';
+      } else {
+        dupesBlock.style.display = '';
+        var dupRows = [];
+        duplicateGroups.forEach(function(group){
+          group.sort(function(a,b){ return (b.modifiedTime||'').localeCompare(a.modifiedTime||''); });
+          group.forEach(function(f, i){
+            var kb  = f.size ? (parseInt(f.size)/1024).toFixed(0)+' KB' : '—';
+            var dt  = f.modifiedTime ? f.modifiedTime.slice(0,10) : '—';
+            var tag = i === 0
+              ? '<span style="font-size:11px;color:var(--green);font-weight:600">✓ Più recente</span>'
+              : '<span style="font-size:11px;color:var(--red);font-weight:600">✗ Duplicato</span>';
+            var nameCell = (i === 0 ? '' : '<span style="color:var(--text2)">↳ </span>') + esc(f.name);
+            dupRows.push([nameCell, kb, dt, tag]);
+          });
+          dupRows.push(['<hr style="margin:0;border:none;border-top:2px solid var(--border)">','','','']);
+        });
+        dupRows.pop(); // remove last divider
+        dupesList.innerHTML = verifTableWithActions(
+          ['Nome file','Dimensione','Ultima modifica',''],
+          dupRows
+        );
+      }
+    }
 
     // Missing from Drive
     var missingCount = document.getElementById('verifica-missing-count');
@@ -871,7 +927,7 @@ async function runDriveVerifica(){
     var ot = document.getElementById('verifica-orphan-title');
     if(ot) ot.innerHTML = 'File su Drive <strong>non presenti</strong> nel '+srcLabel;
 
-    var tot = missingFromDrive.length + orphanInDrive.length;
+    var tot = missingFromDrive.length + orphanInDrive.length + totalDupes;
     showStatus(
       tot === 0
         ? '✅ Nessuna discrepanza trovata per il periodo: ' + periodLabel + '.'
