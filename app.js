@@ -129,38 +129,17 @@ function uploadInvoiceFile(file,invoiceId){
     return sb.from('invoices').update({file_path:path,file_name:file.name}).eq('id',invoiceId);
   });
 }
-async function downloadInvoiceFile(t){
-  // 1. Try localStorage (files saved in browser before Supabase storage was implemented)
-  var stored = localStorage.getItem('inv_file_'+t.id);
-  if(stored){
-    try{
-      var f=JSON.parse(stored);
-      var a=document.createElement('a');a.href='data:'+f.type+';base64,'+f.b64;
-      a.download=f.name;a.click();return;
-    }catch(e){}
+function downloadInvoiceFile(t){
+  if(!t.filePath){
+    // Try localStorage fallback
+    var stored=localStorage.getItem('inv_file_'+t.id);
+    if(stored){try{var f=JSON.parse(stored);var a=document.createElement('a');a.href='data:'+f.type+';base64,'+f.b64;a.download=f.name;a.click();return;}catch(e){}}
+    alert('Nessun file allegato a questa fattura.');return;
   }
-
-  // 2. Try Supabase Storage via filePath
-  if(t.filePath){
-    try{
-      var r = await sb.storage.from('invoice-files').createSignedUrl(t.filePath, 3600);
-      if(r.data && r.data.signedUrl){
-        var a=document.createElement('a');a.href=r.data.signedUrl;
-        a.download=t.fileName||'fattura';a.click();return;
-      }
-      // File not found in storage — show helpful message
-      var errMsg = r.error ? r.error.message : 'File non trovato';
-      showMsg('⚠️ File non trovato in archivio ('+errMsg+'). '
-        +'Il file potrebbe essere stato caricato prima della funzione di archiviazione. '
-        +'Ricaricalo tramite il pulsante di modifica ✏️ oppure importalo da Drive.', 'error');
-      return;
-    }catch(e){
-      showMsg('Errore download: '+e.message,'error');return;
-    }
-  }
-
-  // 3. No file at all
-  showMsg('Nessun file allegato a questa fattura. Usa il pulsante ✏️ per allegarne uno, oppure importalo dalla funzione Verifica Drive.','error');
+  sb.storage.from('invoice-files').createSignedUrl(t.filePath,3600).then(function(r){
+    if(r.error||!r.data){alert('Errore nel recupero del file.');return;}
+    var a=document.createElement('a');a.href=r.data.signedUrl;a.download=t.fileName||'fattura';a.click();
+  });
 }
 function viewInvoiceFile(t){
   // Try Supabase Storage first
@@ -556,7 +535,8 @@ function getVerificaFilteredTxs(){
   var source = getVerificaSource();
 
   return txs.filter(function(t){
-    // Source filter: both modes use all invoices — difference is only in button labels
+    // Source filter
+    if(source === 'registro' && !t.fileName && !t.filePath) return false;
 
     // Period filter
     var d = t.date || '';
@@ -609,6 +589,43 @@ function uploadDbToDriveBtn(btn){
   var folder  = btn.getAttribute('data-folder');
   btn.disabled = true; btn.textContent = '⏳ Upload...';
   uploadDbToDrive(txId, folder, btn);
+}
+
+function uploadFileToDriveBtn(btn){
+  var txId   = btn.getAttribute('data-tid');
+  var folder = btn.getAttribute('data-folder');
+  var input  = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.pdf,.jpg,.jpeg,.png,.heic';
+  input.onchange = async function(){
+    var file = input.files[0];
+    if(!file) return;
+    btn.disabled = true; btn.textContent = '⏳ Upload...';
+    try {
+      if(!driveIsReady()) throw new Error('Drive non connesso');
+      var t = txs.find(function(x){ return x.id == txId; });
+      var fname = t
+        ? (t.date+'_'+(t.invoice||'fattura')+'_'+(t.counterparty||'').slice(0,25)+'.'+file.name.split('.').pop())
+        : file.name;
+      var meta = JSON.stringify({ name: fname, parents: [folder] });
+      var form = new FormData();
+      form.append('metadata', new Blob([meta],{type:'application/json'}));
+      form.append('file', file, fname);
+      var upResp = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+        { method:'POST', headers:{ Authorization:'Bearer '+driveToken }, body: form }
+      );
+      if(!upResp.ok){ var e=await upResp.json(); throw new Error(e.error&&e.error.message||upResp.status); }
+      btn.textContent = '✅ Caricato';
+      btn.style.color = 'var(--green)';
+      btn.style.borderColor = 'var(--green)';
+      showMsg('📤 '+fname+' caricato su Drive!','success');
+    } catch(err){
+      btn.disabled = false; btn.textContent = '📎 Seleziona e carica';
+      showMsg('Errore upload Drive: '+err.message,'error');
+    }
+  };
+  input.click();
 }
 
 async function uploadDbToDrive(txId, folderId, btn){
@@ -685,90 +702,6 @@ async function importFromDrive(fileId, fileName, btn){
   }
 }
 
-
-// ── Verifica Drive: ignored duplicates ──────────────────────────────────────
-function getDriveIgnoredDupes(){
-  try{ return JSON.parse(localStorage.getItem('inv_ignored_dupes')||'[]'); }catch(e){ return []; }
-}
-function ignoreDupe(key){
-  var list = getDriveIgnoredDupes();
-  if(list.indexOf(key) < 0){ list.push(key); }
-  localStorage.setItem('inv_ignored_dupes', JSON.stringify(list));
-  // Re-render duplicates section
-  var block = document.getElementById('verifica-dupes-block');
-  if(block){ runDriveVerificaRenderDupes(window._lastDuplicateGroups||[]); }
-}
-function restoreAllDupes(){
-  localStorage.removeItem('inv_ignored_dupes');
-  var block = document.getElementById('verifica-dupes-block');
-  if(block){ runDriveVerificaRenderDupes(window._lastDuplicateGroups||[]); }
-}
-function runDriveVerificaRenderDupes(duplicateGroups){
-  window._lastDuplicateGroups = duplicateGroups;
-  var ignored = getDriveIgnoredDupes();
-  var dupesBlock = document.getElementById('verifica-dupes-block');
-  var dupesList  = document.getElementById('verifica-dupes-list');
-  var dupesCount = document.getElementById('verifica-dupes-count');
-  if(!dupesBlock) return;
-
-  var visibleGroups = duplicateGroups.filter(function(g){
-    var key = g[0].name.trim().toLowerCase()+'||'+(g[0].size||'0');
-    return ignored.indexOf(key) < 0;
-  });
-  var totalDupes = visibleGroups.reduce(function(s,g){return s+g.length-1;},0);
-  dupesCount.textContent = totalDupes + (ignored.length > 0 ? ' ('+ignored.length+' ignorati)' : '');
-
-  if(visibleGroups.length === 0){
-    dupesBlock.style.display = duplicateGroups.length > 0 ? '' : 'none';
-    if(duplicateGroups.length > 0 && ignored.length > 0){
-      dupesList.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 4px">'
-        +'<span style="font-size:13px;color:var(--green)">✅ Tutti i duplicati sono stati ignorati.</span>'
-        +'<button onclick="restoreAllDupes()" style="font-size:12px;padding:4px 12px;border-radius:6px;'
-        +'border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer">↺ Ripristina tutti</button>'
-        +'</div>';
-    } else {
-      dupesBlock.style.display = 'none';
-    }
-    return;
-  }
-  dupesBlock.style.display = '';
-
-  var dupRows = [];
-  visibleGroups.forEach(function(group){
-    var groupKey = group[0].name.trim().toLowerCase()+'||'+(group[0].size||'0');
-    group.sort(function(a,b){ return (b.modifiedTime||'').localeCompare(a.modifiedTime||''); });
-    group.forEach(function(f, i){
-      var kb  = f.size ? (parseInt(f.size)/1024).toFixed(0)+' KB' : '—';
-      var dt  = f.modifiedTime ? f.modifiedTime.slice(0,10) : '—';
-      var tag = i === 0
-        ? '<span style="font-size:11px;color:var(--green);font-weight:600">✓ Più recente</span>'
-        : '<span style="font-size:11px;color:var(--red);font-weight:600">✗ Duplicato</span>';
-      // Store key in global map, reference by index to avoid inline escaping issues
-      if(!window._dupeKeyMap) window._dupeKeyMap = {};
-      var dupeIdx = Object.keys(window._dupeKeyMap).length;
-      window._dupeKeyMap[dupeIdx] = groupKey;
-      var action = i === 0
-        ? '<button onclick="ignoreDupe(window._dupeKeyMap['+dupeIdx+'])" '
-          +'style="padding:4px 10px;font-size:11px;border-radius:6px;border:1px solid var(--border);'
-          +'background:transparent;color:var(--text2);cursor:pointer;white-space:nowrap">Ignora</button>'
-        : '';
-      var nameCell = (i > 0 ? '<span style="color:var(--text2)">↳ </span>' : '') + esc(f.name);
-      dupRows.push([nameCell, kb, dt, tag + (action ? '&nbsp;' + action : '')]);
-    });
-    dupRows.push(['<hr style="margin:0;border:none;border-top:2px solid var(--border)">','','','']);
-  });
-  dupRows.pop();
-
-  // Add "Ripristina tutti" footer if some ignored
-  var footer = ignored.length > 0
-    ? '<div style="text-align:right;padding:8px 4px 0">'
-      +'<button onclick="restoreAllDupes()" style="font-size:11px;padding:3px 10px;border-radius:6px;'
-      +'border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer">↺ Ripristina '+ignored.length+' ignorati</button></div>'
-    : '';
-
-  dupesList.innerHTML = verifTableWithActions(['Nome file','Dimensione','Ultima modifica',''], dupRows) + footer;
-}
-
 function parseDriveFolderId(input){
   if(!input) return '';
   // If it looks like a URL, extract the folder ID
@@ -814,20 +747,25 @@ async function runDriveVerifica(){
 
     // 1. Get Drive files
     var rawDriveFiles = await driveListFiles(folderId, driveToken);
-    // ── Detect TRUE duplicates: same name AND same size ─────────────────────
-    // Same name but different size = different invoices from same supplier → NOT a duplicate
-    var dupeGroups = {};
+    // ── Detect duplicates BEFORE deduplication ──────────────────────────────
+    var nameGroups = {};
     rawDriveFiles.forEach(function(f){
-      var key = f.name.trim().toLowerCase() + '||' + (f.size||'0');
-      if(!dupeGroups[key]) dupeGroups[key] = [];
-      dupeGroups[key].push(f);
+      var key = f.name.trim().toLowerCase();
+      if(!nameGroups[key]) nameGroups[key] = [];
+      nameGroups[key].push(f);
     });
-    var duplicateGroups = Object.values(dupeGroups).filter(function(g){ return g.length > 1; });
+    var duplicateGroups = Object.values(nameGroups).filter(function(g){ return g.length > 1; });
 
-    // ── Deduplicate for matching: by ID; keep all unique-named files ──────
-    // (don't deduplicate by name alone — same name ≠ same file)
-    var seenIds = new Set();
-    var driveFiles = rawDriveFiles.filter(function(f){
+    // ── Deduplicate: keep most recently modified copy ─────────────────────
+    var seenIds   = new Set();
+    var bestByName = {};
+    rawDriveFiles.forEach(function(f){
+      var key = f.name.trim().toLowerCase();
+      if(!bestByName[key] || (f.modifiedTime||'') > (bestByName[key].modifiedTime||'')){
+        bestByName[key] = f;
+      }
+    });
+    var driveFiles = Object.values(bestByName).filter(function(f){
       if(seenIds.has(f.id)) return false;
       seenIds.add(f.id);
       return true;
@@ -915,6 +853,19 @@ async function runDriveVerifica(){
       return true;
     });
 
+    // Second pass: check against ALL txs to avoid false orphans when Drive filename
+    // date differs from the DB invoice date (period filter mismatch)
+    var allTxs = getVerificaSource() === 'registro' ? (window.registroTxs || txs) : txs;
+    filteredDriveFiles.forEach(function(f){
+      if(matchedDriveFileIds.has(f.id)) return;
+      for(var i=0; i<allTxs.length; i++){
+        if(txMatchesDriveFile(allTxs[i], f)){
+          matchedDriveFileIds.add(f.id);
+          break;
+        }
+      }
+    });
+
     // Drive files (period-filtered) with no matching invoice
     var orphanInDrive = filteredDriveFiles.filter(function(f){
       return !matchedDriveFileIds.has(f.id);
@@ -937,7 +888,37 @@ async function runDriveVerifica(){
         (missingFromDrive.length + orphanInDrive.length) > 0 ? 'var(--red)' : 'var(--green)');
 
     // ── Render duplicates section ───────────────────────────────────────────
-    runDriveVerificaRenderDupes(duplicateGroups);
+    var dupesBlock = document.getElementById('verifica-dupes-block');
+    var dupesList  = document.getElementById('verifica-dupes-list');
+    var dupesCount = document.getElementById('verifica-dupes-count');
+    if(dupesBlock && dupesList && dupesCount){
+      var totalDupes = duplicateGroups.reduce(function(s,g){return s+g.length-1;},0);
+      dupesCount.textContent = totalDupes;
+      if(duplicateGroups.length === 0){
+        dupesBlock.style.display = 'none';
+      } else {
+        dupesBlock.style.display = '';
+        var dupRows = [];
+        duplicateGroups.forEach(function(group){
+          group.sort(function(a,b){ return (b.modifiedTime||'').localeCompare(a.modifiedTime||''); });
+          group.forEach(function(f, i){
+            var kb  = f.size ? (parseInt(f.size)/1024).toFixed(0)+' KB' : '—';
+            var dt  = f.modifiedTime ? f.modifiedTime.slice(0,10) : '—';
+            var tag = i === 0
+              ? '<span style="font-size:11px;color:var(--green);font-weight:600">✓ Più recente</span>'
+              : '<span style="font-size:11px;color:var(--red);font-weight:600">✗ Duplicato</span>';
+            var nameCell = (i === 0 ? '' : '<span style="color:var(--text2)">↳ </span>') + esc(f.name);
+            dupRows.push([nameCell, kb, dt, tag]);
+          });
+          dupRows.push(['<hr style="margin:0;border:none;border-top:2px solid var(--border)">','','','']);
+        });
+        dupRows.pop(); // remove last divider
+        dupesList.innerHTML = verifTableWithActions(
+          ['Nome file','Dimensione','Ultima modifica',''],
+          dupRows
+        );
+      }
+    }
 
     // Missing from Drive
     var missingCount = document.getElementById('verifica-missing-count');
@@ -955,7 +936,10 @@ async function runDriveVerifica(){
               + 'style="padding:4px 12px;font-size:12px;border-radius:6px;border:1px solid var(--green);'
               + 'background:transparent;color:var(--green);cursor:pointer;white-space:nowrap;font-weight:500">'
               + '📤 Carica su Drive</button>'
-            : '<span style="font-size:11px;color:var(--text2)">Nessun file</span>';
+            : '<button data-tid="'+t.id+'" data-folder="'+folderId+'" onclick="uploadFileToDriveBtn(this)" '
+              + 'style="padding:4px 12px;font-size:12px;border-radius:6px;border:1px solid var(--accent);'
+              + 'background:transparent;color:var(--accent);cursor:pointer;white-space:nowrap;font-weight:500">'
+              + '📎 Seleziona e carica</button>';
           return [
             t.date||'—',
             t.invoice||'—',
@@ -980,11 +964,10 @@ async function runDriveVerifica(){
         orphanInDrive.map(function(f){
           var kb = f.size ? (parseInt(f.size)/1024).toFixed(0)+' KB' : '—';
           var dt = f.modifiedTime ? f.modifiedTime.slice(0,10) : '—';
-          var importLabel = getVerificaSource()==='registro' ? '📥 Importa nel Registro' : '📥 Importa nel DB';
           var btn = '<button data-fid="'+f.id+'" data-fname="'+esc(f.name)+'" onclick="importFromDriveBtn(this)" '
             + 'style="padding:4px 12px;font-size:12px;border-radius:6px;border:1px solid var(--accent);'
             + 'background:transparent;color:var(--accent);cursor:pointer;white-space:nowrap;font-weight:500">'
-            + importLabel+'</button>';
+            + '📥 Importa nel DB</button>';
           return [esc(f.name), kb, dt, btn];
         })
       );
