@@ -3890,7 +3890,8 @@ async function generateRecommendations(){
     '    }\n'+
     '  ]\n'+
     '}\n'+
-    'Per new_opportunities suggerisci 3-5 titoli/ETF NON presenti nel portafoglio che si adattano alla strategia buy&hold. Includi almeno 2 ETF diversificati.';
+    'Per new_opportunities suggerisci 3-5 titoli/ETF NON presenti nel portafoglio che si adattano alla strategia buy&hold. Includi almeno 2 ETF diversificati.\n'+
+    'IMPORTANTE: Mantieni ogni campo di testo sotto i 200 caratteri. Il JSON deve essere completo e valido.';
 
   try{
     var abortCtrl = new AbortController();
@@ -3908,7 +3909,7 @@ async function generateRecommendations(){
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
-          max_tokens: 3000,
+          max_tokens: 4096,
           messages:[{role:'user', content:prompt}]
         })
       });
