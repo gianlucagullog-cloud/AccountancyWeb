@@ -535,8 +535,7 @@ function getVerificaFilteredTxs(){
   var source = getVerificaSource();
 
   return txs.filter(function(t){
-    // Source filter
-    if(source === 'registro' && !t.fileName && !t.filePath) return false;
+    // Source filter: both modes use all invoices — difference is only in button labels
 
     // Period filter
     var d = t.date || '';
@@ -723,8 +722,12 @@ function runDriveVerificaRenderDupes(duplicateGroups){
       var tag = i === 0
         ? '<span style="font-size:11px;color:var(--green);font-weight:600">✓ Più recente</span>'
         : '<span style="font-size:11px;color:var(--red);font-weight:600">✗ Duplicato</span>';
+      // Store key in global map, reference by index to avoid inline escaping issues
+      if(!window._dupeKeyMap) window._dupeKeyMap = {};
+      var dupeIdx = Object.keys(window._dupeKeyMap).length;
+      window._dupeKeyMap[dupeIdx] = groupKey;
       var action = i === 0
-        ? '<button onclick="ignoreDupe(\'' + groupKey.replace(/'/g,"\\'") + '\')" '
+        ? '<button onclick="ignoreDupe(window._dupeKeyMap['+dupeIdx+'])" '
           +'style="padding:4px 10px;font-size:11px;border-radius:6px;border:1px solid var(--border);'
           +'background:transparent;color:var(--text2);cursor:pointer;white-space:nowrap">Ignora</button>'
         : '';
@@ -956,10 +959,11 @@ async function runDriveVerifica(){
         orphanInDrive.map(function(f){
           var kb = f.size ? (parseInt(f.size)/1024).toFixed(0)+' KB' : '—';
           var dt = f.modifiedTime ? f.modifiedTime.slice(0,10) : '—';
+          var importLabel = getVerificaSource()==='registro' ? '📥 Importa nel Registro' : '📥 Importa nel DB';
           var btn = '<button data-fid="'+f.id+'" data-fname="'+esc(f.name)+'" onclick="importFromDriveBtn(this)" '
             + 'style="padding:4px 12px;font-size:12px;border-radius:6px;border:1px solid var(--accent);'
             + 'background:transparent;color:var(--accent);cursor:pointer;white-space:nowrap;font-weight:500">'
-            + '📥 Importa nel DB</button>';
+            + importLabel+'</button>';
           return [esc(f.name), kb, dt, btn];
         })
       );
