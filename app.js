@@ -129,17 +129,38 @@ function uploadInvoiceFile(file,invoiceId){
     return sb.from('invoices').update({file_path:path,file_name:file.name}).eq('id',invoiceId);
   });
 }
-function downloadInvoiceFile(t){
-  if(!t.filePath){
-    // Try localStorage fallback
-    var stored=localStorage.getItem('inv_file_'+t.id);
-    if(stored){try{var f=JSON.parse(stored);var a=document.createElement('a');a.href='data:'+f.type+';base64,'+f.b64;a.download=f.name;a.click();return;}catch(e){}}
-    alert('Nessun file allegato a questa fattura.');return;
+async function downloadInvoiceFile(t){
+  // 1. Try localStorage (files saved in browser before Supabase storage was implemented)
+  var stored = localStorage.getItem('inv_file_'+t.id);
+  if(stored){
+    try{
+      var f=JSON.parse(stored);
+      var a=document.createElement('a');a.href='data:'+f.type+';base64,'+f.b64;
+      a.download=f.name;a.click();return;
+    }catch(e){}
   }
-  sb.storage.from('invoice-files').createSignedUrl(t.filePath,3600).then(function(r){
-    if(r.error||!r.data){alert('Errore nel recupero del file.');return;}
-    var a=document.createElement('a');a.href=r.data.signedUrl;a.download=t.fileName||'fattura';a.click();
-  });
+
+  // 2. Try Supabase Storage via filePath
+  if(t.filePath){
+    try{
+      var r = await sb.storage.from('invoice-files').createSignedUrl(t.filePath, 3600);
+      if(r.data && r.data.signedUrl){
+        var a=document.createElement('a');a.href=r.data.signedUrl;
+        a.download=t.fileName||'fattura';a.click();return;
+      }
+      // File not found in storage — show helpful message
+      var errMsg = r.error ? r.error.message : 'File non trovato';
+      showMsg('⚠️ File non trovato in archivio ('+errMsg+'). '
+        +'Il file potrebbe essere stato caricato prima della funzione di archiviazione. '
+        +'Ricaricalo tramite il pulsante di modifica ✏️ oppure importalo da Drive.', 'error');
+      return;
+    }catch(e){
+      showMsg('Errore download: '+e.message,'error');return;
+    }
+  }
+
+  // 3. No file at all
+  showMsg('Nessun file allegato a questa fattura. Usa il pulsante ✏️ per allegarne uno, oppure importalo dalla funzione Verifica Drive.','error');
 }
 function viewInvoiceFile(t){
   // Try Supabase Storage first
@@ -535,8 +556,7 @@ function getVerificaFilteredTxs(){
   var source = getVerificaSource();
 
   return txs.filter(function(t){
-    // Source filter
-    if(source === 'registro' && !t.fileName && !t.filePath) return false;
+    // Source filter: both modes use all invoices — difference is only in button labels
 
     // Period filter
     var d = t.date || '';
@@ -702,6 +722,90 @@ async function importFromDrive(fileId, fileName, btn){
   }
 }
 
+
+// ── Verifica Drive: ignored duplicates ──────────────────────────────────────
+function getDriveIgnoredDupes(){
+  try{ return JSON.parse(localStorage.getItem('inv_ignored_dupes')||'[]'); }catch(e){ return []; }
+}
+function ignoreDupe(key){
+  var list = getDriveIgnoredDupes();
+  if(list.indexOf(key) < 0){ list.push(key); }
+  localStorage.setItem('inv_ignored_dupes', JSON.stringify(list));
+  // Re-render duplicates section
+  var block = document.getElementById('verifica-dupes-block');
+  if(block){ runDriveVerificaRenderDupes(window._lastDuplicateGroups||[]); }
+}
+function restoreAllDupes(){
+  localStorage.removeItem('inv_ignored_dupes');
+  var block = document.getElementById('verifica-dupes-block');
+  if(block){ runDriveVerificaRenderDupes(window._lastDuplicateGroups||[]); }
+}
+function runDriveVerificaRenderDupes(duplicateGroups){
+  window._lastDuplicateGroups = duplicateGroups;
+  var ignored = getDriveIgnoredDupes();
+  var dupesBlock = document.getElementById('verifica-dupes-block');
+  var dupesList  = document.getElementById('verifica-dupes-list');
+  var dupesCount = document.getElementById('verifica-dupes-count');
+  if(!dupesBlock) return;
+
+  var visibleGroups = duplicateGroups.filter(function(g){
+    var key = g[0].name.trim().toLowerCase()+'||'+(g[0].size||'0');
+    return ignored.indexOf(key) < 0;
+  });
+  var totalDupes = visibleGroups.reduce(function(s,g){return s+g.length-1;},0);
+  dupesCount.textContent = totalDupes + (ignored.length > 0 ? ' ('+ignored.length+' ignorati)' : '');
+
+  if(visibleGroups.length === 0){
+    dupesBlock.style.display = duplicateGroups.length > 0 ? '' : 'none';
+    if(duplicateGroups.length > 0 && ignored.length > 0){
+      dupesList.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 4px">'
+        +'<span style="font-size:13px;color:var(--green)">✅ Tutti i duplicati sono stati ignorati.</span>'
+        +'<button onclick="restoreAllDupes()" style="font-size:12px;padding:4px 12px;border-radius:6px;'
+        +'border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer">↺ Ripristina tutti</button>'
+        +'</div>';
+    } else {
+      dupesBlock.style.display = 'none';
+    }
+    return;
+  }
+  dupesBlock.style.display = '';
+
+  var dupRows = [];
+  visibleGroups.forEach(function(group){
+    var groupKey = group[0].name.trim().toLowerCase()+'||'+(group[0].size||'0');
+    group.sort(function(a,b){ return (b.modifiedTime||'').localeCompare(a.modifiedTime||''); });
+    group.forEach(function(f, i){
+      var kb  = f.size ? (parseInt(f.size)/1024).toFixed(0)+' KB' : '—';
+      var dt  = f.modifiedTime ? f.modifiedTime.slice(0,10) : '—';
+      var tag = i === 0
+        ? '<span style="font-size:11px;color:var(--green);font-weight:600">✓ Più recente</span>'
+        : '<span style="font-size:11px;color:var(--red);font-weight:600">✗ Duplicato</span>';
+      // Store key in global map, reference by index to avoid inline escaping issues
+      if(!window._dupeKeyMap) window._dupeKeyMap = {};
+      var dupeIdx = Object.keys(window._dupeKeyMap).length;
+      window._dupeKeyMap[dupeIdx] = groupKey;
+      var action = i === 0
+        ? '<button onclick="ignoreDupe(window._dupeKeyMap['+dupeIdx+'])" '
+          +'style="padding:4px 10px;font-size:11px;border-radius:6px;border:1px solid var(--border);'
+          +'background:transparent;color:var(--text2);cursor:pointer;white-space:nowrap">Ignora</button>'
+        : '';
+      var nameCell = (i > 0 ? '<span style="color:var(--text2)">↳ </span>' : '') + esc(f.name);
+      dupRows.push([nameCell, kb, dt, tag + (action ? '&nbsp;' + action : '')]);
+    });
+    dupRows.push(['<hr style="margin:0;border:none;border-top:2px solid var(--border)">','','','']);
+  });
+  dupRows.pop();
+
+  // Add "Ripristina tutti" footer if some ignored
+  var footer = ignored.length > 0
+    ? '<div style="text-align:right;padding:8px 4px 0">'
+      +'<button onclick="restoreAllDupes()" style="font-size:11px;padding:3px 10px;border-radius:6px;'
+      +'border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer">↺ Ripristina '+ignored.length+' ignorati</button></div>'
+    : '';
+
+  dupesList.innerHTML = verifTableWithActions(['Nome file','Dimensione','Ultima modifica',''], dupRows) + footer;
+}
+
 function parseDriveFolderId(input){
   if(!input) return '';
   // If it looks like a URL, extract the folder ID
@@ -747,25 +851,20 @@ async function runDriveVerifica(){
 
     // 1. Get Drive files
     var rawDriveFiles = await driveListFiles(folderId, driveToken);
-    // ── Detect duplicates BEFORE deduplication ──────────────────────────────
-    var nameGroups = {};
+    // ── Detect TRUE duplicates: same name AND same size ─────────────────────
+    // Same name but different size = different invoices from same supplier → NOT a duplicate
+    var dupeGroups = {};
     rawDriveFiles.forEach(function(f){
-      var key = f.name.trim().toLowerCase();
-      if(!nameGroups[key]) nameGroups[key] = [];
-      nameGroups[key].push(f);
+      var key = f.name.trim().toLowerCase() + '||' + (f.size||'0');
+      if(!dupeGroups[key]) dupeGroups[key] = [];
+      dupeGroups[key].push(f);
     });
-    var duplicateGroups = Object.values(nameGroups).filter(function(g){ return g.length > 1; });
+    var duplicateGroups = Object.values(dupeGroups).filter(function(g){ return g.length > 1; });
 
-    // ── Deduplicate: keep most recently modified copy ─────────────────────
-    var seenIds   = new Set();
-    var bestByName = {};
-    rawDriveFiles.forEach(function(f){
-      var key = f.name.trim().toLowerCase();
-      if(!bestByName[key] || (f.modifiedTime||'') > (bestByName[key].modifiedTime||'')){
-        bestByName[key] = f;
-      }
-    });
-    var driveFiles = Object.values(bestByName).filter(function(f){
+    // ── Deduplicate for matching: by ID; keep all unique-named files ──────
+    // (don't deduplicate by name alone — same name ≠ same file)
+    var seenIds = new Set();
+    var driveFiles = rawDriveFiles.filter(function(f){
       if(seenIds.has(f.id)) return false;
       seenIds.add(f.id);
       return true;
@@ -853,9 +952,11 @@ async function runDriveVerifica(){
       return true;
     });
 
-    // Second pass: check against ALL txs to avoid false orphans when Drive filename
-    // date differs from the DB invoice date (period filter mismatch)
-    var allTxs = getVerificaSource() === 'registro' ? (window.registroTxs || txs) : txs;
+    // Second pass: check remaining unmatched Drive files against ALL txs (not just period-filtered)
+    // This prevents false orphans when the DB invoice date differs from the Drive filename date
+    var allTxs = getVerificaSource() === 'registro'
+      ? (window.registroTxs || txs)
+      : txs;
     filteredDriveFiles.forEach(function(f){
       if(matchedDriveFileIds.has(f.id)) return;
       for(var i=0; i<allTxs.length; i++){
@@ -888,37 +989,7 @@ async function runDriveVerifica(){
         (missingFromDrive.length + orphanInDrive.length) > 0 ? 'var(--red)' : 'var(--green)');
 
     // ── Render duplicates section ───────────────────────────────────────────
-    var dupesBlock = document.getElementById('verifica-dupes-block');
-    var dupesList  = document.getElementById('verifica-dupes-list');
-    var dupesCount = document.getElementById('verifica-dupes-count');
-    if(dupesBlock && dupesList && dupesCount){
-      var totalDupes = duplicateGroups.reduce(function(s,g){return s+g.length-1;},0);
-      dupesCount.textContent = totalDupes;
-      if(duplicateGroups.length === 0){
-        dupesBlock.style.display = 'none';
-      } else {
-        dupesBlock.style.display = '';
-        var dupRows = [];
-        duplicateGroups.forEach(function(group){
-          group.sort(function(a,b){ return (b.modifiedTime||'').localeCompare(a.modifiedTime||''); });
-          group.forEach(function(f, i){
-            var kb  = f.size ? (parseInt(f.size)/1024).toFixed(0)+' KB' : '—';
-            var dt  = f.modifiedTime ? f.modifiedTime.slice(0,10) : '—';
-            var tag = i === 0
-              ? '<span style="font-size:11px;color:var(--green);font-weight:600">✓ Più recente</span>'
-              : '<span style="font-size:11px;color:var(--red);font-weight:600">✗ Duplicato</span>';
-            var nameCell = (i === 0 ? '' : '<span style="color:var(--text2)">↳ </span>') + esc(f.name);
-            dupRows.push([nameCell, kb, dt, tag]);
-          });
-          dupRows.push(['<hr style="margin:0;border:none;border-top:2px solid var(--border)">','','','']);
-        });
-        dupRows.pop(); // remove last divider
-        dupesList.innerHTML = verifTableWithActions(
-          ['Nome file','Dimensione','Ultima modifica',''],
-          dupRows
-        );
-      }
-    }
+    runDriveVerificaRenderDupes(duplicateGroups);
 
     // Missing from Drive
     var missingCount = document.getElementById('verifica-missing-count');
@@ -964,10 +1035,11 @@ async function runDriveVerifica(){
         orphanInDrive.map(function(f){
           var kb = f.size ? (parseInt(f.size)/1024).toFixed(0)+' KB' : '—';
           var dt = f.modifiedTime ? f.modifiedTime.slice(0,10) : '—';
+          var importLabel = getVerificaSource()==='registro' ? '📥 Importa nel Registro' : '📥 Importa nel DB';
           var btn = '<button data-fid="'+f.id+'" data-fname="'+esc(f.name)+'" onclick="importFromDriveBtn(this)" '
             + 'style="padding:4px 12px;font-size:12px;border-radius:6px;border:1px solid var(--accent);'
             + 'background:transparent;color:var(--accent);cursor:pointer;white-space:nowrap;font-weight:500">'
-            + '📥 Importa nel DB</button>';
+            + importLabel+'</button>';
           return [esc(f.name), kb, dt, btn];
         })
       );
@@ -3821,20 +3893,28 @@ async function generateRecommendations(){
     'Per new_opportunities suggerisci 3-5 titoli/ETF NON presenti nel portafoglio che si adattano alla strategia buy&hold. Includi almeno 2 ETF diversificati.';
 
   try{
-    var response = await fetch('https://api.anthropic.com/v1/messages',{
-      method: 'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 3000,
-        messages:[{role:'user', content:prompt}]
-      })
-    });
+    var abortCtrl = new AbortController();
+    var abortTimer = setTimeout(function(){ abortCtrl.abort(); }, 60000);
+    var response;
+    try {
+      response = await fetch('https://api.anthropic.com/v1/messages',{
+        method: 'POST',
+        signal: abortCtrl.signal,
+        headers:{
+          'Content-Type':'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version':'2023-06-01',
+          'anthropic-dangerous-direct-browser-access':'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 3000,
+          messages:[{role:'user', content:prompt}]
+        })
+      });
+    } finally {
+      clearTimeout(abortTimer);
+    }
 
     if(!response.ok){
       var errData = await response.json().catch(function(){ return {}; });
@@ -3920,10 +4000,17 @@ async function generateRecommendations(){
 
   } catch(e){
     console.error('generateRecommendations error:', e);
+    var isTimeout = e.name === 'AbortError';
+    var isCors = e.message && e.message.toLowerCase().indexOf('fetch') >= 0 && !isTimeout;
+    var hint = isTimeout
+      ? 'La richiesta ha impiegato più di 60 secondi. Controlla la connessione e riprova.'
+      : isCors
+        ? 'Errore di rete (possibile blocco CORS o firewall). Prova da un altro browser o rete.'
+        : e.message;
     el.innerHTML = '<div style="color:var(--red);font-size:13px;padding:16px;background:rgba(220,38,38,0.06);'+
       'border-radius:8px;border:1px solid rgba(220,38,38,0.2)">'+
       '<b>&#10060; Errore analisi AI</b><br>'+
-      '<span style="font-family:monospace;font-size:12px;color:var(--text2)">'+e.message+'</span><br>'+
+      '<span style="font-size:12px;color:var(--text2)">'+hint+'</span>'+
       '<div style="margin-top:10px;font-size:12px;color:var(--text2)">Possibili cause:'+
       '<ul style="margin:4px 0 0 16px">'+
       '<li>API key non valida o scaduta → controlla in Impostazioni</li>'+
