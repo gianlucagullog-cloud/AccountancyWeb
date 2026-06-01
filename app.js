@@ -567,7 +567,7 @@ async function driveListFiles(folderId, token){
   do {
     var url = 'https://www.googleapis.com/drive/v3/files'
       + '?q=' + encodeURIComponent("'" + folderId + "' in parents and trashed=false")
-      + '&fields=nextPageToken,files(id,name,size,modifiedTime)'
+      + '&fields=nextPageToken,files(id,name,size,modifiedTime,createdTime)'
       + '&pageSize=1000'
       + (pageToken ? '&pageToken='+pageToken : '');
     var resp = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
@@ -709,7 +709,14 @@ async function runDriveVerifica(){
     showStatus('📂 Recupero file dalla cartella Drive...', 'info');
 
     // 1. Get Drive files
-    var driveFiles = await driveListFiles(folderId, driveToken);
+    var rawDriveFiles = await driveListFiles(folderId, driveToken);
+    // Deduplicate by file ID (same file can appear multiple times in sub-folders or shortcuts)
+    var seenIds = new Set();
+    var driveFiles = rawDriveFiles.filter(function(f){
+      if(seenIds.has(f.id)) return false;
+      seenIds.add(f.id);
+      return true;
+    });
 
     showStatus('🗃️ Confronto con le fatture nel database...', 'info');
 
@@ -721,8 +728,14 @@ async function runDriveVerifica(){
     // Filter Drive files by the same period
     // Try to extract date from filename (YYYY-MM-DD prefix), fall back to modifiedTime
     function getDriveFileDate(f){
+      // First try: date at start of filename (e.g. 2026-04-01_invoice.pdf)
       var m = f.name.match(/^(\d{4}-\d{2}-\d{2})/);
       if(m) return m[1];
+      // Second try: date anywhere in filename
+      var m2 = f.name.match(/(\d{4}-\d{2}-\d{2})/);
+      if(m2) return m2[1];
+      // Fallback: createdTime (more reliable than modifiedTime for invoice date)
+      if(f.createdTime) return f.createdTime.slice(0,10);
       return f.modifiedTime ? f.modifiedTime.slice(0,10) : '';
     }
     function driveFileInPeriod(f){
