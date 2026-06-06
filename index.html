@@ -593,6 +593,12 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
 .ticker-cell{font-weight:700;font-size:13px;color:var(--text)}
 .import-drop{border:2px dashed var(--border);border-radius:var(--radius);padding:20px;text-align:center;font-size:12px;color:var(--text2);margin-bottom:12px;transition:border-color .2s}
 
+/* ── COLLAPSIBLE TABLE COLUMNS ──
+   Columns: 1=cb 2=type 3=date 4=svcmonth 5=invoice 6=netto 7=counterparty
+            8=category 9=country 10=EnNet 11=EnVAT 12=EnTot 13=UsNet 14=UsVAT 15=UsTot 16=notes 17=actions */
+#main-table.collapsed th:nth-child(n+9):nth-child(-n+16),
+#main-table.collapsed td:nth-child(n+9):nth-child(-n+16){display:none}
+
 /* ── MOBILE INVOICE CARDS ── */
 .mobile-cards-container{display:none}
 @media(max-width:768px){
@@ -813,10 +819,11 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
         <option value="all">Anno intero</option><option value="Q1">Q1</option><option value="Q2">Q2</option><option value="Q3">Q3</option><option value="Q4">Q4</option>
       </select>
       <button class="btn btn-orange" onclick="exportZIP()" style="white-space:nowrap;font-size:11px">&#128230; ZIP</button>
+      <button type="button" id="btn-expand-cols" class="btn btn-secondary" onclick="toggleTableColumns()" style="font-size:11px;white-space:nowrap">&#8594; Espandi</button>
     </div>
   </div>
   <div class="table-wrap">
-    <table>
+    <table id="main-table" class="collapsed">
       <thead><tr>
         <th class="cb-cell"><input type="checkbox" id="cb-all" onchange="toggleSelectAll(this)"></th>
         <th class="th-sort" id="th-type" onclick="setSort('type')">Type<span class="sort-arrow"></span></th>

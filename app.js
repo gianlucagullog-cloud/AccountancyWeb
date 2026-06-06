@@ -1649,6 +1649,15 @@ function renderTable(){
   renderMobileCards(arr,dups);
 }
 
+// ── COLLAPSIBLE TABLE COLUMNS ─────────────────────────────────
+function toggleTableColumns(){
+  var tbl=document.getElementById('main-table');
+  var btn=document.getElementById('btn-expand-cols');
+  if(!tbl||!btn) return;
+  var collapsed=tbl.classList.toggle('collapsed');
+  btn.innerHTML=collapsed?'&#8594; Espandi':'&#8592; Comprimi';
+}
+
 // ── MOBILE CARD VIEW ──────────────────────────────────────────
 function renderMobileCards(arr, dups){
   var el=document.getElementById('mobile-cards'); if(!el) return;
