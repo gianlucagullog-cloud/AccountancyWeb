@@ -3939,8 +3939,8 @@ function renderPositions(){
       + '</div>';
     return '<tr class="'+(sel?'pos-selected':'')+'" style="'+(sel?'background:rgba(79,70,229,0.06)':'')+'">'
       +'<td style="width:32px;padding:8px 10px"><input type="checkbox" '+(sel?'checked':'')+' data-ticker="'+p.ticker+'" onchange="handlePosSelect(this)" style="accent-color:var(--accent)"></td>'
-      +'<td style="max-width:300px">'+logoHtml+'</td>'
-      +'<td><span class="'+badgeCls+'">'+(p.asset_type||'other')+'</span></td>'
+      +'<td style="max-width:260px;width:260px;overflow:hidden">'+logoHtml+'</td>'
+      +'<td style="width:70px;white-space:nowrap"><span class="'+badgeCls+'">'+(p.asset_type||'other')+'</span></td>'
       +'<td><b>'+(displayPriceEur!==null?displayPriceEur.toFixed(2):'<span style="color:var(--text3)">N/D</span>')+'</b>&nbsp;<small style="color:var(--text3)">EUR</small></td>'
       +'<td>'+fmtPct(dayPct)+'</td>'
       +'<td>'+fmtPct(perPct)+'</td>'

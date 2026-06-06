@@ -50,8 +50,8 @@
   --shadow:0 1px 3px rgba(0,0,0,.06),0 4px 12px rgba(0,0,0,.04);
   --shadow-md:0 4px 16px rgba(0,0,0,.08),0 1px 4px rgba(0,0,0,.04);
   --shadow-accent:0 4px 14px rgba(37,99,235,.28);
-  --font:'Sora',sans-serif;
-  --font-display:'Syne',sans-serif;
+  --font:'Inter',sans-serif;
+  --font-display:'Inter',sans-serif;
 }
 
 /* ── DARK THEME ── */
@@ -809,7 +809,10 @@ html[data-theme="light"] .port-pnl-chip.neg{background:rgba(220,38,38,.08);color
 .pos-logo-cell{display:flex;align-items:center;gap:8px}
 .pos-logo-img{width:32px;height:32px;border-radius:50%;object-fit:cover;border:1.5px solid var(--border);background:var(--surface2);flex-shrink:0}
 .pos-logo-fb{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0}
-.pos-logo-name{line-height:1.3}
+.pos-logo-name{line-height:1.3;min-width:0}
+.pos-logo-cell{max-width:260px}
+.pos-logo-name .ticker-cell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.pos-badge{white-space:nowrap}
 @media(max-width:768px){
   .port-main-value{font-size:34px;letter-spacing:-1.5px}
   .port-sub-value{font-size:18px}
@@ -1408,8 +1411,8 @@ html[data-theme="light"] .port-pnl-chip.neg{background:rgba(220,38,38,.08);color
         <thead>
           <tr>
             <th style="width:32px;padding:8px 10px"><input type="checkbox" id="pos-cb-all" onchange="toggleAllPositions(this)"></th>
-            <th class="pos-th-sort th-sort" data-field="name" onclick="setTradingSort('name')" style="cursor:pointer;text-align:left">Nome <span class="sort-arrow"></span></th>
-            <th class="pos-th-sort th-sort" data-field="type" onclick="setTradingSort('type')" style="cursor:pointer;text-align:left">Tipo <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="name" onclick="setTradingSort('name')" style="cursor:pointer;text-align:left;max-width:260px;width:260px">Nome <span class="sort-arrow"></span></th>
+            <th class="pos-th-sort th-sort" data-field="type" onclick="setTradingSort('type')" style="cursor:pointer;text-align:left;width:70px;white-space:nowrap">Tipo <span class="sort-arrow"></span></th>
             <th class="pos-th-sort th-sort" data-field="price" onclick="setTradingSort('price')" style="cursor:pointer;text-align:right">Prezzo <span class="sort-arrow"></span></th>
             <th class="pos-th-sort th-sort" data-field="day" onclick="setTradingSort('day')" style="cursor:pointer;text-align:right">Var. giorno <span class="sort-arrow"></span></th>
             <th class="pos-th-sort th-sort" data-field="period" onclick="setTradingSort('period')" style="cursor:pointer;text-align:right">Var. periodo <span class="sort-arrow"></span></th>
