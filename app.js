@@ -3369,7 +3369,7 @@ async function loadPositions(){
   }
   renderPositions();
   if(positions.length > 0){
-    refreshAllPrices().then(function(){ updatePortfolioChart(); });
+    refreshAllPrices().then(function(){ updatePortfolioChart(); renderMobilePositions(positions); });
   }
 }
 
@@ -3971,17 +3971,13 @@ function posMobFilter(type, btn){
   _posMobFilterType = type;
   document.querySelectorAll('.pos-mob-filter').forEach(function(b){ b.classList.remove('active'); });
   if(btn) btn.classList.add('active');
-  // sync to desktop filter too
-  var sel1 = document.getElementById('pos-filter-type');
-  var sel2 = document.getElementById('pos-filter-type-table');
-  if(sel1) sel1.value = type;
-  if(sel2) sel2.value = type;
-  renderPositions();
+  renderMobilePositions(positions);
 }
 
-function renderMobilePositions(arr){
+function renderMobilePositions(srcArr){
   var list = document.getElementById('pos-mob-list');
   if(!list) return;
+  var arr = srcArr || positions;
 
   // Filter by mobile filter type
   var filtered = _posMobFilterType === 'all' ? arr : arr.filter(function(p){ return p.asset_type === _posMobFilterType; });
