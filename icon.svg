@@ -1,21 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1e1b4b"/>
-      <stop offset="60%" stop-color="#312e81"/>
-      <stop offset="100%" stop-color="#4c1d95"/>
+      <stop offset="0%" stop-color="#0c1a4b"/>
+      <stop offset="60%" stop-color="#1e3a8a"/>
+      <stop offset="100%" stop-color="#1e40af"/>
     </linearGradient>
     <linearGradient id="calc" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#2d2a5e"/>
-      <stop offset="100%" stop-color="#1e1b4b"/>
+      <stop offset="0%" stop-color="#172554"/>
+      <stop offset="100%" stop-color="#0c1a4b"/>
     </linearGradient>
     <linearGradient id="screen" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#6ee7b7"/>
       <stop offset="100%" stop-color="#10b981"/>
     </linearGradient>
     <linearGradient id="btnhi" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#818cf8"/>
-      <stop offset="100%" stop-color="#6366f1"/>
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#2563eb"/>
     </linearGradient>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
       <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="rgba(0,0,0,0.5)"/>
@@ -54,13 +54,13 @@
   <!-- Button grid: 4 cols × 4 rows -->
   <!-- Row 1 (operator row — indigo) -->
   <rect x="120" y="216" width="56" height="40" rx="12" fill="rgba(99,102,241,0.25)"/>
-  <text x="148" y="241" font-family="Arial" font-size="18" fill="#a5b4fc" text-anchor="middle" font-weight="600">C</text>
+  <text x="148" y="241" font-family="Arial" font-size="18" fill="#93c5fd" text-anchor="middle" font-weight="600">C</text>
 
   <rect x="188" y="216" width="56" height="40" rx="12" fill="rgba(99,102,241,0.25)"/>
-  <text x="216" y="241" font-family="Arial" font-size="20" fill="#a5b4fc" text-anchor="middle">±</text>
+  <text x="216" y="241" font-family="Arial" font-size="20" fill="#93c5fd" text-anchor="middle">±</text>
 
   <rect x="256" y="216" width="56" height="40" rx="12" fill="rgba(99,102,241,0.25)"/>
-  <text x="284" y="241" font-family="Arial" font-size="20" fill="#a5b4fc" text-anchor="middle">%</text>
+  <text x="284" y="241" font-family="Arial" font-size="20" fill="#93c5fd" text-anchor="middle">%</text>
 
   <rect x="324" y="216" width="56" height="40" rx="12" fill="url(#btnhi)"/>
   <text x="352" y="242" font-family="Arial" font-size="22" fill="white" text-anchor="middle">÷</text>
