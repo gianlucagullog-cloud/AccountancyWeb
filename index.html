@@ -1222,26 +1222,43 @@ html[data-theme="light"] .port-pnl-chip.neg{background:rgba(220,38,38,.08);color
 
   <!-- MOBILE: Revolut-style list (hidden on desktop) -->
   <div id="pos-mobile-view" class="pos-mobile-view">
-    <!-- Mobile header: total value + daily change -->
-    <div class="pos-mob-header">
-      <div>
-        <div class="pos-mob-label">Portafoglio</div>
-        <div class="pos-mob-total" id="mob-total-value">— €</div>
+    <!-- Mobile portfolio stats panel -->
+    <div class="port-stats-panel" id="portfolio-stats-panel-mob" style="display:none">
+      <div class="port-period-bar">
+        <button class="port-period-btn active" data-range="1d" onclick="setStatsPeriod('1d',this)">1G</button>
+        <button class="port-period-btn" data-range="5d" onclick="setStatsPeriod('5d',this)">1S</button>
+        <button class="port-period-btn" data-range="1mo" onclick="setStatsPeriod('1mo',this)">1M</button>
+        <button class="port-period-btn" data-range="6mo" onclick="setStatsPeriod('6mo',this)">6M</button>
+        <button class="port-period-btn" data-range="1y" onclick="setStatsPeriod('1y',this)">1A</button>
+        <button class="port-period-btn" data-range="5y" onclick="setStatsPeriod('5y',this)">MAX</button>
       </div>
-      <div style="text-align:right">
-        <div class="pos-mob-label">Oggi</div>
-        <div class="pos-mob-day" id="mob-day-pnl">—</div>
+      <div class="port-main-card">
+        <div class="port-main-label">Valore totale</div>
+        <div class="port-main-value">
+          <span id="ps-total-value-mob">—</span>
+          <span class="port-pnl-chip" id="ps-pnl-chip-mob">—</span>
+        </div>
+        <div class="port-spark"><svg id="ps-spark-svg-mob" viewBox="0 0 600 70" preserveAspectRatio="none"></svg></div>
       </div>
-      <div style="text-align:right">
-        <button class="btn btn-secondary" style="font-size:11px;padding:5px 12px" onclick="refreshAllPrices()">⟳</button>
+      <div class="port-sub-grid">
+        <div class="port-sub-card">
+          <div class="port-sub-label">Rendimento periodo</div>
+          <div class="port-sub-value" id="ps-pnl-pct-mob">—</div>
+        </div>
+        <div class="port-sub-card">
+          <div class="port-sub-label">P&amp;L totale</div>
+          <div class="port-sub-value" id="ps-pnl-eur-mob">—</div>
+          <div style="margin-top:6px;font-size:11px;color:var(--text3)" id="ps-pnl-detail-mob"></div>
+        </div>
       </div>
     </div>
     <!-- Mobile filter pills -->
-    <div class="pos-mob-filter-bar">
+    <div class="pos-mob-filter-bar" style="margin-top:10px">
       <button class="pos-mob-filter active" data-type="all" onclick="posMobFilter('all',this)">Tutti</button>
       <button class="pos-mob-filter" data-type="stock" onclick="posMobFilter('stock',this)">Azioni</button>
       <button class="pos-mob-filter" data-type="etf" onclick="posMobFilter('etf',this)">ETF</button>
       <button class="pos-mob-filter" data-type="crypto" onclick="posMobFilter('crypto',this)">Crypto</button>
+      <button class="btn btn-secondary" style="margin-left:auto;font-size:11px;padding:5px 10px" onclick="refreshAllPrices()">⟳</button>
     </div>
     <!-- Mobile positions list -->
     <div id="pos-mob-list"></div>

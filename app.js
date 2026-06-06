@@ -4196,9 +4196,12 @@ function getPortfolioSeries(period){
 }
 
 function renderPortfolioStatsPanel(){
-  var panel = document.getElementById('portfolio-stats-panel');
-  if(!panel || !positions || !positions.length){ if(panel) panel.style.display='none'; return; }
-  panel.style.display = '';
+  var panel    = document.getElementById('portfolio-stats-panel');
+  var panelMob = document.getElementById('portfolio-stats-panel-mob');
+  var hasPositions = positions && positions.length;
+  if(panel){ if(!hasPositions){ panel.style.display='none'; } else { panel.style.display=''; } }
+  if(panelMob){ if(!hasPositions){ panelMob.style.display='none'; } else { panelMob.style.display=''; } }
+  if(!hasPositions) return;
 
   var period = statsActivePeriod;
   var totalValue = 0, totalCost = 0, periodPnl = 0;
@@ -4240,41 +4243,41 @@ function renderPortfolioStatsPanel(){
   var isPos = periodPnl >= 0;
   var color = isPos ? '#22c55e' : '#f87171';
 
+  function setEl(id, fn){
+    var el = document.getElementById(id); if(el) fn(el);
+    var mob = document.getElementById(id+'-mob'); if(mob) fn(mob);
+  }
+
   // Total value
-  var tvEl = document.getElementById('ps-total-value');
-  if(tvEl) tvEl.textContent = totalValue.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €';
+  setEl('ps-total-value', function(el){ el.textContent = totalValue.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €'; });
 
   // PnL chip (period)
-  var chip = document.getElementById('ps-pnl-chip');
-  if(chip){
-    chip.className = 'port-pnl-chip ' + (isPos?'pos':'neg');
-    chip.textContent = (isPos?'▲ +':'▼ ') + Math.abs(periodPnl).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €';
-  }
+  setEl('ps-pnl-chip', function(el){
+    el.className = 'port-pnl-chip ' + (isPos?'pos':'neg');
+    el.textContent = (isPos?'▲ +':'▼ ') + Math.abs(periodPnl).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €';
+  });
 
   // Period % sub card
-  var pctEl = document.getElementById('ps-pnl-pct');
-  if(pctEl){
-    pctEl.className = 'port-sub-value ' + (isPos?'pos':'neg');
-    pctEl.textContent = (isPos?'+':'') + periodPnlPct.toFixed(2) + '%';
-  }
+  setEl('ps-pnl-pct', function(el){
+    el.className = 'port-sub-value ' + (isPos?'pos':'neg');
+    el.textContent = (isPos?'+':'') + periodPnlPct.toFixed(2) + '%';
+  });
 
   // Period € sub card
-  var eurEl = document.getElementById('ps-pnl-eur');
-  if(eurEl){
-    eurEl.className = 'port-sub-value ' + (totalPnl>=0?'pos':'neg');
-    eurEl.textContent = (totalPnl>=0?'+':'') + totalPnl.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €';
-  }
-  var detEl = document.getElementById('ps-pnl-detail');
-  if(detEl) detEl.innerHTML = 'Da inizio: <b>' + (totalPnlPct>=0?'+':'') + totalPnlPct.toFixed(1) + '%</b><br>Investito: <b>' + totalCost.toLocaleString('it-IT',{minimumFractionDigits:0,maximumFractionDigits:0}) + ' €</b>';
+  setEl('ps-pnl-eur', function(el){
+    el.className = 'port-sub-value ' + (totalPnl>=0?'pos':'neg');
+    el.textContent = (totalPnl>=0?'+':'') + totalPnl.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €';
+  });
+  setEl('ps-pnl-detail', function(el){
+    el.innerHTML = 'Da inizio: <b>' + (totalPnlPct>=0?'+':'') + totalPnlPct.toFixed(1) + '%</b><br>Investito: <b>' + totalCost.toLocaleString('it-IT',{minimumFractionDigits:0,maximumFractionDigits:0}) + ' €</b>';
+  });
 
   // Main sparkline
   var series = getPortfolioSeries(period);
-  var sparkSvg = document.getElementById('ps-spark-svg');
-  if(sparkSvg) sparkSvg.innerHTML = makeSvgSparkline(series, 600, 70, color, true);
+  setEl('ps-spark-svg', function(el){ el.innerHTML = makeSvgSparkline(series, 600, 70, color, true); });
 
   // Sub sparkline
-  var subSvg = document.getElementById('ps-sub-spark-svg');
-  if(subSvg) subSvg.innerHTML = makeSvgSparkline(series, 280, 36, color, false);
+  setEl('ps-sub-spark-svg', function(el){ el.innerHTML = makeSvgSparkline(series, 280, 36, color, false); });
 
   // Allocation logos
   var logosCont = document.getElementById('ps-alloc-logos');
