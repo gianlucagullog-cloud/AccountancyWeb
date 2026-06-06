@@ -16,7 +16,7 @@
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 
 <!-- Anti-flash: apply saved theme before paint -->
-<script>(function(){var t=localStorage.getItem('theme')||'light';document.documentElement.setAttribute('data-theme',t)})()</script>
+<script>(function(){var t=localStorage.getItem('theme')||'dark';document.documentElement.setAttribute('data-theme',t)})()</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -1072,7 +1072,7 @@ html[data-theme="light"] .port-pnl-chip.neg{background:rgba(220,38,38,.08);color
       <thead><tr>
         <th class="cb-cell"><input type="checkbox" id="cb-all" onchange="toggleSelectAll(this)"></th>
         <th class="th-sort" id="th-type" onclick="setSort('type')">Type<span class="sort-arrow"></span></th>
-        <th class="th-sort" id="th-date" onclick="setSort('date')" style="min-width:110px">Date<span class="sort-arrow"></span></th>
+        <th class="th-sort desc" id="th-date" onclick="setSort('date')" style="min-width:110px">Date<span class="sort-arrow"></span></th>
         <th>Svc Month</th>
         <th class="th-sort" id="th-invoice" onclick="setSort('invoice')">Invoice #<span class="sort-arrow"></span></th>
         <th style="white-space:nowrap;color:var(--accent);font-weight:700">Netto &#177;(&#8364;)</th>

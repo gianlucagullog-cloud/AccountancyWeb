@@ -23,11 +23,11 @@ var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 var currentUser=null, txs=[], filter='all', dateRef='date', editingId=null;
 var settings={name:'',vat:'',key:'',gclientid:'',gfolderid:''};
-var filterPeriods=new Set(['all']), filterYear='all';
+var filterPeriods=new Set(['all']), filterYear=String(new Date().getFullYear());
 var filterPeriodsS=new Set(['all']), filterYearS='all';
 var currentRegime='malta-se';
 var selectedIds=new Set();
-var sortField='date', sortDir=1;
+var sortField='date', sortDir=-1;
 var catFilterSet=null; // null = all
 var isGuestMode=false;
 var guestPermissions={};
@@ -1197,11 +1197,15 @@ function verifTable(headers, rows){
 function populateYearFilters(){
   var years={};txs.forEach(function(t){var y=(t.date||'').slice(0,4);if(y)years[y]=1;});
   var ya=Object.keys(years).sort();
-  ['year-filter','year-filter-s'].forEach(function(id){
-    var el=document.getElementById(id);if(!el)return;
-    var cur=el.value;el.innerHTML='<option value="all">Tutti gli anni</option>';
+  var elMain=document.getElementById('year-filter');
+  var elS=document.getElementById('year-filter-s');
+  [elMain,elS].forEach(function(el,i){
+    if(!el)return;
+    var cur=el.value;
+    el.innerHTML='<option value="all">Tutti gli anni</option>';
     ya.forEach(function(y){el.innerHTML+='<option value="'+y+'">'+y+'</option>';});
-    if(cur&&cur!=='all')el.value=cur;
+    // For main register: preserve filterYear (defaults to current year); for summary: preserve current
+    if(i===0){ el.value=filterYear; } else { if(cur&&cur!=='all')el.value=cur; }
   });
 }
 function togglePeriod(p,btn){
@@ -3955,7 +3959,18 @@ function setStatsPeriod(range, btn){
   statsActivePeriod = range;
   document.querySelectorAll('.port-period-btn').forEach(function(b){ b.classList.remove('active'); });
   if(btn) btn.classList.add('active');
-  renderPortfolioStatsPanel();
+  // Fetch price data for this period if not already cached
+  var missing = positions.filter(function(p){
+    var key = normalizeTickerSymbol(p.ticker) + '_' + range;
+    return !priceCache[key];
+  });
+  if(missing.length){
+    var interval = PERIOD_INTERVALS[range] || '1d';
+    Promise.allSettled(missing.map(function(p){ return fetchPrice(p.ticker, range, interval); }))
+      .then(function(){ renderPortfolioStatsPanel(); });
+  } else {
+    renderPortfolioStatsPanel();
+  }
 }
 
 function getTickerLogoUrl(ticker){
