@@ -4501,12 +4501,20 @@ function renderMemo(){
   if(memoPeriodType==='quarter') coveredMonths=quarterMonths(val);
   if(memoPeriodType==='year')    coveredMonths=yearMonths(val);
 
-  // Which counterparties have at least one invoice in covered months
-  var found={};
+  // Collect invoice counterparties present in the covered period (lowercase)
+  var invoiceCounterparties=[];
   txs.forEach(function(tx){
     if(coveredMonths.indexOf(tx.serviceMonth)>=0)
-      found[tx.counterparty.toLowerCase().trim()]=true;
+      invoiceCounterparties.push(tx.counterparty.toLowerCase().trim());
   });
+
+  // Fuzzy match: memo name found if any invoice counterparty contains it or vice versa
+  function isMemoFound(memoName){
+    var mn=memoName.toLowerCase().trim();
+    return invoiceCounterparties.some(function(ic){
+      return ic.indexOf(mn)>=0 || mn.indexOf(ic)>=0;
+    });
+  }
 
   // Relevant items: those matching the current period type + all recurring
   var seen={}, items=[];
@@ -4540,8 +4548,8 @@ function renderMemo(){
     '</div>';
   }
 
-  var missing=items.filter(function(i){return !found[i.counterparty.toLowerCase().trim()];});
-  var present=items.filter(function(i){return found[i.counterparty.toLowerCase().trim()];});
+  var missing=items.filter(function(i){return !isMemoFound(i.counterparty);});
+  var present=items.filter(function(i){return isMemoFound(i.counterparty);});
   var html='';
   if(missing.length){
     html+='<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">⚠️ Mancanti ('+missing.length+')</div>';
