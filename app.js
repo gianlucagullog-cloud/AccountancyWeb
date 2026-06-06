@@ -4248,8 +4248,13 @@ function renderPortfolioStatsPanel(){
     var mob = document.getElementById(id+'-mob'); if(mob) fn(mob);
   }
 
-  // Total value
-  setEl('ps-total-value', function(el){ el.textContent = totalValue.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €'; });
+  // Total value — split integer/cents for Revolut-style display
+  var tvFmt = totalValue.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});
+  var tvParts = tvFmt.split(',');
+  var tvHtml = '<span class="val-int">'+tvParts[0]+'</span>'
+    + (tvParts[1] ? '<span class="val-dec">,'+tvParts[1]+'</span>' : '')
+    + ' <span class="val-sym">€</span>';
+  setEl('ps-total-value', function(el){ el.innerHTML = tvHtml; });
 
   // PnL chip (period)
   setEl('ps-pnl-chip', function(el){
