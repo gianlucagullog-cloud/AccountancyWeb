@@ -1,4 +1,4 @@
-const CACHE = 'invoice-register-v1';
+const CACHE = 'invoice-register-v8';
 const SHELL = [
   '/AccountancyWeb/',
   '/AccountancyWeb/index.html',
