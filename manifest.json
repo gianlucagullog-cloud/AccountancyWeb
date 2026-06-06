@@ -1,0 +1,30 @@
+{
+  "name": "Invoice Register",
+  "short_name": "Invoice",
+  "description": "AI-powered invoice register with Supabase sync",
+  "start_url": "/AccountancyWeb/",
+  "scope": "/AccountancyWeb/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f7f6f2",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["finance", "business", "productivity"]
+}

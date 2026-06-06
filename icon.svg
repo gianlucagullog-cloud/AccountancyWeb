@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="60%" stop-color="#312e81"/>
+      <stop offset="100%" stop-color="#4c1d95"/>
+    </linearGradient>
+    <linearGradient id="calc" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2d2a5e"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#6ee7b7"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="btnhi" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="rgba(0,0,0,0.5)"/>
+    </filter>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- App background -->
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+
+  <!-- Subtle grid lines -->
+  <line x1="0" y1="170" x2="512" y2="170" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+  <line x1="0" y1="340" x2="512" y2="340" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+  <line x1="170" y1="0" x2="170" y2="512" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+  <line x1="340" y1="0" x2="340" y2="512" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+
+  <!-- Calculator body -->
+  <rect x="96" y="72" width="320" height="368" rx="32" fill="url(#calc)" filter="url(#shadow)"/>
+  <rect x="96" y="72" width="320" height="368" rx="32" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>
+
+  <!-- Screen -->
+  <rect x="120" y="96" width="272" height="100" rx="16" fill="#0f172a"/>
+  <rect x="120" y="96" width="272" height="100" rx="16" fill="none" stroke="rgba(110,231,183,0.3)" stroke-width="1"/>
+
+  <!-- GG monogram on screen -->
+  <text x="256" y="167" font-family="'SF Pro Display','Helvetica Neue',Arial,sans-serif"
+        font-size="68" font-weight="800" fill="url(#screen)"
+        text-anchor="middle" letter-spacing="-2" filter="url(#glow)">GG</text>
+
+  <!-- Screen subtle shine -->
+  <rect x="120" y="96" width="272" height="32" rx="16" fill="rgba(255,255,255,0.04)"/>
+
+  <!-- Button grid: 4 cols × 4 rows -->
+  <!-- Row 1 (operator row — indigo) -->
+  <rect x="120" y="216" width="56" height="40" rx="12" fill="rgba(99,102,241,0.25)"/>
+  <text x="148" y="241" font-family="Arial" font-size="18" fill="#a5b4fc" text-anchor="middle" font-weight="600">C</text>
+
+  <rect x="188" y="216" width="56" height="40" rx="12" fill="rgba(99,102,241,0.25)"/>
+  <text x="216" y="241" font-family="Arial" font-size="20" fill="#a5b4fc" text-anchor="middle">±</text>
+
+  <rect x="256" y="216" width="56" height="40" rx="12" fill="rgba(99,102,241,0.25)"/>
+  <text x="284" y="241" font-family="Arial" font-size="20" fill="#a5b4fc" text-anchor="middle">%</text>
+
+  <rect x="324" y="216" width="56" height="40" rx="12" fill="url(#btnhi)"/>
+  <text x="352" y="242" font-family="Arial" font-size="22" fill="white" text-anchor="middle">÷</text>
+
+  <!-- Row 2 -->
+  <rect x="120" y="268" width="56" height="40" rx="12" fill="rgba(255,255,255,0.08)"/>
+  <text x="148" y="293" font-family="Arial" font-size="18" fill="white" text-anchor="middle" font-weight="500">7</text>
+
+  <rect x="188" y="268" width="56" height="40" rx="12" fill="rgba(255,255,255,0.08)"/>
+  <text x="216" y="293" font-family="Arial" font-size="18" fill="white" text-anchor="middle" font-weight="500">8</text>
+
+  <rect x="256" y="268" width="56" height="40" rx="12" fill="rgba(255,255,255,0.08)"/>
+  <text x="284" y="293" font-family="Arial" font-size="18" fill="white" text-anchor="middle" font-weight="500">9</text>
+
+  <rect x="324" y="268" width="56" height="40" rx="12" fill="url(#btnhi)"/>
+  <text x="352" y="294" font-family="Arial" font-size="24" fill="white" text-anchor="middle">×</text>
+
+  <!-- Row 3 -->
+  <rect x="120" y="320" width="56" height="40" rx="12" fill="rgba(255,255,255,0.08)"/>
+  <text x="148" y="345" font-family="Arial" font-size="18" fill="white" text-anchor="middle" font-weight="500">4</text>
+
+  <rect x="188" y="320" width="56" height="40" rx="12" fill="rgba(255,255,255,0.08)"/>
+  <text x="216" y="345" font-family="Arial" font-size="18" fill="white" text-anchor="middle" font-weight="500">5</text>
+
+  <rect x="256" y="320" width="56" height="40" rx="12" fill="rgba(255,255,255,0.08)"/>
+  <text x="284" y="345" font-family="Arial" font-size="18" fill="white" text-anchor="middle" font-weight="500">6</text>
+
+  <rect x="324" y="320" width="56" height="40" rx="12" fill="url(#btnhi)"/>
+  <text x="352" y="346" font-family="Arial" font-size="24" fill="white" text-anchor="middle">−</text>
+
+  <!-- Row 4 -->
+  <rect x="120" y="372" width="56" height="40" rx="12" fill="rgba(255,255,255,0.08)"/>
+  <text x="148" y="397" font-family="Arial" font-size="18" fill="white" text-anchor="middle" font-weight="500">1</text>
+
+  <rect x="188" y="372" width="56" height="40" rx="12" fill="rgba(255,255,255,0.08)"/>
+  <text x="216" y="397" font-family="Arial" font-size="18" fill="white" text-anchor="middle" font-weight="500">2</text>
+
+  <rect x="256" y="372" width="56" height="40" rx="12" fill="rgba(255,255,255,0.08)"/>
+  <text x="284" y="397" font-family="Arial" font-size="18" fill="white" text-anchor="middle" font-weight="500">3</text>
+
+  <rect x="324" y="372" width="56" height="40" rx="12" fill="url(#btnhi)"/>
+  <text x="352" y="398" font-family="Arial" font-size="24" fill="white" text-anchor="middle">+</text>
+
+</svg>

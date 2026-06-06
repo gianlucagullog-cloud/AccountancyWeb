@@ -4692,3 +4692,10 @@ async function changeMemoRecurrence(id, value){
   memoItems=memoItems.map(function(i){return i.id===id?Object.assign({},i,upd):i;});
   renderMemo();
 }
+
+// ── SERVICE WORKER (PWA) ──────────────────────────────────────
+if('serviceWorker' in navigator){
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('sw.js').catch(function(){});
+  });
+}
