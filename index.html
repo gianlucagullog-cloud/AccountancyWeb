@@ -23,9 +23,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="app.js?v=1778245159"></script>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Sora:wght@300;400;500;600;700&family=Syne:wght@600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif}
 
 :root{
   --bg:#f5f4f0;
@@ -52,6 +52,7 @@
   --shadow-accent:0 4px 14px rgba(37,99,235,.28);
   --font:'Inter',sans-serif;
   --font-display:'Inter',sans-serif;
+  --font-mono:'SF Mono','Fira Code',monospace;
 }
 
 /* ── DARK THEME ── */
@@ -551,7 +552,7 @@ tr:hover td{background:var(--surface2)}
 }
 .step-item code{
   background:rgba(37,99,235,.08);color:var(--accent);
-  padding:1px 5px;border-radius:4px;font-family:monospace;font-size:10.5px;
+  padding:1px 5px;border-radius:4px;font-family:var(--font-mono);font-size:10.5px;
 }
 .cat-table th{
   background:linear-gradient(135deg,#2563eb,#1d4ed8);
