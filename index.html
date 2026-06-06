@@ -769,6 +769,50 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
 .rec-sell .rec-title{color:var(--red)}
 .rec-hold .rec-title{color:#854d0e}
 .rec-watch .rec-title{color:var(--accent)}
+/* ── PORTFOLIO STATS PANEL (Revolut style) ── */
+.port-stats-panel{margin-bottom:18px}
+.port-period-bar{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap}
+.port-period-btn{padding:5px 14px;border-radius:20px;border:1px solid var(--border);background:transparent;font-size:11px;font-weight:600;color:var(--text2);cursor:pointer;transition:.15s;font-family:var(--font)}
+.port-period-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.port-period-btn:hover:not(.active){border-color:var(--accent);color:var(--accent)}
+.port-main-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow-md);margin-bottom:10px;position:relative;overflow:hidden}
+.port-main-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:6px}
+.port-main-value{font-family:var(--font-display);font-size:30px;font-weight:800;letter-spacing:-1px;color:var(--text);display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.port-pnl-chip{font-size:14px;font-weight:700;padding:2px 10px;border-radius:20px}
+.port-pnl-chip.pos{background:rgba(74,222,128,.15);color:var(--green)}
+.port-pnl-chip.neg{background:rgba(248,113,113,.12);color:var(--red)}
+html[data-theme="light"] .port-pnl-chip.pos{background:rgba(22,163,74,.12);color:var(--green)}
+html[data-theme="light"] .port-pnl-chip.neg{background:rgba(220,38,38,.08);color:var(--red)}
+.port-spark{width:100%;height:70px;margin-top:10px;display:block}
+.port-spark svg{width:100%;height:70px;display:block}
+.port-sub-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.port-sub-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.port-sub-label{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:4px}
+.port-sub-value{font-family:var(--font-display);font-size:20px;font-weight:700;letter-spacing:-.5px}
+.port-sub-value.pos{color:var(--green)}
+.port-sub-value.neg{color:var(--red)}
+.port-sub-spark{width:100%;height:36px;margin-top:6px}
+.port-sub-spark svg{width:100%;height:36px}
+.port-alloc-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow)}
+.port-alloc-label{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:12px}
+.port-alloc-logos{display:flex;gap:8px;align-items:flex-end;margin-bottom:10px}
+.port-alloc-logo-wrap{display:flex;flex-direction:column;align-items:center;gap:3px}
+.port-alloc-bar-track{width:32px;border-radius:4px 4px 0 0;background:var(--accent);min-height:4px;transition:height .4s}
+.port-alloc-logo-img{width:28px;height:28px;border-radius:50%;object-fit:cover;border:2px solid var(--border);background:var(--surface2)}
+.port-alloc-logo-fb{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;border:2px solid var(--border)}
+.port-alloc-top{font-size:11px;color:var(--text2);margin-top:4px}
+.port-alloc-top b{color:var(--text)}
+/* logo cells in position table */
+.pos-logo-cell{display:flex;align-items:center;gap:8px}
+.pos-logo-img{width:32px;height:32px;border-radius:50%;object-fit:cover;border:1.5px solid var(--border);background:var(--surface2);flex-shrink:0}
+.pos-logo-fb{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0}
+.pos-logo-name{line-height:1.3}
+@media(max-width:768px){
+  .port-main-value{font-size:22px}
+  .port-sub-value{font-size:16px}
+  .port-period-btn{font-size:10px;padding:4px 10px}
+}
+/* ── end portfolio stats ── */
 .sparkline{display:inline-block;vertical-align:middle}
 .ai-thinking{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);padding:16px}
 .price-up{color:var(--green);font-size:11px}
@@ -1149,8 +1193,49 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
 <!-- TRADING -->
 <div id="tab-trading" style="display:none">
 
-  <!-- Stats bar -->
-  <div class="stats" id="trading-stats" style="margin-bottom:12px"></div>
+  <!-- Portfolio Stats Panel (Revolut style) -->
+  <div class="port-stats-panel" id="portfolio-stats-panel" style="display:none">
+    <!-- Period selector -->
+    <div class="port-period-bar">
+      <button class="port-period-btn active" data-range="1d" onclick="setStatsPeriod('1d',this)">1G</button>
+      <button class="port-period-btn" data-range="5d" onclick="setStatsPeriod('5d',this)">1S</button>
+      <button class="port-period-btn" data-range="1mo" onclick="setStatsPeriod('1mo',this)">1M</button>
+      <button class="port-period-btn" data-range="6mo" onclick="setStatsPeriod('6mo',this)">6M</button>
+      <button class="port-period-btn" data-range="1y" onclick="setStatsPeriod('1y',this)">1A</button>
+      <button class="port-period-btn" data-range="5y" onclick="setStatsPeriod('5y',this)">MAX</button>
+    </div>
+    <!-- Main value card -->
+    <div class="port-main-card">
+      <div class="port-main-label">Valore totale</div>
+      <div class="port-main-value">
+        <span id="ps-total-value">—</span>
+        <span class="port-pnl-chip" id="ps-pnl-chip">—</span>
+      </div>
+      <div class="port-spark"><svg id="ps-spark-svg" viewBox="0 0 600 70" preserveAspectRatio="none"></svg></div>
+    </div>
+    <!-- Sub cards -->
+    <div class="port-sub-grid">
+      <div class="port-sub-card">
+        <div class="port-sub-label">Rendimento</div>
+        <div class="port-sub-value" id="ps-pnl-pct">—</div>
+        <div class="port-sub-spark"><svg id="ps-sub-spark-svg" viewBox="0 0 280 36" preserveAspectRatio="none"></svg></div>
+      </div>
+      <div class="port-sub-card">
+        <div class="port-sub-label">Profitti e perdite</div>
+        <div class="port-sub-value" id="ps-pnl-eur">—</div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text3)" id="ps-pnl-detail"></div>
+      </div>
+    </div>
+    <!-- Allocation -->
+    <div class="port-alloc-card">
+      <div class="port-alloc-label">Allocazione</div>
+      <div class="port-alloc-logos" id="ps-alloc-logos"></div>
+      <div class="port-alloc-top" id="ps-alloc-top"></div>
+    </div>
+  </div>
+
+  <!-- Legacy stats (hidden, kept for compatibility) -->
+  <div class="stats" id="trading-stats" style="display:none;margin-bottom:12px"></div>
 
   <!-- Toolbar -->
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">

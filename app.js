@@ -2357,7 +2357,7 @@ async function refreshAllPrices(options){
   var upd=document.getElementById('last-update');
   if(upd) upd.textContent='Aggiornato: '+new Date().toLocaleTimeString('it-IT');
   renderPositions();
-  if(options.updateChart !== false) updatePortfolioChart();
+  if(options.updateChart !== false){ updatePortfolioChart(); renderPortfolioStatsPanel(); }
 }
 
 function applyCustomTradingPeriod(){
@@ -3814,9 +3814,16 @@ function renderPositions(){
     var badgeCls = 'pos-badge pos-badge-'+(p.asset_type||'other');
     var displayName = (p.name || (data && data.name) || p.ticker || '').trim();
 
+    var logoUrl = getTickerLogoUrl(p.ticker);
+    var logoCol = tickerColor(p.ticker);
+    var logoHtml = '<div class="pos-logo-cell">'
+      + '<img class="pos-logo-img" src="'+logoUrl+'" alt="'+esc(p.ticker)+'" onerror="this.style.display=\'none\';this.nextSibling.style.display=\'flex\'">'
+      + '<div class="pos-logo-fb" style="display:none;background:'+logoCol+'">'+esc(p.ticker.slice(0,2))+'</div>'
+      + '<div class="pos-logo-name"><div class="ticker-cell">'+esc(displayName)+'</div><div style="font-size:10px;color:var(--text3)">'+esc(p.ticker)+'</div></div>'
+      + '</div>';
     return '<tr class="'+(sel?'pos-selected':'')+'" style="'+(sel?'background:rgba(79,70,229,0.06)':'')+'">'
       +'<td style="width:32px;padding:8px 10px"><input type="checkbox" '+(sel?'checked':'')+' data-ticker="'+p.ticker+'" onchange="handlePosSelect(this)" style="accent-color:var(--accent)"></td>'
-      +'<td class="ticker-cell" style="max-width:280px;white-space:normal;line-height:1.35">'+esc(displayName)+'</td>'
+      +'<td style="max-width:300px">'+logoHtml+'</td>'
       +'<td><span class="'+badgeCls+'">'+(p.asset_type||'other')+'</span></td>'
       +'<td><b>'+(displayPriceEur!==null?displayPriceEur.toFixed(2):'<span style="color:var(--text3)">N/D</span>')+'</b>&nbsp;<small style="color:var(--text3)">EUR</small></td>'
       +'<td>'+fmtPct(dayPct)+'</td>'
@@ -3838,6 +3845,7 @@ function renderPositions(){
   }).join('');
 
   renderTradingStats(arr);
+  renderPortfolioStatsPanel();
   updatePortfolioChart();
 }
 
@@ -3885,6 +3893,195 @@ function renderTradingStats(arr){
     stat('Valore Attuale (EUR)', totalValue.toFixed(0), 'var(--accent)') +
     stat('P&L (EUR)', totalCost>0 ? (totalPnl>=0?'+':'')+totalPnl.toFixed(0)+' ('+(totalPnlPct>=0?'+':'')+totalPnlPct.toFixed(1)+'%)' : 'Aggiorna prezzi', totalPnl>=0?'var(--green)':'var(--red)') +
     stat('Posizioni', arr.length, 'var(--accent)');
+}
+
+// ── PORTFOLIO STATS PANEL (Revolut style) ──
+var statsActivePeriod = '1d';
+
+function setStatsPeriod(range, btn){
+  statsActivePeriod = range;
+  document.querySelectorAll('.port-period-btn').forEach(function(b){ b.classList.remove('active'); });
+  if(btn) btn.classList.add('active');
+  renderPortfolioStatsPanel();
+}
+
+function getTickerLogoUrl(ticker){
+  // Parqet logo service — good coverage for stocks/ETFs
+  return 'https://assets.parqet.com/logos/symbol/' + encodeURIComponent(ticker) + '?format=jpg';
+}
+
+// Random-but-stable color from ticker string
+function tickerColor(ticker){
+  var colors=['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#db2777','#059669','#ea580c','#0d9488'];
+  var h=0; for(var i=0;i<ticker.length;i++) h=(h*31+ticker.charCodeAt(i))&0xfffffff;
+  return colors[h % colors.length];
+}
+
+function makeSvgSparkline(points, width, height, color, fill){
+  if(!points || points.length < 2) return '';
+  var valid = points.filter(function(p){ return p !== null && !isNaN(p); });
+  if(valid.length < 2) return '';
+  var mn = Math.min.apply(null, valid), mx = Math.max.apply(null, valid);
+  var rng = mx - mn || 1;
+  var step = width / (points.length - 1);
+  var pts = [], filledPts = [];
+  points.forEach(function(v, i){
+    if(v === null || isNaN(v)) return;
+    var x = (i * step).toFixed(1);
+    var y = (height - ((v - mn) / rng) * (height - 4) - 2).toFixed(1);
+    pts.push(x + ',' + y);
+    filledPts.push(x + ',' + y);
+  });
+  if(!pts.length) return '';
+  var lineD = 'M' + pts.join(' L');
+  var fillD = 'M' + filledPts[0] + ' L' + filledPts.join(' L')
+    + ' L' + (points.length-1)*step + ',' + height + ' L0,' + height + ' Z';
+  var id = 'sg' + Math.random().toString(36).slice(2);
+  return '<defs><linearGradient id="'+id+'" x1="0" y1="0" x2="0" y2="1">'
+    + '<stop offset="0%" stop-color="'+color+'" stop-opacity="'+(fill?'.35':'.2')+'"/>'
+    + '<stop offset="100%" stop-color="'+color+'" stop-opacity="0"/>'
+    + '</linearGradient></defs>'
+    + (fill ? '<path d="'+fillD+'" fill="url(#'+id+')" />' : '')
+    + '<path d="'+lineD+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+}
+
+function getPortfolioSeries(period){
+  // Build portfolio-value time series by summing qty * price[t] for each position
+  var seriesArr = [];
+  var minLen = Infinity;
+  positions.forEach(function(p){
+    var key = p.ticker + '_' + period;
+    var d = priceCache[key] || priceCache[normalizeTickerSymbol(p.ticker)+'_'+period];
+    if(!d || !d.closes || !d.closes.length) return;
+    var qty = parseFloat(p.quantity) || 0;
+    var rate = d.currency ? toEUR(1, d.currency) : 1;
+    var vals = d.closes.map(function(c){ return c !== null ? c * qty * rate : null; });
+    seriesArr.push(vals);
+    if(vals.length < minLen) minLen = vals.length;
+  });
+  if(!seriesArr.length || minLen === Infinity) return [];
+  var combined = [];
+  for(var t = 0; t < minLen; t++){
+    var sum = 0, allNull = true;
+    seriesArr.forEach(function(s){ if(s[t] !== null){ sum += s[t]; allNull = false; } });
+    combined.push(allNull ? null : sum);
+  }
+  return combined;
+}
+
+function renderPortfolioStatsPanel(){
+  var panel = document.getElementById('portfolio-stats-panel');
+  if(!panel || !positions || !positions.length){ if(panel) panel.style.display='none'; return; }
+  panel.style.display = '';
+
+  var period = statsActivePeriod;
+  var totalValue = 0, totalCost = 0, periodPnl = 0;
+  var hasPrices = false;
+
+  positions.forEach(function(p){
+    var meta = getPositionImportMeta(p.notes);
+    var key = p.ticker + '_' + period;
+    var d = priceCache[key] || priceCache[normalizeTickerSymbol(p.ticker)+'_'+period];
+    var dayD = priceCache[p.ticker+'_1d'] || d;
+    var qty = parseFloat(p.quantity) || 0;
+    var avg = parseFloat(p.avg_buy_price) || 0;
+    var baseCur = (meta && meta.importedCurrency) || p.currency || 'USD';
+
+    // Cost
+    totalCost += meta && meta.importedInvestedValue > 0
+      ? toEUR(meta.importedInvestedValue, baseCur)
+      : toEUR(qty * avg, baseCur);
+
+    // Value
+    var liveCur = (d && d.currency) || (dayD && dayD.currency) || baseCur;
+    if(meta && meta.importedCurrentValue > 0){
+      totalValue += toEUR(meta.importedCurrentValue, baseCur); hasPrices = true;
+    } else if(dayD && dayD.price){
+      totalValue += toEUR(qty * dayD.price, liveCur); hasPrices = true;
+    } else {
+      totalValue += toEUR(qty * avg, baseCur);
+    }
+
+    // Period PnL
+    if(d && d.periodChange !== null && d.periodChange !== undefined){
+      periodPnl += toEUR(d.periodChange * qty, liveCur);
+    }
+  });
+
+  var totalPnl = totalValue - totalCost;
+  var totalPnlPct = totalCost > 0 ? totalPnl / totalCost * 100 : 0;
+  var periodPnlPct = totalValue > 0 ? periodPnl / (totalValue - periodPnl) * 100 : 0;
+  var isPos = periodPnl >= 0;
+  var color = isPos ? '#22c55e' : '#f87171';
+
+  // Total value
+  var tvEl = document.getElementById('ps-total-value');
+  if(tvEl) tvEl.textContent = totalValue.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €';
+
+  // PnL chip (period)
+  var chip = document.getElementById('ps-pnl-chip');
+  if(chip){
+    chip.className = 'port-pnl-chip ' + (isPos?'pos':'neg');
+    chip.textContent = (isPos?'▲ +':'▼ ') + Math.abs(periodPnl).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €';
+  }
+
+  // Period % sub card
+  var pctEl = document.getElementById('ps-pnl-pct');
+  if(pctEl){
+    pctEl.className = 'port-sub-value ' + (isPos?'pos':'neg');
+    pctEl.textContent = (isPos?'+':'') + periodPnlPct.toFixed(2) + '%';
+  }
+
+  // Period € sub card
+  var eurEl = document.getElementById('ps-pnl-eur');
+  if(eurEl){
+    eurEl.className = 'port-sub-value ' + (totalPnl>=0?'pos':'neg');
+    eurEl.textContent = (totalPnl>=0?'+':'') + totalPnl.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €';
+  }
+  var detEl = document.getElementById('ps-pnl-detail');
+  if(detEl) detEl.innerHTML = 'Da inizio: <b>' + (totalPnlPct>=0?'+':'') + totalPnlPct.toFixed(1) + '%</b><br>Investito: <b>' + totalCost.toLocaleString('it-IT',{minimumFractionDigits:0,maximumFractionDigits:0}) + ' €</b>';
+
+  // Main sparkline
+  var series = getPortfolioSeries(period);
+  var sparkSvg = document.getElementById('ps-spark-svg');
+  if(sparkSvg) sparkSvg.innerHTML = makeSvgSparkline(series, 600, 70, color, true);
+
+  // Sub sparkline
+  var subSvg = document.getElementById('ps-sub-spark-svg');
+  if(subSvg) subSvg.innerHTML = makeSvgSparkline(series, 280, 36, color, false);
+
+  // Allocation logos
+  var logosCont = document.getElementById('ps-alloc-logos');
+  var topCont = document.getElementById('ps-alloc-top');
+  if(logosCont){
+    var posValues = positions.map(function(p){
+      var key = p.ticker + '_' + period;
+      var d = priceCache[key] || priceCache[normalizeTickerSymbol(p.ticker)+'_'+period];
+      var dayD = priceCache[p.ticker+'_1d'] || d;
+      var qty = parseFloat(p.quantity) || 0;
+      var cur = (d&&d.currency)||(dayD&&dayD.currency)||p.currency||'USD';
+      var val = dayD&&dayD.price ? toEUR(qty*dayD.price,cur) : 0;
+      return {ticker:p.ticker, name:p.name||p.ticker, val:val};
+    }).filter(function(x){ return x.val > 0; });
+    posValues.sort(function(a,b){ return b.val - a.val; });
+    var tot = posValues.reduce(function(s,x){ return s+x.val; }, 0) || 1;
+    var maxH = 60;
+    logosCont.innerHTML = posValues.slice(0,6).map(function(x){
+      var pct = x.val / tot;
+      var barH = Math.max(4, Math.round(pct * maxH));
+      var col = tickerColor(x.ticker);
+      return '<div class="port-alloc-logo-wrap">'
+        + '<div class="port-alloc-bar-track" style="height:'+barH+'px;background:'+col+'"></div>'
+        + '<img class="port-alloc-logo-img" src="'+getTickerLogoUrl(x.ticker)+'" alt="'+x.ticker+'" onerror="this.style.display=\'none\';this.nextSibling.style.display=\'flex\'">'
+        + '<div class="port-alloc-logo-fb" style="display:none;background:'+col+'">'+x.ticker.slice(0,2)+'</div>'
+      + '</div>';
+    }).join('');
+    // Top position
+    if(posValues.length && topCont){
+      var top = posValues[0];
+      topCont.innerHTML = '↑ <b>Posizione maggiore</b> · ' + top.ticker + ' · ' + (top.val/tot*100).toFixed(1) + '%';
+    }
+  }
 }
 
 function toggleAllPositions(cb){
