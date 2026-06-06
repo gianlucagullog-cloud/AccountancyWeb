@@ -627,6 +627,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
   <button class="tab" id="tab-btn-trading" onclick="showTab('trading')">&#128200; Trading</button>
   <button class="tab" id="tab-btn-utenti" onclick="showTab('utenti')">&#128101; Utenti</button>
   <button class="tab" id="tab-btn-verifica" onclick="showTab('verifica')">🔍 Verifica Drive</button>
+  <button class="tab" id="tab-btn-memo" onclick="showTab('memo')">📋 Memo</button>
   <button class="tab" id="tab-btn-settings" onclick="showTab('settings')">Impostazioni</button>
 </div>
 
@@ -1314,6 +1315,41 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
         <div id="verifica-orphan-list"></div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- MEMO TAB -->
+<div id="tab-memo" style="display:none">
+  <div style="max-width:640px;margin:0 auto">
+    <p class="section-title">Memo mensile — verifica che tutte le fatture attese siano state caricate</p>
+
+    <!-- Month selector + add form -->
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px">
+      <div class="form-group" style="margin:0;flex:0 0 auto">
+        <label>Mese di riferimento</label>
+        <input type="month" id="memo-month" onchange="renderMemo()">
+      </div>
+      <div style="flex:1;min-width:200px">
+        <label style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px">Aggiungi voce attesa</label>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="memo-new-name" placeholder="es. Vodafone, Amazon AWS…" style="flex:1" onkeydown="if(event.key==='Enter')addMemoItem()">
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;white-space:nowrap;cursor:pointer;padding:0 8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm)">
+            <input type="checkbox" id="memo-new-recurring" style="margin:0"> Ricorrente
+          </label>
+          <button class="btn btn-primary" style="white-space:nowrap;padding:0 14px" onclick="addMemoItem()">+ Aggiungi</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div style="display:flex;gap:16px;margin-bottom:14px;font-size:11px;color:var(--text2)">
+      <span>✅ Fattura presente</span>
+      <span>⚠️ Non ancora caricata</span>
+      <span style="margin-left:auto">🔁 = ricorrente mensile</span>
+    </div>
+
+    <!-- Items list -->
+    <div id="memo-list"></div>
   </div>
 </div>
 

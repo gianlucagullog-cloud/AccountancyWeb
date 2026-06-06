@@ -487,7 +487,7 @@ function showTab(t){
   if(isGuestMode&&!canSeeSection(t)){
     showMsg('Sezione non disponibile in modalita ospite.','error');return;
   }
-  ['carica','registro','summary','trading','utenti','settings','verifica'].forEach(function(id){
+  ['carica','registro','summary','trading','utenti','settings','verifica','memo'].forEach(function(id){
     var el=document.getElementById('tab-'+id);if(el)el.style.display=id===t?'':'none';
     var btn=document.getElementById('tab-btn-'+id);if(btn)btn.classList.toggle('active',id===t);
   });
@@ -496,6 +496,7 @@ function showTab(t){
   if(t==='trading'){loadPositions();}
   if(t==='utenti'){loadUtenti();}
   if(t==='verifica'){initVerifica();}
+  if(t==='memo'){initMemo();}
 }
 
 
@@ -4394,4 +4395,132 @@ async function importPortfolioPDF(file){
   if(errors.length) alert('Errori:\n'+errors.slice(0,5).join('\n'));
   else showMsg(parsed.length+' posizioni importate dal PDF!','success');
   await loadPositions();
+}
+
+// ============================================================
+// MEMO MENSILE
+// ============================================================
+
+var memoItems = []; // cached from Supabase
+
+function initMemo(){
+  var inp = document.getElementById('memo-month');
+  if(inp && !inp.value){
+    var now = new Date();
+    inp.value = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  }
+  loadMemoItems();
+}
+
+async function loadMemoItems(){
+  if(!currentUser) return;
+  var month = document.getElementById('memo-month').value; // YYYY-MM
+  // Load recurring items + items specific to this month
+  var r = await sb.from('memo_items')
+    .select('*')
+    .eq('user_id', currentUser.id)
+    .or('recurring.eq.true,month.eq.'+month);
+  memoItems = r.data || [];
+  renderMemo();
+}
+
+function renderMemo(){
+  var el = document.getElementById('memo-list');
+  if(!el) return;
+  var month = document.getElementById('memo-month').value; // YYYY-MM
+
+  if(!memoItems.length){
+    el.innerHTML = '<div style="text-align:center;color:var(--text3);padding:40px 0;font-size:13px">Nessuna voce nel memo.<br>Aggiungi i fornitori/spese che ti aspetti ogni mese.</div>';
+    return;
+  }
+
+  // De-duplicate by counterparty (recurring + month-specific may overlap)
+  var seen = {};
+  var items = [];
+  memoItems.forEach(function(item){
+    var key = item.counterparty.toLowerCase().trim();
+    if(!seen[key]){ seen[key]=true; items.push(item); }
+  });
+
+  // Check which counterparties have invoices in the selected service_month
+  var found = {};
+  txs.forEach(function(tx){
+    if(tx.serviceMonth === month){
+      found[tx.counterparty.toLowerCase().trim()] = true;
+    }
+  });
+
+  var missing = items.filter(function(i){ return !found[i.counterparty.toLowerCase().trim()]; });
+  var present = items.filter(function(i){ return found[i.counterparty.toLowerCase().trim()]; });
+
+  function renderItem(item, ok){
+    var icon = ok ? '✅' : '⚠️';
+    var recurIcon = item.recurring ? ' <span style="color:var(--text3);font-size:11px">🔁</span>' : '';
+    var textColor = ok ? 'var(--green)' : 'var(--text)';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px">'+
+      '<span style="font-size:18px">'+icon+'</span>'+
+      '<span style="flex:1;font-size:13px;color:'+textColor+'">'+escHtml(item.counterparty)+recurIcon+'</span>'+
+      '<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);cursor:pointer">'+
+        '<input type="checkbox" '+(item.recurring?'checked':'')+' onchange="toggleMemoRecurring('+item.id+',this.checked)" style="margin:0"> Ricorrente'+
+      '</label>'+
+      '<button onclick="deleteMemoItem('+item.id+')" style="background:none;border:none;cursor:pointer;font-size:14px;color:var(--text3);padding:2px 6px" title="Rimuovi">✕</button>'+
+    '</div>';
+  }
+
+  var html = '';
+  if(missing.length){
+    html += '<div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">⚠️ Mancanti ('+missing.length+')</div>';
+    missing.forEach(function(i){ html += renderItem(i, false); });
+    html += '<div style="margin-bottom:18px"></div>';
+  }
+  if(present.length){
+    html += '<div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">✅ Presenti ('+present.length+')</div>';
+    present.forEach(function(i){ html += renderItem(i, true); });
+  }
+  el.innerHTML = html;
+}
+
+function escHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function addMemoItem(){
+  var nameEl = document.getElementById('memo-new-name');
+  var name = nameEl.value.trim();
+  if(!name){ nameEl.focus(); return; }
+  var recurring = document.getElementById('memo-new-recurring').checked;
+  var month = document.getElementById('memo-month').value;
+
+  var row = {
+    user_id: currentUser.id,
+    counterparty: name,
+    recurring: recurring,
+    month: recurring ? null : month
+  };
+  var r = await sb.from('memo_items').insert(row).select();
+  if(r.error){ showMsg('Errore: '+r.error.message,'error'); return; }
+  nameEl.value='';
+  document.getElementById('memo-new-recurring').checked=false;
+  memoItems.push(r.data[0]);
+  renderMemo();
+}
+
+async function deleteMemoItem(id){
+  var r = await sb.from('memo_items').delete().eq('id',id);
+  if(r.error){ showMsg('Errore: '+r.error.message,'error'); return; }
+  memoItems = memoItems.filter(function(i){ return i.id!==id; });
+  renderMemo();
+}
+
+async function toggleMemoRecurring(id, recurring){
+  var month = document.getElementById('memo-month').value;
+  var r = await sb.from('memo_items').update({
+    recurring: recurring,
+    month: recurring ? null : month
+  }).eq('id',id);
+  if(r.error){ showMsg('Errore: '+r.error.message,'error'); return; }
+  memoItems = memoItems.map(function(i){
+    return i.id===id ? Object.assign({},i,{recurring:recurring, month:recurring?null:month}) : i;
+  });
+  renderMemo();
 }
