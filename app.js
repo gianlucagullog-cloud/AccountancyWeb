@@ -4566,9 +4566,8 @@ async function addMemoItem(){
   var recurrence=document.getElementById('memo-new-recurrence').value;
   var val=memoGetPeriodValue();
 
-  var row={user_id:currentUser.id, counterparty:name, recurrence:recurrence==='none'?null:recurrence,
-    month:null, quarter:null, year:null};
-  // One-time items are pinned to the selected period
+  // Only include period field actually used — omitting others avoids errors if column missing
+  var row={user_id:currentUser.id, counterparty:name, recurrence:recurrence==='none'?null:recurrence};
   if(recurrence==='none'){
     if(memoPeriodType==='month')   row.month=val;
     if(memoPeriodType==='quarter') row.quarter=val;
@@ -4576,7 +4575,7 @@ async function addMemoItem(){
   }
 
   var r=await sb.from('memo_items').insert(row).select();
-  if(r.error){showMsg('Errore: '+r.error.message,'error');return;}
+  if(r.error){showMsg('Errore DB: '+r.error.message,'error');return;}
   nameEl.value='';
   memoItems.push(r.data[0]);
   renderMemo();
@@ -4592,11 +4591,11 @@ async function deleteMemoItem(id){
 async function changeMemoRecurrence(id, value){
   var val=memoGetPeriodValue();
   var recurrence=value==='none'?null:value;
-  var upd={recurrence:recurrence, month:null, quarter:null, year:null};
+  var upd={recurrence:recurrence, month:null, quarter:null};
   if(!recurrence){
     if(memoPeriodType==='month')   upd.month=val;
     if(memoPeriodType==='quarter') upd.quarter=val;
-    if(memoPeriodType==='year')    upd.year=val;
+    if(memoPeriodType==='year')    {upd.year=val;}
   }
   var r=await sb.from('memo_items').update(upd).eq('id',id);
   if(r.error){showMsg('Errore: '+r.error.message,'error');return;}
