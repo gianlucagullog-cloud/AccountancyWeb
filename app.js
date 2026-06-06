@@ -7,9 +7,11 @@ function toggleTheme(){
   localStorage.setItem('theme',next);
   var btn=document.getElementById('theme-toggle');
   if(btn) btn.textContent=next==='dark'?'☀️':'🌙';
+  // Persist to Supabase so other devices pick it up
+  if(currentUser) sb.from('profile').upsert({user_id:currentUser.id,theme:next},{onConflict:'user_id'}).then(function(){});
 }
 document.addEventListener('DOMContentLoaded',function(){
-  var t=localStorage.getItem('theme')||'light';
+  var t=localStorage.getItem('theme')||'dark';
   var btn=document.getElementById('theme-toggle');
   if(btn) btn.textContent=t==='dark'?'☀️':'🌙';
 });
@@ -115,6 +117,7 @@ async function showApp(){
   }
   updateAmountSections();
   driveAutoConnect();
+  setupRealtimeSync();
   showTab('carica');
 }
 
@@ -206,6 +209,47 @@ function viewFromLocalStorage(t){
     }
   }catch(e){alert('Errore apertura file.');}
 }
+
+// ============================================================
+// REALTIME SYNC
+// ============================================================
+var _realtimeChannel = null;
+var _lastVisibilityRefresh = 0;
+
+function setupRealtimeSync(){
+  if(!currentUser) return;
+  // Tear down any existing channel before re-subscribing
+  if(_realtimeChannel){ try{ sb.removeChannel(_realtimeChannel); }catch(e){} _realtimeChannel=null; }
+
+  _realtimeChannel = sb.channel('app-sync-'+currentUser.id)
+    .on('postgres_changes',{event:'*',schema:'public',table:'invoices',filter:'user_id=eq.'+currentUser.id},function(){
+      loadInvoices();
+    })
+    .on('postgres_changes',{event:'*',schema:'public',table:'memo_items',filter:'user_id=eq.'+currentUser.id},function(){
+      loadMemoItems().then(function(){ renderMemo(); });
+    })
+    .on('postgres_changes',{event:'*',schema:'public',table:'trading_positions',filter:'user_id=eq.'+currentUser.id},function(){
+      loadPositions().then(function(){ renderTradingStats(); renderPositions(); });
+    })
+    .on('postgres_changes',{event:'*',schema:'public',table:'profile',filter:'user_id=eq.'+currentUser.id},function(){
+      loadSettings();
+    })
+    .subscribe();
+}
+
+function silentRefreshAll(){
+  if(!currentUser) return;
+  var now=Date.now();
+  if(now-_lastVisibilityRefresh < 30000) return; // debounce 30s
+  _lastVisibilityRefresh=now;
+  loadInvoices();
+  if(typeof loadMemoItems==='function') loadMemoItems().then(function(){ renderMemo(); });
+  if(typeof loadPositions==='function') loadPositions().then(function(){ renderTradingStats(); renderPositions(); });
+}
+
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='visible') silentRefreshAll();
+});
 
 // DATA FUNCTIONS
 function loadInvoices(){
@@ -419,6 +463,14 @@ function loadSettings(){
       settings.gclientid = r.data.google_client_id || localStorage.getItem('inv_gcid') || DEFAULT_GCID;
       settings.gfolderid = r.data.google_folder_id || localStorage.getItem('inv_gfid') || DEFAULT_GFID;
       settings.svckey    = r.data.svc_key          || localStorage.getItem('inv_svc_key') || '';
+      // Sync theme across devices
+      if(r.data.theme && r.data.theme !== localStorage.getItem('theme')){
+        var t=r.data.theme;
+        localStorage.setItem('theme',t);
+        document.documentElement.setAttribute('data-theme',t);
+        var tb=document.getElementById('theme-toggle');
+        if(tb) tb.textContent=t==='dark'?'☀️':'🌙';
+      }
     } else {
       settings.key       = localStorage.getItem('inv_key')    || DEFAULT_KEY;
       settings.gclientid = localStorage.getItem('inv_gcid')   || DEFAULT_GCID;
@@ -452,7 +504,8 @@ function saveSettings(){
     anthropic_key:   settings.key       || null,
     google_client_id:settings.gclientid || null,
     google_folder_id:settings.gfolderid || null,
-    svc_key:         settings.svckey    || null
+    svc_key:         settings.svckey    || null,
+    theme:           localStorage.getItem('theme') || 'dark'
   },{onConflict:'user_id'});
 
   // Keep localStorage in sync as local cache
