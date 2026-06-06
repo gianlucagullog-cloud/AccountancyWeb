@@ -4501,20 +4501,21 @@ function renderMemo(){
   if(memoPeriodType==='quarter') coveredMonths=quarterMonths(val);
   if(memoPeriodType==='year')    coveredMonths=yearMonths(val);
 
-  // Collect invoice counterparties present in the covered period (lowercase)
-  var invoiceCounterparties=[];
+  // Collect invoices present in the covered period
+  var periodInvoices=[];
   txs.forEach(function(tx){
-    if(coveredMonths.indexOf(tx.serviceMonth)>=0)
-      invoiceCounterparties.push(tx.counterparty.toLowerCase().trim());
+    if(coveredMonths.indexOf(tx.serviceMonth)>=0) periodInvoices.push(tx);
   });
 
   // Fuzzy match: memo name found if any invoice counterparty contains it or vice versa
-  function isMemoFound(memoName){
+  function matchingInvoices(memoName){
     var mn=memoName.toLowerCase().trim();
-    return invoiceCounterparties.some(function(ic){
+    return periodInvoices.filter(function(tx){
+      var ic=tx.counterparty.toLowerCase().trim();
       return ic.indexOf(mn)>=0 || mn.indexOf(ic)>=0;
     });
   }
+  function isMemoFound(memoName){ return matchingInvoices(memoName).length>0; }
 
   // Relevant items: those matching the current period type + all recurring
   var seen={}, items=[];
@@ -4535,9 +4536,15 @@ function renderMemo(){
       ' <span style="font-size:10px;background:var(--accent-light);color:var(--accent);border-radius:10px;padding:1px 6px">🔁 '+RECUR_LABELS[item.recurrence]+'</span>':'';
     var textColor=ok?'var(--green)':'var(--text)';
     var recVal=item.recurrence||'none';
+    // Dates of matching invoices
+    var dateStr='';
+    if(ok){
+      var dates=matchingInvoices(item.counterparty).map(function(tx){return formatDate(tx.date);});
+      dateStr='<div style="font-size:11px;color:var(--green);margin-top:2px">'+dates.join(' · ')+'</div>';
+    }
     return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px">'+
       '<span style="font-size:18px">'+icon+'</span>'+
-      '<span style="flex:1;font-size:13px;color:'+textColor+'">'+escHtml(item.counterparty)+badge+'</span>'+
+      '<span style="flex:1;font-size:13px;color:'+textColor+'">'+escHtml(item.counterparty)+badge+dateStr+'</span>'+
       '<select onchange="changeMemoRecurrence('+item.id+',this.value)" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)">'+
         '<option value="none"'+(recVal==='none'?' selected':'')+'>Una tantum</option>'+
         '<option value="monthly"'+(recVal==='monthly'?' selected':'')+'>🔁 Mensile</option>'+
