@@ -1,3 +1,19 @@
+// ── THEME ──
+function toggleTheme(){
+  var html=document.documentElement;
+  var isDark=html.getAttribute('data-theme')==='dark';
+  var next=isDark?'light':'dark';
+  html.setAttribute('data-theme',next);
+  localStorage.setItem('theme',next);
+  var btn=document.getElementById('theme-toggle');
+  if(btn) btn.textContent=next==='dark'?'☀️':'🌙';
+}
+document.addEventListener('DOMContentLoaded',function(){
+  var t=localStorage.getItem('theme')||'light';
+  var btn=document.getElementById('theme-toggle');
+  if(btn) btn.textContent=t==='dark'?'☀️':'🌙';
+});
+
 // CONFIG
 var SUPABASE_URL = 'https://tabobhdntfnedwjrqboc.supabase.co';
 var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhYm9iaGRudGZuZWR3anJxYm9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2MTcyMTUsImV4cCI6MjA5MzE5MzIxNX0.Q7p0cd7aseU08JEwrQ2GHpbYQukbctRJlM1A3Y4FTaA';
@@ -1293,7 +1309,7 @@ function renderSimulator(){
   var eIn=parseFloat(document.getElementById('sim-extra-in').value)||0;
   var eOut=parseFloat(document.getElementById('sim-extra-out').value)||0;
   var gRev=bIn+eIn,dExp=bOut+eOut;
-  var regimes=[['malta-se','#4f46e5'],['malta-ltd','#0891b2'],['dubai-se','#d97706'],['dubai-fz','#16a34a'],['italy-piva','#dc2626']];
+  var regimes=[['malta-se','#2563eb'],['malta-ltd','#0891b2'],['dubai-se','#d97706'],['dubai-fz','#16a34a'],['italy-piva','#dc2626']];
   var el=document.getElementById('sim-results');if(!el)return;
   el.innerHTML='<div class="sim-grid">'+regimes.map(function(rp){
     var c=getCalc(rp[0],gRev,dExp);
@@ -3520,7 +3536,7 @@ async function updatePortfolioChart(){
   if(lbl) lbl.textContent = getTradingLabel();
   var titleEl = document.getElementById('chart-title');
 
-  var COLORS = ['#4f46e5','#16a34a','#dc2626','#d97706','#0891b2','#7c3aed','#db2777','#059669','#ea580c','#0d9488'];
+  var COLORS = ['#2563eb','#16a34a','#dc2626','#d97706','#0891b2','#1d4ed8','#db2777','#059669','#ea580c','#0d9488'];
 
   // Collect data
   var allData = tickers.map(function(t){
@@ -4570,19 +4586,19 @@ function renderMemo(){
     return;
   }
 
-  // Collect months covered by the selected period (for invoice matching)
+  // Collect months covered by the selected period
   var coveredMonths=[];
   if(memoPeriodType==='month')   coveredMonths=[val];
   if(memoPeriodType==='quarter') coveredMonths=quarterMonths(val);
   if(memoPeriodType==='year')    coveredMonths=yearMonths(val);
 
-  // Collect invoices present in the covered period
+  // Invoices in the covered period
   var periodInvoices=[];
   txs.forEach(function(tx){
     if(coveredMonths.indexOf(tx.serviceMonth)>=0) periodInvoices.push(tx);
   });
 
-  // Fuzzy match: memo name found if any invoice counterparty contains it or vice versa
+  // Fuzzy match
   function matchingInvoices(memoName){
     var mn=memoName.toLowerCase().trim();
     return periodInvoices.filter(function(tx){
@@ -4590,9 +4606,99 @@ function renderMemo(){
       return ic.indexOf(mn)>=0 || mn.indexOf(ic)>=0;
     });
   }
-  function isMemoFound(memoName){ return matchingInvoices(memoName).length>0; }
 
-  // Relevant items: those matching the current period type + all recurring
+  // Per-month invoices for a given counterparty
+  function monthInvoices(memoName,m){
+    return matchingInvoices(memoName).filter(function(tx){return tx.serviceMonth===m;});
+  }
+
+  // Status: 'ok' | 'partial' | 'missing'
+  function itemStatus(item){
+    var all=matchingInvoices(item.counterparty);
+    if(!all.length) return 'missing';
+    // For monthly recurrence in multi-month view: require coverage every month
+    if(memoPeriodType!=='month' && item.recurrence==='monthly'){
+      var found=coveredMonths.filter(function(m){return monthInvoices(item.counterparty,m).length>0;}).length;
+      if(found===coveredMonths.length) return 'ok';
+      if(found>0) return 'partial';
+      return 'missing';
+    }
+    return 'ok';
+  }
+
+  var RECUR_LABELS={monthly:'Mensile',quarterly:'Trimestrale',yearly:'Annuale'};
+  var MONTH_LABELS=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+  function fmtMonth(yyyymm){
+    var p=yyyymm.split('-');
+    return MONTH_LABELS[parseInt(p[1],10)-1]+' '+p[0];
+  }
+  function fmtAmt(tx){
+    var n=tx.usciteNet||tx.entrateNet||0;
+    return n.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+  }
+  function invRow(tx){
+    return '<div class="memo-inv-row">'+
+      '<span class="memo-inv-date">'+formatDate(tx.date)+'</span>'+
+      (tx.invoice?'<span class="memo-inv-num">#'+escHtml(tx.invoice)+'</span>':'')+
+      (tx.description?'<span class="memo-inv-desc">'+escHtml(tx.description)+'</span>':'')+
+      '<span class="memo-inv-amt">'+fmtAmt(tx)+'</span>'+
+    '</div>';
+  }
+
+  function renderItem(item){
+    var st=itemStatus(item);
+    var recVal=item.recurrence||'none';
+    var isMultiMonth=(memoPeriodType!=='month');
+    var showPerMonth=isMultiMonth&&(item.recurrence==='monthly'||!item.recurrence);
+    var statusDot=st==='ok'?'memo-dot-ok':st==='partial'?'memo-dot-partial':'memo-dot-miss';
+    var recBadge=item.recurrence?
+      '<span class="memo-recur-badge">🔁 '+RECUR_LABELS[item.recurrence]+'</span>':'';
+
+    var bodyHtml='';
+    if(showPerMonth){
+      // Per-month breakdown columns
+      bodyHtml='<div class="memo-month-grid">';
+      coveredMonths.forEach(function(m){
+        var inv=monthInvoices(item.counterparty,m);
+        if(inv.length){
+          bodyHtml+='<div class="memo-mcol memo-mcol-ok">'+
+            '<div class="memo-mcol-head">✅ '+fmtMonth(m)+'</div>'+
+            inv.map(invRow).join('')+
+          '</div>';
+        } else {
+          bodyHtml+='<div class="memo-mcol memo-mcol-miss">'+
+            '<div class="memo-mcol-head">⚠️ '+fmtMonth(m)+'</div>'+
+            '<div class="memo-miss-label">Fattura mancante</div>'+
+          '</div>';
+        }
+      });
+      bodyHtml+='</div>';
+    } else {
+      // Simple invoice list
+      var inv=matchingInvoices(item.counterparty);
+      if(inv.length) bodyHtml='<div class="memo-inv-list">'+inv.map(invRow).join('')+'</div>';
+    }
+
+    return '<div class="memo-card memo-card-'+st+'">'+
+      '<div class="memo-card-head">'+
+        '<span class="memo-dot '+statusDot+'"></span>'+
+        '<span class="memo-cp">'+escHtml(item.counterparty)+'</span>'+
+        recBadge+
+        '<div class="memo-card-actions">'+
+          '<select onchange="changeMemoRecurrence('+item.id+',this.value)" class="memo-recur-sel">'+
+            '<option value="none"'+(recVal==='none'?' selected':'')+'>Una tantum</option>'+
+            '<option value="monthly"'+(recVal==='monthly'?' selected':'')+'>🔁 Mensile</option>'+
+            '<option value="quarterly"'+(recVal==='quarterly'?' selected':'')+'>🔁 Trimestrale</option>'+
+            '<option value="yearly"'+(recVal==='yearly'?' selected':'')+'>🔁 Annuale</option>'+
+          '</select>'+
+          '<button onclick="deleteMemoItem('+item.id+')" class="memo-del-btn" title="Rimuovi">✕</button>'+
+        '</div>'+
+      '</div>'+
+      bodyHtml+
+    '</div>';
+  }
+
+  // Relevant items for this period
   var seen={}, items=[];
   memoItems.forEach(function(item){
     var key=item.counterparty.toLowerCase().trim();
@@ -4603,44 +4709,22 @@ function renderMemo(){
     if(relevant&&!seen[key]){seen[key]=true;items.push(item);}
   });
 
-  var RECUR_LABELS={monthly:'Mensile',quarterly:'Trimestrale',yearly:'Annuale'};
+  var missing=items.filter(function(i){return itemStatus(i)==='missing';});
+  var partial=items.filter(function(i){return itemStatus(i)==='partial';});
+  var present=items.filter(function(i){return itemStatus(i)==='ok';});
 
-  function renderItem(item, ok){
-    var icon=ok?'✅':'⚠️';
-    var badge=item.recurrence?
-      ' <span style="font-size:10px;background:var(--accent-light);color:var(--accent);border-radius:10px;padding:1px 6px">🔁 '+RECUR_LABELS[item.recurrence]+'</span>':'';
-    var textColor=ok?'var(--green)':'var(--text)';
-    var recVal=item.recurrence||'none';
-    // Dates of matching invoices
-    var dateStr='';
-    if(ok){
-      var dates=matchingInvoices(item.counterparty).map(function(tx){return formatDate(tx.date);});
-      dateStr='<div style="font-size:11px;color:var(--green);margin-top:2px">'+dates.join(' · ')+'</div>';
-    }
-    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px">'+
-      '<span style="font-size:18px">'+icon+'</span>'+
-      '<span style="flex:1;font-size:13px;color:'+textColor+'">'+escHtml(item.counterparty)+badge+dateStr+'</span>'+
-      '<select onchange="changeMemoRecurrence('+item.id+',this.value)" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)">'+
-        '<option value="none"'+(recVal==='none'?' selected':'')+'>Una tantum</option>'+
-        '<option value="monthly"'+(recVal==='monthly'?' selected':'')+'>🔁 Mensile</option>'+
-        '<option value="quarterly"'+(recVal==='quarterly'?' selected':'')+'>🔁 Trimestrale</option>'+
-        '<option value="yearly"'+(recVal==='yearly'?' selected':'')+'>🔁 Annuale</option>'+
-      '</select>'+
-      '<button onclick="deleteMemoItem('+item.id+')" style="background:none;border:none;cursor:pointer;font-size:14px;color:var(--text3);padding:2px 6px" title="Rimuovi">✕</button>'+
-    '</div>';
-  }
-
-  var missing=items.filter(function(i){return !isMemoFound(i.counterparty);});
-  var present=items.filter(function(i){return isMemoFound(i.counterparty);});
   var html='';
   if(missing.length){
-    html+='<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">⚠️ Mancanti ('+missing.length+')</div>';
-    missing.forEach(function(i){html+=renderItem(i,false);});
-    html+='<div style="margin-bottom:18px"></div>';
+    html+='<div class="memo-section-label">⚠️ Mancanti ('+missing.length+')</div>';
+    missing.forEach(function(i){html+=renderItem(i);});
+  }
+  if(partial.length){
+    html+='<div class="memo-section-label" style="color:var(--orange)">🔶 Parziali ('+partial.length+') — alcuni mesi mancanti</div>';
+    partial.forEach(function(i){html+=renderItem(i);});
   }
   if(present.length){
-    html+='<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">✅ Presenti ('+present.length+')</div>';
-    present.forEach(function(i){html+=renderItem(i,true);});
+    html+='<div class="memo-section-label" style="color:var(--green)">✅ Presenti ('+present.length+')</div>';
+    present.forEach(function(i){html+=renderItem(i);});
   }
   el.innerHTML=html||'<div style="text-align:center;color:var(--text3);padding:40px 0;font-size:13px">Nessuna voce per il periodo selezionato.</div>';
 }

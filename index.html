@@ -15,6 +15,8 @@
 <link rel="apple-touch-icon" href="icon.svg">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 
+<!-- Anti-flash: apply saved theme before paint -->
+<script>(function(){var t=localStorage.getItem('theme')||'light';document.documentElement.setAttribute('data-theme',t)})()</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -51,6 +53,69 @@
   --font:'Sora',sans-serif;
   --font-display:'Syne',sans-serif;
 }
+
+/* ── DARK THEME ── */
+html[data-theme="dark"]{
+  --bg:#0f0f13;
+  --surface:#13131a;
+  --surface2:#1a1a24;
+  --border:#1e1e2a;
+  --border2:#2a2a38;
+  --accent:#3b82f6;
+  --accent-hover:#2563eb;
+  --accent-light:rgba(59,130,246,.15);
+  --text:#ebebf0;
+  --text2:#888;
+  --text3:#4a4a58;
+  --red:#f87171;
+  --red-light:rgba(248,113,113,.12);
+  --green:#4ade80;
+  --green-light:rgba(74,222,128,.1);
+  --orange:#fbbf24;
+  --shadow:0 1px 4px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.3);
+  --shadow-md:0 4px 20px rgba(0,0,0,.5),0 1px 6px rgba(0,0,0,.3);
+  --shadow-accent:0 4px 14px rgba(59,130,246,.35);
+}
+html[data-theme="dark"] body{
+  background-image:radial-gradient(circle at 20% 0%,rgba(37,99,235,.08) 0%,transparent 60%),
+                   radial-gradient(circle at 80% 100%,rgba(59,130,246,.05) 0%,transparent 50%);
+}
+html[data-theme="dark"] header h1{
+  background:linear-gradient(135deg,#ffffff 30%,#3b82f6 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+}
+html[data-theme="dark"] .modal-overlay{background:rgba(0,0,0,.7)}
+html[data-theme="dark"] .adv-warn{background:rgba(234,179,8,.08);border-color:rgba(234,179,8,.25)}
+html[data-theme="dark"] .adv-warn .adv-title{color:#fbbf24}
+html[data-theme="dark"] .adv-ok{background:rgba(74,222,128,.07);border-color:rgba(74,222,128,.2)}
+html[data-theme="dark"] .adv-info{background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.25)}
+html[data-theme="dark"] .adv-danger{border-color:rgba(248,113,113,.25)}
+html[data-theme="dark"] .badge-in{background:rgba(74,222,128,.1);color:#4ade80;border-color:rgba(74,222,128,.2)}
+html[data-theme="dark"] .badge-out{background:rgba(248,113,113,.1);color:#f87171;border-color:rgba(248,113,113,.2)}
+html[data-theme="dark"] .drive-setup-box{background:linear-gradient(135deg,rgba(37,99,235,.12),rgba(8,145,178,.07));border-color:rgba(37,99,235,.3)}
+html[data-theme="dark"] .drive-setup-box h4{color:#93c5fd}
+html[data-theme="dark"] .drive-status.connected{background:rgba(74,222,128,.1);border-color:rgba(74,222,128,.3)}
+html[data-theme="dark"] .memo-mcol-ok{background:rgba(74,222,128,.06)}
+html[data-theme="dark"] .memo-mcol-miss{background:rgba(255,255,255,.02)}
+html[data-theme="dark"] .memo-inv-row{border-bottom-color:rgba(255,255,255,.05)}
+html[data-theme="dark"] .memo-mcol .memo-inv-row{border-bottom-color:rgba(255,255,255,.05)}
+html[data-theme="dark"] .pos-badge-stock{background:rgba(14,165,233,.15);color:#38bdf8}
+html[data-theme="dark"] .pos-badge-etf{background:rgba(245,158,11,.12);color:#fbbf24}
+html[data-theme="dark"] .pos-badge-bond{background:rgba(168,85,247,.12);color:#c084fc}
+html[data-theme="dark"] .pos-badge-crypto{background:rgba(249,115,22,.12);color:#fb923c}
+html[data-theme="dark"] .pos-badge-commodity{background:rgba(74,222,128,.1);color:#4ade80}
+html[data-theme="dark"] .pos-badge-other{background:rgba(255,255,255,.07);color:#888}
+html[data-theme="dark"] .rec-buy{background:rgba(74,222,128,.07);border-color:rgba(74,222,128,.2)}
+html[data-theme="dark"] .rec-buy .rec-title{color:#4ade80}
+html[data-theme="dark"] .rec-sell{background:rgba(248,113,113,.07);border-color:rgba(248,113,113,.2)}
+html[data-theme="dark"] .rec-hold{background:rgba(251,191,36,.07);border-color:rgba(251,191,36,.2)}
+html[data-theme="dark"] .rec-hold .rec-title{color:#fbbf24}
+html[data-theme="dark"] .rec-watch{background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.25)}
+html[data-theme="dark"] .th-sort:hover{background:rgba(255,255,255,.05);color:#ebebf0}
+html[data-theme="dark"] select option{background:#13131a;color:#ebebf0}
+html[data-theme="dark"] .lock-screen-inner{background:var(--surface)!important;border-color:var(--border)!important;box-shadow:0 8px 40px rgba(0,0,0,.5)!important}
+html[data-theme="dark"] #lock-screen{background:var(--bg)!important}
+html[data-theme="dark"] .mc-card.mc-dup{background:rgba(251,191,36,.05)}
 
 body{
   background:var(--bg);
@@ -615,6 +680,47 @@ tr:hover td{background:var(--surface2)}
 .cb-cell{width:32px;padding:11px 8px!important;text-align:center}
 input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--accent)}
 
+/* ── MEMO CARDS ── */
+.memo-section-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text2);margin:18px 0 8px}
+.memo-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:10px;overflow:hidden;box-shadow:var(--shadow)}
+.memo-card-ok{border-left:3px solid var(--green)}
+.memo-card-partial{border-left:3px solid var(--orange)}
+.memo-card-miss{border-left:3px solid var(--text3)}
+.memo-card-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.memo-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.memo-dot-ok{background:var(--green)}
+.memo-dot-partial{background:var(--orange)}
+.memo-dot-miss{background:var(--text3)}
+.memo-cp{font-size:13px;font-weight:700;flex:1;color:var(--text)}
+.memo-recur-badge{font-size:10px;background:var(--accent-light);color:var(--accent);border-radius:10px;padding:2px 8px;font-weight:600;white-space:nowrap}
+.memo-card-actions{display:flex;align-items:center;gap:6px;margin-left:auto}
+.memo-recur-sel{font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);cursor:pointer}
+.memo-del-btn{background:none;border:none;cursor:pointer;font-size:13px;color:var(--text3);padding:2px 6px;border-radius:4px}
+.memo-del-btn:hover{color:var(--red);background:var(--red-light)}
+/* Month grid (quarterly/yearly view) */
+.memo-month-grid{display:flex;gap:1px;background:var(--border)}
+.memo-mcol{flex:1;padding:10px 12px;background:var(--surface)}
+.memo-mcol-ok{background:#f0fdf4}
+.memo-mcol-miss{background:#fafafa}
+.memo-mcol-head{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;color:var(--text2)}
+.memo-mcol-ok .memo-mcol-head{color:var(--green)}
+.memo-mcol-miss .memo-mcol-head{color:var(--text3)}
+.memo-miss-label{font-size:11px;color:var(--text3);font-style:italic}
+/* Invoice rows */
+.memo-inv-list{padding:8px 14px;display:flex;flex-direction:column;gap:4px}
+.memo-inv-row{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;font-size:11px;padding:3px 0;border-bottom:1px solid var(--border)}
+.memo-mcol .memo-inv-row{border-bottom:1px solid rgba(0,0,0,.06)}
+.memo-inv-row:last-child{border-bottom:none}
+.memo-inv-date{color:var(--text2);white-space:nowrap;flex-shrink:0}
+.memo-inv-num{color:var(--accent);font-weight:600;white-space:nowrap;flex-shrink:0}
+.memo-inv-desc{color:var(--text);flex:1;min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.memo-inv-amt{font-weight:700;color:var(--text);white-space:nowrap;margin-left:auto}
+@media(max-width:600px){
+  .memo-month-grid{flex-direction:column;gap:0}
+  .memo-mcol{border-bottom:1px solid var(--border)}
+  .memo-inv-desc{display:none}
+}
+/* ── end memo ── */
 .th-sort{cursor:pointer;user-select:none;white-space:nowrap}
 .th-sort:hover{color:var(--text);background:var(--surface)}
 .sort-arrow{margin-left:3px;opacity:.4;font-size:9px}
@@ -748,6 +854,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
     <span>AI · Supabase</span>
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+    <button id="theme-toggle" onclick="toggleTheme()" title="Cambia tema" style="background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:5px 11px;font-size:15px;cursor:pointer;line-height:1;transition:all .2s;color:var(--text2)">🌙</button>
     <span id="user-email-badge" style="font-size:11px;color:var(--text2);background:var(--surface);border:1px solid var(--border);padding:5px 12px;border-radius:20px;display:none;font-weight:500"></span>
     <button class="btn btn-secondary" id="logout-btn" style="font-size:11px;padding:6px 14px;display:none;border-radius:20px" onclick="doLogout()">Esci</button>
   </div>
