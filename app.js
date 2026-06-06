@@ -4398,36 +4398,64 @@ async function importPortfolioPDF(file){
 }
 
 // ============================================================
-// MEMO MENSILE / TRIMESTRALE
+// MEMO — periodo: mese / trimestre / anno
 // ============================================================
 
 var memoItems = [];
+var memoPeriodType = 'month'; // 'month' | 'quarter' | 'year'
 
-function monthToQuarter(ym){ // 'YYYY-MM' → 'YYYY-QN'
+function monthToQuarter(ym){
   var p=ym.split('-'); if(p.length<2) return '';
   return p[0]+'-Q'+Math.ceil(parseInt(p[1])/3);
 }
-
-function quarterMonths(q){ // 'YYYY-QN' → ['YYYY-MM','YYYY-MM','YYYY-MM']
+function quarterMonths(q){
   var p=q.match(/(\d{4})-Q(\d)/); if(!p) return [];
   var y=parseInt(p[1]),n=parseInt(p[2]),m=(n-1)*3+1;
   return [m,m+1,m+2].map(function(x){return y+'-'+String(x).padStart(2,'0');});
 }
+function yearMonths(y){ // '2026' → ['2026-01',...,'2026-12']
+  var months=[];
+  for(var m=1;m<=12;m++) months.push(y+'-'+String(m).padStart(2,'0'));
+  return months;
+}
 
-function buildQuarterOptions(){
-  var sel=document.getElementById('memo-quarter'); if(!sel) return;
+function buildMemoSelects(){
   var now=new Date(), cy=now.getFullYear();
-  sel.innerHTML='';
-  [cy-1,cy,cy+1].forEach(function(y){
-    [1,2,3,4].forEach(function(q){
-      var val=y+'-Q'+q;
-      var opt=document.createElement('option');
-      opt.value=val; opt.textContent='Q'+q+' '+y;
-      sel.appendChild(opt);
+  // Quarter options
+  var qsel=document.getElementById('memo-quarter');
+  if(qsel){
+    qsel.innerHTML='';
+    [cy-1,cy,cy+1].forEach(function(y){
+      [1,2,3,4].forEach(function(q){
+        var o=document.createElement('option');
+        o.value=y+'-Q'+q; o.textContent='Q'+q+' '+y; qsel.appendChild(o);
+      });
     });
+    qsel.value=monthToQuarter(cy+'-'+String(now.getMonth()+1).padStart(2,'0'));
+  }
+  // Year options
+  var ysel=document.getElementById('memo-year');
+  if(ysel){
+    ysel.innerHTML='';
+    [cy-1,cy,cy+1].forEach(function(y){
+      var o=document.createElement('option');
+      o.value=String(y); o.textContent=String(y); ysel.appendChild(o);
+    });
+    ysel.value=String(cy);
+  }
+}
+
+function setMemoPeriodType(type){
+  memoPeriodType=type;
+  var labels={month:'Mese di riferimento',quarter:'Trimestre di riferimento',year:'Anno di riferimento'};
+  var lbl=document.getElementById('memo-period-label'); if(lbl) lbl.textContent=labels[type];
+  ['month','quarter','year'].forEach(function(t){
+    var inp=document.getElementById('memo-'+t);
+    if(inp) inp.style.display=(t===type)?'block':'none';
+    var btn=document.getElementById('memo-type-'+t);
+    if(btn){btn.style.background=t===type?'var(--accent)':'var(--surface2)';btn.style.color=t===type?'#fff':'var(--text)';}
   });
-  var cq=monthToQuarter(cy+'-'+String(now.getMonth()+1).padStart(2,'0'));
-  sel.value=cq;
+  loadMemoItems();
 }
 
 function initMemo(){
@@ -4435,70 +4463,65 @@ function initMemo(){
   var monthInp=document.getElementById('memo-month');
   if(monthInp&&!monthInp.value)
     monthInp.value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  buildQuarterOptions();
-  // Sync quarter selector to match the selected month
-  var q=monthToQuarter(monthInp.value);
-  var sel=document.getElementById('memo-quarter'); if(sel) sel.value=q;
-  loadMemoItems();
+  buildMemoSelects();
+  setMemoPeriodType('month');
 }
 
-function onMemoMonthChange(){
-  // Auto-update quarter when month changes
-  var monthInp=document.getElementById('memo-month');
-  var sel=document.getElementById('memo-quarter');
-  if(sel) sel.value=monthToQuarter(monthInp.value);
-  loadMemoItems();
+function memoGetPeriodValue(){
+  return document.getElementById('memo-'+memoPeriodType).value;
 }
 
 async function loadMemoItems(){
   if(!currentUser) return;
-  var month=document.getElementById('memo-month').value;
-  var quarter=document.getElementById('memo-quarter').value;
+  var val=memoGetPeriodValue();
+  var orParts=['recurrence.eq.monthly','recurrence.eq.quarterly','recurrence.eq.yearly'];
+  if(memoPeriodType==='month')   orParts.push('month.eq.'+val);
+  if(memoPeriodType==='quarter') orParts.push('quarter.eq.'+val);
+  if(memoPeriodType==='year')    orParts.push('year.eq.'+val);
   var r=await sb.from('memo_items')
     .select('*')
     .eq('user_id',currentUser.id)
-    .or('recurrence.eq.monthly,recurrence.eq.quarterly,month.eq.'+month+',quarter.eq.'+quarter);
+    .or(orParts.join(','));
   memoItems=r.data||[];
   renderMemo();
 }
 
 function renderMemo(){
   var el=document.getElementById('memo-list'); if(!el) return;
-  var month=document.getElementById('memo-month').value;
-  var quarter=document.getElementById('memo-quarter').value;
+  var val=memoGetPeriodValue();
 
   if(!memoItems.length){
-    el.innerHTML='<div style="text-align:center;color:var(--text3);padding:40px 0;font-size:13px">Nessuna voce nel memo.<br>Aggiungi i fornitori/spese che ti aspetti ogni mese.</div>';
+    el.innerHTML='<div style="text-align:center;color:var(--text3);padding:40px 0;font-size:13px">Nessuna voce nel memo.<br>Aggiungi i fornitori/spese che ti aspetti per questo periodo.</div>';
     return;
   }
 
-  // Split into monthly bucket and quarterly bucket (an item can appear in both)
-  var seenM={}, seenQ={}, monthly=[], quarterly=[];
+  // Collect months covered by the selected period (for invoice matching)
+  var coveredMonths=[];
+  if(memoPeriodType==='month')   coveredMonths=[val];
+  if(memoPeriodType==='quarter') coveredMonths=quarterMonths(val);
+  if(memoPeriodType==='year')    coveredMonths=yearMonths(val);
+
+  // Which counterparties have at least one invoice in covered months
+  var found={};
+  txs.forEach(function(tx){
+    if(coveredMonths.indexOf(tx.serviceMonth)>=0)
+      found[tx.counterparty.toLowerCase().trim()]=true;
+  });
+
+  // Relevant items: those matching the current period type + all recurring
+  var seen={}, items=[];
   memoItems.forEach(function(item){
     var key=item.counterparty.toLowerCase().trim();
-    var isM=(item.recurrence==='monthly'||item.month===month);
-    var isQ=(item.recurrence==='quarterly'||item.quarter===quarter);
-    if(isM&&!seenM[key]){seenM[key]=true;monthly.push(item);}
-    if(isQ&&!seenQ[key]){seenQ[key]=true;quarterly.push(item);}
+    var relevant=(item.recurrence==='monthly'||item.recurrence==='quarterly'||item.recurrence==='yearly')||
+      (memoPeriodType==='month'   && item.month===val)||
+      (memoPeriodType==='quarter' && item.quarter===val)||
+      (memoPeriodType==='year'    && item.year===val);
+    if(relevant&&!seen[key]){seen[key]=true;items.push(item);}
   });
 
-  // Invoice presence check — monthly: exact serviceMonth match
-  var foundM={};
-  txs.forEach(function(tx){
-    if(tx.serviceMonth===month) foundM[tx.counterparty.toLowerCase().trim()]=true;
-  });
+  var RECUR_LABELS={monthly:'Mensile',quarterly:'Trimestrale',yearly:'Annuale'};
 
-  // Invoice presence check — quarterly: any month in the quarter
-  var foundQ={};
-  quarterMonths(quarter).forEach(function(qm){
-    txs.forEach(function(tx){
-      if(tx.serviceMonth===qm) foundQ[tx.counterparty.toLowerCase().trim()]=true;
-    });
-  });
-
-  var RECUR_LABELS={'monthly':'Mensile','quarterly':'Trimestrale'};
-
-  function renderItem(item, ok, found){
+  function renderItem(item, ok){
     var icon=ok?'✅':'⚠️';
     var badge=item.recurrence?
       ' <span style="font-size:10px;background:var(--accent-light);color:var(--accent);border-radius:10px;padding:1px 6px">🔁 '+RECUR_LABELS[item.recurrence]+'</span>':'';
@@ -4511,32 +4534,24 @@ function renderMemo(){
         '<option value="none"'+(recVal==='none'?' selected':'')+'>Una tantum</option>'+
         '<option value="monthly"'+(recVal==='monthly'?' selected':'')+'>🔁 Mensile</option>'+
         '<option value="quarterly"'+(recVal==='quarterly'?' selected':'')+'>🔁 Trimestrale</option>'+
+        '<option value="yearly"'+(recVal==='yearly'?' selected':'')+'>🔁 Annuale</option>'+
       '</select>'+
       '<button onclick="deleteMemoItem('+item.id+')" style="background:none;border:none;cursor:pointer;font-size:14px;color:var(--text3);padding:2px 6px" title="Rimuovi">✕</button>'+
     '</div>';
   }
 
-  function section(title, items, found){
-    if(!items.length) return '';
-    var missing=items.filter(function(i){return !found[i.counterparty.toLowerCase().trim()];});
-    var present=items.filter(function(i){return found[i.counterparty.toLowerCase().trim()];});
-    var html='<div style="font-size:12px;font-weight:700;color:var(--text);margin:18px 0 8px">'+title+'</div>';
-    if(missing.length){
-      html+='<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">⚠️ Mancanti ('+missing.length+')</div>';
-      missing.forEach(function(i){html+=renderItem(i,false,found);});
-    }
-    if(present.length){
-      html+='<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 6px">✅ Presenti ('+present.length+')</div>';
-      present.forEach(function(i){html+=renderItem(i,true,found);});
-    }
-    return html;
-  }
-
+  var missing=items.filter(function(i){return !found[i.counterparty.toLowerCase().trim()];});
+  var present=items.filter(function(i){return found[i.counterparty.toLowerCase().trim()];});
   var html='';
-  var mLabel=document.getElementById('memo-month').value; // displayed as-is
-  var qLabel=quarter;
-  html+=section('📅 Mensile — '+mLabel, monthly, foundM);
-  html+=section('📆 Trimestrale — '+qLabel, quarterly, foundQ);
+  if(missing.length){
+    html+='<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">⚠️ Mancanti ('+missing.length+')</div>';
+    missing.forEach(function(i){html+=renderItem(i,false);});
+    html+='<div style="margin-bottom:18px"></div>';
+  }
+  if(present.length){
+    html+='<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">✅ Presenti ('+present.length+')</div>';
+    present.forEach(function(i){html+=renderItem(i,true);});
+  }
   el.innerHTML=html||'<div style="text-align:center;color:var(--text3);padding:40px 0;font-size:13px">Nessuna voce per il periodo selezionato.</div>';
 }
 
@@ -4548,20 +4563,17 @@ async function addMemoItem(){
   var nameEl=document.getElementById('memo-new-name');
   var name=nameEl.value.trim();
   if(!name){nameEl.focus();return;}
-  var recurrence=document.getElementById('memo-new-recurrence').value; // 'none','monthly','quarterly'
-  var month=document.getElementById('memo-month').value;
-  var quarter=document.getElementById('memo-quarter').value;
+  var recurrence=document.getElementById('memo-new-recurrence').value;
+  var val=memoGetPeriodValue();
 
-  var row={
-    user_id:currentUser.id,
-    counterparty:name,
-    recurrence:recurrence==='none'?null:recurrence,
-    month:(recurrence==='none'||recurrence==='monthly')?month:null,
-    quarter:(recurrence==='none'||recurrence==='quarterly')?quarter:null
-  };
-  // For recurring items, month/quarter are null (they match every period)
-  if(recurrence==='monthly'){row.month=null;row.quarter=null;}
-  if(recurrence==='quarterly'){row.month=null;row.quarter=null;}
+  var row={user_id:currentUser.id, counterparty:name, recurrence:recurrence==='none'?null:recurrence,
+    month:null, quarter:null, year:null};
+  // One-time items are pinned to the selected period
+  if(recurrence==='none'){
+    if(memoPeriodType==='month')   row.month=val;
+    if(memoPeriodType==='quarter') row.quarter=val;
+    if(memoPeriodType==='year')    row.year=val;
+  }
 
   var r=await sb.from('memo_items').insert(row).select();
   if(r.error){showMsg('Errore: '+r.error.message,'error');return;}
@@ -4578,14 +4590,14 @@ async function deleteMemoItem(id){
 }
 
 async function changeMemoRecurrence(id, value){
-  var month=document.getElementById('memo-month').value;
-  var quarter=document.getElementById('memo-quarter').value;
+  var val=memoGetPeriodValue();
   var recurrence=value==='none'?null:value;
-  var upd={
-    recurrence:recurrence,
-    month:(!recurrence)?month:null,
-    quarter:(!recurrence)?quarter:null
-  };
+  var upd={recurrence:recurrence, month:null, quarter:null, year:null};
+  if(!recurrence){
+    if(memoPeriodType==='month')   upd.month=val;
+    if(memoPeriodType==='quarter') upd.quarter=val;
+    if(memoPeriodType==='year')    upd.year=val;
+  }
   var r=await sb.from('memo_items').update(upd).eq('id',id);
   if(r.error){showMsg('Errore: '+r.error.message,'error');return;}
   memoItems=memoItems.map(function(i){return i.id===id?Object.assign({},i,upd):i;});

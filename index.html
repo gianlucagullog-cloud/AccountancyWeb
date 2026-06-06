@@ -1323,15 +1323,21 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
   <div style="max-width:640px;margin:0 auto">
     <p class="section-title">Memo — verifica che tutte le fatture attese siano state caricate</p>
 
-    <!-- Period selectors -->
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
-      <div class="form-group" style="margin:0;flex:1;min-width:140px">
-        <label>Mese</label>
-        <input type="month" id="memo-month" onchange="onMemoMonthChange()">
+    <!-- Period type toggle + value -->
+    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+      <div>
+        <label style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px">Periodo</label>
+        <div style="display:flex;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
+          <button id="memo-type-month"   onclick="setMemoPeriodType('month')"   style="padding:6px 14px;font-size:12px;border:none;cursor:pointer;background:var(--accent);color:#fff">Mese</button>
+          <button id="memo-type-quarter" onclick="setMemoPeriodType('quarter')" style="padding:6px 14px;font-size:12px;border:none;cursor:pointer;background:var(--surface2);color:var(--text)">Trimestre</button>
+          <button id="memo-type-year"    onclick="setMemoPeriodType('year')"    style="padding:6px 14px;font-size:12px;border:none;cursor:pointer;background:var(--surface2);color:var(--text)">Anno</button>
+        </div>
       </div>
-      <div class="form-group" style="margin:0;flex:1;min-width:140px">
-        <label>Trimestre</label>
-        <select id="memo-quarter" onchange="loadMemoItems()"></select>
+      <div class="form-group" style="margin:0;flex:1;min-width:160px">
+        <label id="memo-period-label">Mese di riferimento</label>
+        <input  type="month" id="memo-month"   onchange="loadMemoItems()" style="display:block">
+        <select id="memo-quarter" onchange="loadMemoItems()" style="display:none;width:100%"></select>
+        <select id="memo-year"    onchange="loadMemoItems()" style="display:none;width:100%"></select>
       </div>
     </div>
 
@@ -1340,10 +1346,11 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
       <div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Aggiungi voce attesa</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <input type="text" id="memo-new-name" placeholder="es. Vodafone, Amazon AWS…" style="flex:2;min-width:160px" onkeydown="if(event.key==='Enter')addMemoItem()">
-        <select id="memo-new-recurrence" style="flex:1;min-width:130px;font-size:12px">
+        <select id="memo-new-recurrence" style="flex:1;min-width:140px;font-size:12px">
           <option value="none">Una tantum</option>
           <option value="monthly">🔁 Mensile</option>
           <option value="quarterly">🔁 Trimestrale</option>
+          <option value="yearly">🔁 Annuale</option>
         </select>
         <button class="btn btn-primary" style="white-space:nowrap" onclick="addMemoItem()">+ Aggiungi</button>
       </div>
