@@ -1646,6 +1646,72 @@ function renderTable(){
   updateSelBar();
   var allCb=document.getElementById('cb-all');
   if(allCb)allCb.checked=arr.length>0&&arr.every(function(t){return selectedIds.has(t.id);});
+  renderMobileCards(arr,dups);
+}
+
+// ── MOBILE CARD VIEW ──────────────────────────────────────────
+function renderMobileCards(arr, dups){
+  var el=document.getElementById('mobile-cards'); if(!el) return;
+  if(!arr.length){ el.innerHTML=''; return; }
+
+  // Group by serviceMonth (fall back to invoice date month)
+  var groups={}, order=[];
+  arr.forEach(function(t){
+    var key=t.serviceMonth||(t.date?t.date.substring(0,7):'');
+    if(!groups[key]){groups[key]=[];order.push(key);}
+    groups[key].push(t);
+  });
+
+  var html='';
+  order.forEach(function(key){
+    var parts=key.split('-');
+    var lbl=parts.length>=2?MESI[parseInt(parts[1])-1]+' '+parts[0]:key;
+    html+='<div class="mc-group-label">'+lbl+'</div>';
+    groups[key].forEach(function(t){
+      var isIn=t.type==='Issued';
+      var net=(t.entrateTotal||0)-(t.usciteTotal||0);
+      var netStr=net!==0?(net>0?'+':'')+fmt(net):'--';
+      var netCls=net>0?'net-pos':net<0?'net-neg':'';
+      var isDup=dups.has(t.id);
+      var hasFile=t.filePath||localStorage.getItem('inv_file_'+t.id);
+
+      html+='<div class="mc-card'+(isDup?' mc-dup':'')+'" onclick="toggleMobileCard(this)">'+
+        '<div class="mc-main">'+
+          '<div class="mc-icon '+(isIn?'mc-icon-in':'mc-icon-out')+'">'+(isIn?'💶':'🧾')+'</div>'+
+          '<div class="mc-body">'+
+            '<div class="mc-name">'+esc(t.counterparty)+(isDup?' <span class="mc-dup-badge">⚠️ Dup</span>':'')+'</div>'+
+            '<div class="mc-sub">'+esc(t.invoice||'—')+(t.country?' · '+esc(t.country):'')+(t.category?' · '+esc(t.category):'')+'</div>'+
+          '</div>'+
+          '<div class="mc-right">'+
+            '<div class="'+netCls+'">'+netStr+'</div>'+
+            '<div class="mc-date">'+formatDate(t.date)+'</div>'+
+          '</div>'+
+          '<div class="mc-chevron">›</div>'+
+        '</div>'+
+        '<div class="mc-detail" onclick="event.stopPropagation()">'+
+          (t.serviceMonth?'<div class="mc-detail-row"><span>Service Month</span><span>'+esc(t.serviceMonth)+'</span></div>':'')+
+          (t.vatId?'<div class="mc-detail-row"><span>VAT / Tax ID</span><span>'+esc(t.vatId)+'</span></div>':'')+
+          (t.address?'<div class="mc-detail-row"><span>Indirizzo</span><span>'+esc(t.address)+'</span></div>':'')+
+          (t.description?'<div class="mc-detail-row"><span>Descrizione</span><span>'+esc(t.description)+'</span></div>':'')+
+          (t.entrateTotal?'<div class="mc-detail-row mc-amounts"><span>Entrate</span><span>'+fmtN(t.entrateNet)+' + IVA '+fmtN(t.entrateVat)+' = <b>'+fmtN(t.entrateTotal)+'</b></span></div>':'')+
+          (t.usciteTotal?'<div class="mc-detail-row mc-amounts"><span>Uscite</span><span>'+fmtN(t.usciteNet)+' + IVA '+fmtN(t.usciteVat)+' = <b>'+fmtN(t.usciteTotal)+'</b></span></div>':'')+
+          (t.notes?'<div class="mc-detail-row"><span>Note</span><span>'+esc(t.notes)+'</span></div>':'')+
+          '<div class="mc-actions">'+
+            (isDup?'<button class="btn" style="font-size:11px;padding:5px 10px;color:var(--orange);border-color:var(--orange);background:rgba(217,119,6,.1)" onclick="validateDuplicate('+t.id+')">Valida dup.</button>':'')+
+            (hasFile?'<button class="btn btn-edit" style="font-size:13px;padding:6px 12px" onclick="downloadInvoiceFile(txs.find(function(x){return x.id==='+t.id+'}))">⬇️</button>':'')+
+            (hasFile?'<button class="btn btn-secondary" style="font-size:13px;padding:6px 12px" onclick="viewInvoiceFile(txs.find(function(x){return x.id==='+t.id+'}))">👁</button>':'')+
+            '<button class="btn btn-edit" style="font-size:13px;padding:6px 12px" onclick="editTx('+t.id+')">✏️</button>'+
+            '<button class="btn btn-danger" style="font-size:13px;padding:6px 12px" onclick="delTx('+t.id+')">✕</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+    });
+  });
+  el.innerHTML=html;
+}
+
+function toggleMobileCard(el){
+  el.classList.toggle('mc-expanded');
 }
 
 function renderFilteredStats(arr){

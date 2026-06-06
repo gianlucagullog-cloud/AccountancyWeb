@@ -592,6 +592,39 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
 .reg-table tr.pos-selected td{background:rgba(79,70,229,0.06)}
 .ticker-cell{font-weight:700;font-size:13px;color:var(--text)}
 .import-drop{border:2px dashed var(--border);border-radius:var(--radius);padding:20px;text-align:center;font-size:12px;color:var(--text2);margin-bottom:12px;transition:border-color .2s}
+
+/* ── MOBILE INVOICE CARDS ── */
+.mobile-cards-container{display:none}
+@media(max-width:768px){
+  .table-wrap{display:none}
+  #dup-warning{display:none!important}
+  .mobile-cards-container{display:block;margin-top:12px}
+  .mc-group-label{font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;padding:14px 2px 6px}
+  .mc-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;overflow:hidden;box-shadow:var(--shadow);cursor:pointer}
+  .mc-card.mc-dup{border-left:3px solid var(--orange);background:rgba(251,146,60,.05)}
+  .mc-main{display:flex;align-items:center;gap:10px;padding:12px 14px}
+  .mc-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+  .mc-icon-in{background:var(--green-light)}
+  .mc-icon-out{background:var(--red-light)}
+  .mc-body{flex:1;min-width:0}
+  .mc-name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mc-dup-badge{font-size:10px;color:var(--orange);background:rgba(217,119,6,.12);border-radius:6px;padding:1px 5px;margin-left:4px}
+  .mc-sub{font-size:11px;color:var(--text3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mc-right{text-align:right;flex-shrink:0}
+  .mc-right .net-pos{font-size:15px;font-weight:700;color:var(--green)}
+  .mc-right .net-neg{font-size:15px;font-weight:700;color:var(--red)}
+  .mc-date{font-size:10px;color:var(--text3);margin-top:2px}
+  .mc-chevron{color:var(--text3);font-size:22px;padding-left:4px;transition:transform .2s;flex-shrink:0;line-height:1}
+  .mc-detail{display:none;border-top:1px solid var(--border);padding:12px 14px;background:var(--surface2)}
+  .mc-card.mc-expanded .mc-detail{display:block}
+  .mc-card.mc-expanded .mc-chevron{transform:rotate(90deg)}
+  .mc-detail-row{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)}
+  .mc-detail-row:last-of-type{border-bottom:none}
+  .mc-detail-row>span:first-child{color:var(--text2);flex-shrink:0;min-width:90px}
+  .mc-detail-row>span:last-child{text-align:right;word-break:break-word;font-weight:500}
+  .mc-amounts>span:last-child{color:var(--accent)}
+  .mc-actions{display:flex;gap:6px;margin-top:14px;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--border)}
+}
 .import-drop.drag-over{border-color:var(--accent);background:var(--accent-light)}
 </style>
 </head>
@@ -806,6 +839,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
     </table>
   </div>
   <div id="empty" style="display:none;text-align:center;padding:50px;color:var(--text2)"><p>Nessuna transazione. Carica la prima fattura.</p></div>
+  <div id="mobile-cards" class="mobile-cards-container"></div>
   <div id="sel-bar" class="sel-bar" style="display:none">
     <span id="sel-count">0 selezionate</span>
     <button class="btn" onclick="exportSelectedZIP()">&#128230; ZIP selezionate</button>
