@@ -2602,7 +2602,34 @@ async function isinToTicker(isin){
     'LU0274208692':'VUSA.DE','IE00B3RBWM25':'VWRL.AS', 'IE00B52MJY50':'IUSA.DE',
     'US9229087690':'VTI',    'US9219097683':'VT',      'US4642874329':'IVV',
     'US4642872265':'IJH',    'US46432F8419':'EEM',     'IE00BWT6H894':'FLTR.L',
-    'US5949724083':'MSTR'
+    'US5949724083':'MSTR',
+    // Revolut portfolio 06/2026
+    'IE00B0M62Q58':'IWRD.L',  // iShares MSCI World UCITS ETF USD (Dist)
+    'IE00BK5BR626':'VHYL.L',  // Vanguard FTSE All-World High Div Yield
+    'IE00B53SZB19':'CNDX.L',  // iShares Nasdaq 100 UCITS ETF USD (Acc)
+    'LU2573966905':'AEEM.PA', // Amundi Core MSCI EM Swap
+    'IE00B6R52259':'SSAC.L',  // iShares MSCI ACWI
+    'IE00BMC38736':'VVSM.L',  // VanEck Semiconductor UCITS ETF
+    'IE00B53L3W79':'EUE.L',   // iShares Core Euro Stoxx 50
+    'IE00BK5BQT80':'VWRA.L',  // Vanguard FTSE All-World Acc
+    'IE00B3XXRP09':'VUSA.L',  // Vanguard S&P 500 UCITS ETF
+    'IT0005495657':'SPM.MI',  // Saipem
+    'IT0003128367':'ENEL.MI', // Enel
+    'IT0005541336':'LTM.MI',  // Lottomatica
+    'US4581401001':'INTC',    // Intel
+    'US46120E6023':'ISRG',    // Intuitive Surgical
+    'US5324571083':'LLY',     // Eli Lilly
+    'US46625H1005':'JPM',     // JPMorgan Chase
+    'US87165B1035':'SYF',     // Synchrony Financial
+    'US8740391003':'TSM',     // Taiwan Semiconductor ADR
+    'US3364331070':'FSLR',    // First Solar
+    'US90353T1007':'UBER',    // Uber
+    'CH0432492467':'ALC',     // Alcon
+    'US79466L3024':'CRM',     // Salesforce
+    'US03769M1062':'APO',     // Apollo Global Management
+    'US70450Y1038':'PYPL',    // PayPal
+    'US22788C1053':'CRWD',    // CrowdStrike
+    'CA82509L1076':'SHOP'     // Shopify
   };
   if(manual[isin]) {
     isinCache[isin] = manual[isin];
@@ -3044,7 +3071,37 @@ var tradingCustomTo = null;
 var selectedPosTickers = new Set();
 var PERIOD_LABELS = {'1d':'1 Giorno','5d':'1 Settimana','1mo':'1 Mese','3mo':'3 Mesi','6mo':'6 Mesi','1y':'1 Anno','5y':'5 Anni','custom':'Personalizzato'};
 var PERIOD_INTERVALS = {'1d':'5m','5d':'60m','1mo':'1d','3mo':'1d','6mo':'1d','1y':'1wk','5y':'1mo'};
-var LEGACY_TICKER_MAP = {'PPB.DE':'FLTR.L','MIGA.DE':'MSTR'};
+var LEGACY_TICKER_MAP = {
+  'PPB.DE':'FLTR.L','MIGA.DE':'MSTR',
+  // Revolut internal codes → Yahoo Finance tickers
+  'IWRDN':'IWRD.L',    // iShares MSCI World UCITS ETF USD (Dist) - IE00B0M62Q58
+  'VHYLN':'VHYL.L',   // Vanguard FTSE All-World High Div Yield - IE00BK5BR626
+  'VWRAN':'VWRA.L',   // Vanguard FTSE All-World Acc - IE00BK5BQT80
+  'VUSAN':'VUSA.L',   // Vanguard S&P 500 - IE00B3XXRP09
+  'CSPXN':'CSPX.L',   // iShares Core S&P 500 - IE00B5BMR087
+  'SSACN':'SSAC.L',   // iShares MSCI ACWI - IE00B6R52259
+};
+// ISIN → Yahoo Finance ticker (for direct ISIN-based lookups)
+var ISIN_TICKER_MAP = {
+  'IE00B0M62Q58':'IWRD.L',   // iShares MSCI World UCITS ETF USD (Dist)
+  'IE00BK5BR626':'VHYL.L',   // Vanguard FTSE All-World High Div Yield
+  'IE00B53SZB19':'CNDX.L',   // iShares Nasdaq 100 UCITS ETF USD (Acc)
+  'LU2573966905':'AEEM.PA',  // Amundi Core MSCI EM Swap
+  'IE00B6R52259':'SSAC.L',   // iShares MSCI ACWI
+  'IE00BMC38736':'VVSM.L',   // VanEck Semiconductor UCITS ETF
+  'IE00B53L3W79':'EUE.L',    // iShares Core Euro Stoxx 50
+  'IE00B5BMR087':'CSPX.L',   // iShares Core S&P 500
+  'IE00BK5BQT80':'VWRA.L',   // Vanguard FTSE All-World Acc
+  'IE00BWT6H894':'FLTR.L',   // Flutter Entertainment
+  'IE00B3XXRP09':'VUSA.L',   // Vanguard S&P 500 UCITS ETF
+  'IT0005495657':'SPM.MI',   // Saipem
+  'IT0003128367':'ENEL.MI',  // Enel
+  'IT0005541336':'LTM.MI',   // Lottomatica
+  'NL0010273215':'ASML',     // ASML (also trades on Nasdaq)
+  'CA82509L1076':'SHOP',     // Shopify
+  'CH0432492467':'ALC',      // Alcon
+  'US5949724083':'MSTR',     // Strategy (ex-MicroStrategy)
+};
 // ── FX RATES (convert all to EUR) ────────────────────────────────────────────
 var fxRates = {EUR:1, USD:1, GBP:1, CHF:1, JPY:1}; // defaults, updated live
 var fxLastFetch = 0;
@@ -3092,6 +3149,8 @@ function normalizeImportedCurrency(cur, isin){
 
 function normalizeTickerSymbol(ticker){
   var key = String(ticker || '').trim().toUpperCase();
+  // If it looks like an ISIN (12 chars, starts with 2 letters), try ISIN map first
+  if(/^[A-Z]{2}[A-Z0-9]{10}$/.test(key) && ISIN_TICKER_MAP[key]) return ISIN_TICKER_MAP[key];
   return LEGACY_TICKER_MAP[key] || key;
 }
 
