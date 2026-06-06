@@ -4398,86 +4398,146 @@ async function importPortfolioPDF(file){
 }
 
 // ============================================================
-// MEMO MENSILE
+// MEMO MENSILE / TRIMESTRALE
 // ============================================================
 
-var memoItems = []; // cached from Supabase
+var memoItems = [];
+
+function monthToQuarter(ym){ // 'YYYY-MM' → 'YYYY-QN'
+  var p=ym.split('-'); if(p.length<2) return '';
+  return p[0]+'-Q'+Math.ceil(parseInt(p[1])/3);
+}
+
+function quarterMonths(q){ // 'YYYY-QN' → ['YYYY-MM','YYYY-MM','YYYY-MM']
+  var p=q.match(/(\d{4})-Q(\d)/); if(!p) return [];
+  var y=parseInt(p[1]),n=parseInt(p[2]),m=(n-1)*3+1;
+  return [m,m+1,m+2].map(function(x){return y+'-'+String(x).padStart(2,'0');});
+}
+
+function buildQuarterOptions(){
+  var sel=document.getElementById('memo-quarter'); if(!sel) return;
+  var now=new Date(), cy=now.getFullYear();
+  sel.innerHTML='';
+  [cy-1,cy,cy+1].forEach(function(y){
+    [1,2,3,4].forEach(function(q){
+      var val=y+'-Q'+q;
+      var opt=document.createElement('option');
+      opt.value=val; opt.textContent='Q'+q+' '+y;
+      sel.appendChild(opt);
+    });
+  });
+  var cq=monthToQuarter(cy+'-'+String(now.getMonth()+1).padStart(2,'0'));
+  sel.value=cq;
+}
 
 function initMemo(){
-  var inp = document.getElementById('memo-month');
-  if(inp && !inp.value){
-    var now = new Date();
-    inp.value = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  }
+  var now=new Date();
+  var monthInp=document.getElementById('memo-month');
+  if(monthInp&&!monthInp.value)
+    monthInp.value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  buildQuarterOptions();
+  // Sync quarter selector to match the selected month
+  var q=monthToQuarter(monthInp.value);
+  var sel=document.getElementById('memo-quarter'); if(sel) sel.value=q;
+  loadMemoItems();
+}
+
+function onMemoMonthChange(){
+  // Auto-update quarter when month changes
+  var monthInp=document.getElementById('memo-month');
+  var sel=document.getElementById('memo-quarter');
+  if(sel) sel.value=monthToQuarter(monthInp.value);
   loadMemoItems();
 }
 
 async function loadMemoItems(){
   if(!currentUser) return;
-  var month = document.getElementById('memo-month').value; // YYYY-MM
-  // Load recurring items + items specific to this month
-  var r = await sb.from('memo_items')
+  var month=document.getElementById('memo-month').value;
+  var quarter=document.getElementById('memo-quarter').value;
+  var r=await sb.from('memo_items')
     .select('*')
-    .eq('user_id', currentUser.id)
-    .or('recurring.eq.true,month.eq.'+month);
-  memoItems = r.data || [];
+    .eq('user_id',currentUser.id)
+    .or('recurrence.eq.monthly,recurrence.eq.quarterly,month.eq.'+month+',quarter.eq.'+quarter);
+  memoItems=r.data||[];
   renderMemo();
 }
 
 function renderMemo(){
-  var el = document.getElementById('memo-list');
-  if(!el) return;
-  var month = document.getElementById('memo-month').value; // YYYY-MM
+  var el=document.getElementById('memo-list'); if(!el) return;
+  var month=document.getElementById('memo-month').value;
+  var quarter=document.getElementById('memo-quarter').value;
 
   if(!memoItems.length){
-    el.innerHTML = '<div style="text-align:center;color:var(--text3);padding:40px 0;font-size:13px">Nessuna voce nel memo.<br>Aggiungi i fornitori/spese che ti aspetti ogni mese.</div>';
+    el.innerHTML='<div style="text-align:center;color:var(--text3);padding:40px 0;font-size:13px">Nessuna voce nel memo.<br>Aggiungi i fornitori/spese che ti aspetti ogni mese.</div>';
     return;
   }
 
-  // De-duplicate by counterparty (recurring + month-specific may overlap)
-  var seen = {};
-  var items = [];
+  // Split into monthly bucket and quarterly bucket (an item can appear in both)
+  var seenM={}, seenQ={}, monthly=[], quarterly=[];
   memoItems.forEach(function(item){
-    var key = item.counterparty.toLowerCase().trim();
-    if(!seen[key]){ seen[key]=true; items.push(item); }
+    var key=item.counterparty.toLowerCase().trim();
+    var isM=(item.recurrence==='monthly'||item.month===month);
+    var isQ=(item.recurrence==='quarterly'||item.quarter===quarter);
+    if(isM&&!seenM[key]){seenM[key]=true;monthly.push(item);}
+    if(isQ&&!seenQ[key]){seenQ[key]=true;quarterly.push(item);}
   });
 
-  // Check which counterparties have invoices in the selected service_month
-  var found = {};
+  // Invoice presence check — monthly: exact serviceMonth match
+  var foundM={};
   txs.forEach(function(tx){
-    if(tx.serviceMonth === month){
-      found[tx.counterparty.toLowerCase().trim()] = true;
-    }
+    if(tx.serviceMonth===month) foundM[tx.counterparty.toLowerCase().trim()]=true;
   });
 
-  var missing = items.filter(function(i){ return !found[i.counterparty.toLowerCase().trim()]; });
-  var present = items.filter(function(i){ return found[i.counterparty.toLowerCase().trim()]; });
+  // Invoice presence check — quarterly: any month in the quarter
+  var foundQ={};
+  quarterMonths(quarter).forEach(function(qm){
+    txs.forEach(function(tx){
+      if(tx.serviceMonth===qm) foundQ[tx.counterparty.toLowerCase().trim()]=true;
+    });
+  });
 
-  function renderItem(item, ok){
-    var icon = ok ? '✅' : '⚠️';
-    var recurIcon = item.recurring ? ' <span style="color:var(--text3);font-size:11px">🔁</span>' : '';
-    var textColor = ok ? 'var(--green)' : 'var(--text)';
+  var RECUR_LABELS={'monthly':'Mensile','quarterly':'Trimestrale'};
+
+  function renderItem(item, ok, found){
+    var icon=ok?'✅':'⚠️';
+    var badge=item.recurrence?
+      ' <span style="font-size:10px;background:var(--accent-light);color:var(--accent);border-radius:10px;padding:1px 6px">🔁 '+RECUR_LABELS[item.recurrence]+'</span>':'';
+    var textColor=ok?'var(--green)':'var(--text)';
+    var recVal=item.recurrence||'none';
     return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px">'+
       '<span style="font-size:18px">'+icon+'</span>'+
-      '<span style="flex:1;font-size:13px;color:'+textColor+'">'+escHtml(item.counterparty)+recurIcon+'</span>'+
-      '<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);cursor:pointer">'+
-        '<input type="checkbox" '+(item.recurring?'checked':'')+' onchange="toggleMemoRecurring('+item.id+',this.checked)" style="margin:0"> Ricorrente'+
-      '</label>'+
+      '<span style="flex:1;font-size:13px;color:'+textColor+'">'+escHtml(item.counterparty)+badge+'</span>'+
+      '<select onchange="changeMemoRecurrence('+item.id+',this.value)" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)">'+
+        '<option value="none"'+(recVal==='none'?' selected':'')+'>Una tantum</option>'+
+        '<option value="monthly"'+(recVal==='monthly'?' selected':'')+'>🔁 Mensile</option>'+
+        '<option value="quarterly"'+(recVal==='quarterly'?' selected':'')+'>🔁 Trimestrale</option>'+
+      '</select>'+
       '<button onclick="deleteMemoItem('+item.id+')" style="background:none;border:none;cursor:pointer;font-size:14px;color:var(--text3);padding:2px 6px" title="Rimuovi">✕</button>'+
     '</div>';
   }
 
-  var html = '';
-  if(missing.length){
-    html += '<div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">⚠️ Mancanti ('+missing.length+')</div>';
-    missing.forEach(function(i){ html += renderItem(i, false); });
-    html += '<div style="margin-bottom:18px"></div>';
+  function section(title, items, found){
+    if(!items.length) return '';
+    var missing=items.filter(function(i){return !found[i.counterparty.toLowerCase().trim()];});
+    var present=items.filter(function(i){return found[i.counterparty.toLowerCase().trim()];});
+    var html='<div style="font-size:12px;font-weight:700;color:var(--text);margin:18px 0 8px">'+title+'</div>';
+    if(missing.length){
+      html+='<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">⚠️ Mancanti ('+missing.length+')</div>';
+      missing.forEach(function(i){html+=renderItem(i,false,found);});
+    }
+    if(present.length){
+      html+='<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 6px">✅ Presenti ('+present.length+')</div>';
+      present.forEach(function(i){html+=renderItem(i,true,found);});
+    }
+    return html;
   }
-  if(present.length){
-    html += '<div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">✅ Presenti ('+present.length+')</div>';
-    present.forEach(function(i){ html += renderItem(i, true); });
-  }
-  el.innerHTML = html;
+
+  var html='';
+  var mLabel=document.getElementById('memo-month').value; // displayed as-is
+  var qLabel=quarter;
+  html+=section('📅 Mensile — '+mLabel, monthly, foundM);
+  html+=section('📆 Trimestrale — '+qLabel, quarterly, foundQ);
+  el.innerHTML=html||'<div style="text-align:center;color:var(--text3);padding:40px 0;font-size:13px">Nessuna voce per il periodo selezionato.</div>';
 }
 
 function escHtml(s){
@@ -4485,42 +4545,49 @@ function escHtml(s){
 }
 
 async function addMemoItem(){
-  var nameEl = document.getElementById('memo-new-name');
-  var name = nameEl.value.trim();
-  if(!name){ nameEl.focus(); return; }
-  var recurring = document.getElementById('memo-new-recurring').checked;
-  var month = document.getElementById('memo-month').value;
+  var nameEl=document.getElementById('memo-new-name');
+  var name=nameEl.value.trim();
+  if(!name){nameEl.focus();return;}
+  var recurrence=document.getElementById('memo-new-recurrence').value; // 'none','monthly','quarterly'
+  var month=document.getElementById('memo-month').value;
+  var quarter=document.getElementById('memo-quarter').value;
 
-  var row = {
-    user_id: currentUser.id,
-    counterparty: name,
-    recurring: recurring,
-    month: recurring ? null : month
+  var row={
+    user_id:currentUser.id,
+    counterparty:name,
+    recurrence:recurrence==='none'?null:recurrence,
+    month:(recurrence==='none'||recurrence==='monthly')?month:null,
+    quarter:(recurrence==='none'||recurrence==='quarterly')?quarter:null
   };
-  var r = await sb.from('memo_items').insert(row).select();
-  if(r.error){ showMsg('Errore: '+r.error.message,'error'); return; }
+  // For recurring items, month/quarter are null (they match every period)
+  if(recurrence==='monthly'){row.month=null;row.quarter=null;}
+  if(recurrence==='quarterly'){row.month=null;row.quarter=null;}
+
+  var r=await sb.from('memo_items').insert(row).select();
+  if(r.error){showMsg('Errore: '+r.error.message,'error');return;}
   nameEl.value='';
-  document.getElementById('memo-new-recurring').checked=false;
   memoItems.push(r.data[0]);
   renderMemo();
 }
 
 async function deleteMemoItem(id){
-  var r = await sb.from('memo_items').delete().eq('id',id);
-  if(r.error){ showMsg('Errore: '+r.error.message,'error'); return; }
-  memoItems = memoItems.filter(function(i){ return i.id!==id; });
+  var r=await sb.from('memo_items').delete().eq('id',id);
+  if(r.error){showMsg('Errore: '+r.error.message,'error');return;}
+  memoItems=memoItems.filter(function(i){return i.id!==id;});
   renderMemo();
 }
 
-async function toggleMemoRecurring(id, recurring){
-  var month = document.getElementById('memo-month').value;
-  var r = await sb.from('memo_items').update({
-    recurring: recurring,
-    month: recurring ? null : month
-  }).eq('id',id);
-  if(r.error){ showMsg('Errore: '+r.error.message,'error'); return; }
-  memoItems = memoItems.map(function(i){
-    return i.id===id ? Object.assign({},i,{recurring:recurring, month:recurring?null:month}) : i;
-  });
+async function changeMemoRecurrence(id, value){
+  var month=document.getElementById('memo-month').value;
+  var quarter=document.getElementById('memo-quarter').value;
+  var recurrence=value==='none'?null:value;
+  var upd={
+    recurrence:recurrence,
+    month:(!recurrence)?month:null,
+    quarter:(!recurrence)?quarter:null
+  };
+  var r=await sb.from('memo_items').update(upd).eq('id',id);
+  if(r.error){showMsg('Errore: '+r.error.message,'error');return;}
+  memoItems=memoItems.map(function(i){return i.id===id?Object.assign({},i,upd):i;});
   renderMemo();
 }
