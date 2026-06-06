@@ -393,16 +393,27 @@ var DEFAULT_GFID='1UvOst1smuek8B5uMb0PfKlCtOqci3GHn';
 
 function loadSettings(){
   return sb.from('profile').select('*').maybeSingle().then(function(r){
-    if(r.data){settings.name=r.data.name||'';settings.vat=r.data.vat_number||'';
+    if(r.data){
+      settings.name=r.data.name||'';
+      settings.vat=r.data.vat_number||'';
       var sn=document.getElementById('s-name');if(sn)sn.value=settings.name;
-      var sv=document.getElementById('s-vat');if(sv)sv.value=settings.vat;}
-    // Pre-fill defaults if not already saved
-    if(!localStorage.getItem('inv_key'))localStorage.setItem('inv_key',DEFAULT_KEY);
-    if(!localStorage.getItem('inv_gcid'))localStorage.setItem('inv_gcid',DEFAULT_GCID);
-    if(!localStorage.getItem('inv_gfid'))localStorage.setItem('inv_gfid',DEFAULT_GFID);
-    settings.key=localStorage.getItem('inv_key')||DEFAULT_KEY;
-    settings.gclientid=localStorage.getItem('inv_gcid')||DEFAULT_GCID;
-    settings.gfolderid=localStorage.getItem('inv_gfid')||DEFAULT_GFID;
+      var sv=document.getElementById('s-vat');if(sv)sv.value=settings.vat;
+      // Load API keys from Supabase (cross-device sync), fall back to localStorage
+      settings.key       = r.data.anthropic_key   || localStorage.getItem('inv_key')   || DEFAULT_KEY;
+      settings.gclientid = r.data.google_client_id || localStorage.getItem('inv_gcid') || DEFAULT_GCID;
+      settings.gfolderid = r.data.google_folder_id || localStorage.getItem('inv_gfid') || DEFAULT_GFID;
+      settings.svckey    = r.data.svc_key          || localStorage.getItem('inv_svc_key') || '';
+    } else {
+      settings.key       = localStorage.getItem('inv_key')    || DEFAULT_KEY;
+      settings.gclientid = localStorage.getItem('inv_gcid')   || DEFAULT_GCID;
+      settings.gfolderid = localStorage.getItem('inv_gfid')   || DEFAULT_GFID;
+      settings.svckey    = localStorage.getItem('inv_svc_key') || '';
+    }
+    // Keep localStorage in sync as local cache
+    localStorage.setItem('inv_key',     settings.key);
+    localStorage.setItem('inv_gcid',    settings.gclientid);
+    localStorage.setItem('inv_gfid',    settings.gfolderid);
+    if(settings.svckey) localStorage.setItem('inv_svc_key', settings.svckey);
     var sk=document.getElementById('s-key');if(sk)sk.value=settings.key;
     var ssk=document.getElementById('s-svc-key');if(ssk)ssk.value=settings.svckey||'';
     var gi=document.getElementById('s-gclientid');if(gi)gi.value=settings.gclientid;
@@ -417,9 +428,18 @@ function saveSettings(){
   settings.gfolderid= v('s-gfolderid');
   settings.svckey   = v('s-svc-key') || '';
 
-  sb.from('profile').upsert({user_id:currentUser.id, name:settings.name, vat_number:settings.vat},{onConflict:'user_id'});
+  // Save to Supabase so all devices stay in sync
+  sb.from('profile').upsert({
+    user_id:         currentUser.id,
+    name:            settings.name,
+    vat_number:      settings.vat,
+    anthropic_key:   settings.key       || null,
+    google_client_id:settings.gclientid || null,
+    google_folder_id:settings.gfolderid || null,
+    svc_key:         settings.svckey    || null
+  },{onConflict:'user_id'});
 
-  // Save or clear each key from localStorage
+  // Keep localStorage in sync as local cache
   if(settings.key)       localStorage.setItem('inv_key',     settings.key);
   else                   localStorage.removeItem('inv_key');
 
