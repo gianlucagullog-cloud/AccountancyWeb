@@ -113,7 +113,8 @@ header h1{
   box-shadow:var(--shadow);
 }
 .tab{
-  padding:8px 18px;
+  display:flex;align-items:center;gap:5px;
+  padding:8px 16px;
   border-radius:10px;
   border:none;
   background:transparent;
@@ -133,6 +134,8 @@ header h1{
   box-shadow:var(--shadow-accent);
   font-weight:600;
 }
+.ti{font-size:14px;line-height:1;flex-shrink:0}
+.tl{}
 
 /* ── UPLOAD ── */
 .upload-area{
@@ -501,24 +504,66 @@ tr:hover td{background:var(--surface2)}
 
 /* ── RESPONSIVE ── */
 @media(max-width:900px){
-  body{padding:16px 14px}
+  body{padding:16px 14px 80px}
   .stats{grid-template-columns:repeat(2,1fr)}
   .form-grid{grid-template-columns:1fr 1fr}
   .cat-split{grid-template-columns:1fr}
   .sim-grid{grid-template-columns:repeat(2,1fr)}
-  header{flex-wrap:wrap;gap:10px}
   .modal-box{padding:20px 16px;width:98vw}
 }
-@media(max-width:600px){
-  body{padding:12px 10px}
+@media(max-width:768px){
+  /* body leaves space for bottom nav */
+  body{padding:12px 12px 80px}
+
+  /* ── header compatto ── */
+  header{
+    padding:10px 12px;
+    position:sticky;top:0;z-index:150;
+    background:var(--surface);
+    box-shadow:0 1px 6px rgba(0,0,0,.07);
+  }
+  header h1{font-size:16px}
+  .hdr-mark{width:30px;height:30px;font-size:12px;border-radius:8px}
+  #user-email-badge{display:none!important}
+
+  /* ── bottom navigation bar ── */
+  .tabs{
+    position:fixed;bottom:0;left:0;right:0;
+    z-index:200;
+    width:100%;
+    border-radius:0;
+    margin:0;
+    padding:4px 2px env(safe-area-inset-bottom,6px);
+    border:none;
+    border-top:1px solid var(--border);
+    box-shadow:0 -4px 16px rgba(0,0,0,.09);
+    background:var(--surface);
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  .tabs::-webkit-scrollbar{display:none}
+
+  .tab{
+    flex-direction:column;
+    align-items:center;
+    gap:2px;
+    min-width:62px;
+    flex:1 0 62px;
+    padding:5px 4px;
+    border-radius:10px;
+    font-size:9px;
+    white-space:nowrap;
+  }
+  .ti{font-size:20px;line-height:1.1}
+  .tl{font-size:9px;font-weight:500;letter-spacing:0}
+
+  /* ── other responsive fixes ── */
   .stats{grid-template-columns:1fr 1fr;gap:8px}
   .stat-value{font-size:17px}
   .form-grid{grid-template-columns:1fr}
   .form-group.two,.form-group.full{grid-column:1}
   .amounts-grid{grid-template-columns:1fr}
-  .tabs{overflow-x:auto;width:100%;display:flex}
-  .tab{flex-shrink:0;font-size:11px;padding:6px 12px}
-  header h1{font-size:17px}
   .filters{gap:6px}
   .sim-grid{grid-template-columns:1fr}
   .regime-tabs-wrap{flex-wrap:wrap}
@@ -526,6 +571,13 @@ tr:hover td{background:var(--surface2)}
   .table-wrap{border-radius:8px}
   .form-actions{flex-direction:column}
   .btn{font-size:12px}
+}
+@media(max-width:600px){
+  body{padding:10px 10px 80px}
+  .stats{grid-template-columns:1fr 1fr;gap:6px}
+  .stat-value{font-size:15px}
+  .stat{padding:12px 14px}
+  .modal-box{padding:16px 12px;width:100vw;border-radius:var(--radius) var(--radius) 0 0;align-self:flex-end}
 }
 
 /* ── SELECTION BAR ── */
@@ -702,14 +754,14 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--ac
 </header>
 
 <div class="tabs">
-  <button class="tab active" id="tab-btn-carica" onclick="showTab('carica')">+ Carica Fattura</button>
-  <button class="tab" id="tab-btn-registro" onclick="showTab('registro')">Registro</button>
-  <button class="tab" id="tab-btn-summary" onclick="showTab('summary')">Summary &amp; Tax</button>
-  <button class="tab" id="tab-btn-trading" onclick="showTab('trading')">&#128200; Trading</button>
-  <button class="tab" id="tab-btn-utenti" onclick="showTab('utenti')">&#128101; Utenti</button>
-  <button class="tab" id="tab-btn-verifica" onclick="showTab('verifica')">🔍 Verifica Drive</button>
-  <button class="tab" id="tab-btn-memo" onclick="showTab('memo')">📋 Memo</button>
-  <button class="tab" id="tab-btn-settings" onclick="showTab('settings')">Impostazioni</button>
+  <button class="tab active" id="tab-btn-carica" onclick="showTab('carica')"><span class="ti">➕</span><span class="tl">Carica</span></button>
+  <button class="tab" id="tab-btn-registro" onclick="showTab('registro')"><span class="ti">📋</span><span class="tl">Registro</span></button>
+  <button class="tab" id="tab-btn-summary" onclick="showTab('summary')"><span class="ti">📊</span><span class="tl">Summary</span></button>
+  <button class="tab" id="tab-btn-trading" onclick="showTab('trading')"><span class="ti">📈</span><span class="tl">Trading</span></button>
+  <button class="tab" id="tab-btn-utenti" onclick="showTab('utenti')"><span class="ti">👥</span><span class="tl">Utenti</span></button>
+  <button class="tab" id="tab-btn-verifica" onclick="showTab('verifica')"><span class="ti">🔍</span><span class="tl">Drive</span></button>
+  <button class="tab" id="tab-btn-memo" onclick="showTab('memo')"><span class="ti">📝</span><span class="tl">Memo</span></button>
+  <button class="tab" id="tab-btn-settings" onclick="showTab('settings')"><span class="ti">⚙️</span><span class="tl">Imp.</span></button>
 </div>
 
 <!-- CARICA -->
