@@ -3963,8 +3963,111 @@ function renderPositions(){
   renderTradingStats(arr);
   renderPortfolioStatsPanel();
   updatePortfolioChart();
+  renderMobilePositions(arr);
 }
 
+var _posMobFilterType = 'all';
+function posMobFilter(type, btn){
+  _posMobFilterType = type;
+  document.querySelectorAll('.pos-mob-filter').forEach(function(b){ b.classList.remove('active'); });
+  if(btn) btn.classList.add('active');
+  // sync to desktop filter too
+  var sel1 = document.getElementById('pos-filter-type');
+  var sel2 = document.getElementById('pos-filter-type-table');
+  if(sel1) sel1.value = type;
+  if(sel2) sel2.value = type;
+  renderPositions();
+}
+
+function renderMobilePositions(arr){
+  var list = document.getElementById('pos-mob-list');
+  if(!list) return;
+
+  // Filter by mobile filter type
+  var filtered = _posMobFilterType === 'all' ? arr : arr.filter(function(p){ return p.asset_type === _posMobFilterType; });
+
+  // Compute mobile header totals
+  var totalValue = 0, totalDayPnl = 0;
+  filtered.forEach(function(p){
+    var meta = getPositionImportMeta(p.notes);
+    var dayD = priceCache[getTradingCacheKey(p.ticker,'1d')] || priceCache[normalizeTickerSymbol(p.ticker)];
+    var qty = parseFloat(p.quantity)||0;
+    var baseCur = (meta && meta.importedCurrency) || p.currency || 'USD';
+    var liveCur = (dayD && dayD.currency) || baseCur;
+    if(meta && meta.importedCurrentValue > 0){
+      totalValue += toEUR(meta.importedCurrentValue, baseCur);
+    } else if(dayD && dayD.price){
+      totalValue += toEUR(qty * dayD.price, liveCur);
+    }
+    if(dayD && dayD.periodChange !== null && dayD.periodChange !== undefined){
+      totalDayPnl += toEUR(dayD.periodChange * qty, liveCur);
+    }
+  });
+
+  var tvEl = document.getElementById('mob-total-value');
+  if(tvEl) tvEl.textContent = totalValue > 0 ? totalValue.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €' : '— €';
+  var dpEl = document.getElementById('mob-day-pnl');
+  if(dpEl){
+    var isPos = totalDayPnl >= 0;
+    dpEl.className = 'pos-mob-day ' + (isPos ? 'pos' : 'neg');
+    dpEl.textContent = (isPos ? '▲ +' : '▼ ') + Math.abs(totalDayPnl).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €';
+    dpEl.style.color = isPos ? 'var(--green)' : 'var(--red)';
+  }
+
+  if(!filtered.length){ list.innerHTML = '<div style="padding:40px 0;text-align:center;color:var(--text3)">Nessuna posizione</div>'; return; }
+
+  // Sort by value descending
+  var sorted = filtered.slice().sort(function(a,b){
+    function val(p){
+      var meta = getPositionImportMeta(p.notes);
+      var dayD = priceCache[getTradingCacheKey(p.ticker,'1d')] || priceCache[normalizeTickerSymbol(p.ticker)];
+      var qty = parseFloat(p.quantity)||0;
+      var baseCur = (meta && meta.importedCurrency) || p.currency || 'USD';
+      var liveCur = (dayD && dayD.currency) || baseCur;
+      if(meta && meta.importedCurrentValue > 0) return toEUR(meta.importedCurrentValue, baseCur);
+      if(dayD && dayD.price) return toEUR(qty * dayD.price, liveCur);
+      return 0;
+    }
+    return val(b) - val(a);
+  });
+
+  list.innerHTML = sorted.map(function(p){
+    var meta = getPositionImportMeta(p.notes);
+    var dayD = priceCache[getTradingCacheKey(p.ticker,'1d')] || priceCache[normalizeTickerSymbol(p.ticker)];
+    var qty = parseFloat(p.quantity)||0;
+    var avg = parseFloat(p.avg_buy_price)||0;
+    var baseCur = (meta && meta.importedCurrency) || p.currency || 'USD';
+    var liveCur = (dayD && dayD.currency) || baseCur;
+    var cost = meta && meta.importedInvestedValue > 0 ? toEUR(meta.importedInvestedValue, baseCur) : toEUR(qty * avg, baseCur);
+    var liveVal = dayD && dayD.price ? toEUR(qty * dayD.price, liveCur) : null;
+    var importedVal = meta && meta.importedCurrentValue > 0 ? toEUR(meta.importedCurrentValue, baseCur) : null;
+    var val = liveVal !== null ? liveVal : (importedVal !== null ? importedVal : cost);
+    var pnl = cost > 0 ? val - cost : null;
+    var pnlPct = cost > 0 && pnl !== null ? pnl / cost * 100 : null;
+    var dayPct = dayD ? dayD.changePct : null;
+    var displayName = (p.name || (dayD && dayD.name) || p.ticker || '').trim();
+    var logoUrl = getTickerLogoUrl(p.ticker);
+    var logoCol = tickerColor(p.ticker);
+    var initials = p.ticker.slice(0,2).toUpperCase();
+    var pctVal = pnlPct !== null ? pnlPct : dayPct;
+    var pctIsPos = pctVal === null ? true : pctVal >= 0;
+    var pctStr = pctVal !== null ? (pctIsPos ? '▲ +' : '▼ ') + Math.abs(pctVal).toFixed(2) + '%' : '—';
+    var valStr = val.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €';
+    var subStr = qty.toLocaleString('it-IT',{maximumFractionDigits:6}) + ' ' + p.ticker + (dayD && dayD.price ? ' · ' + toEUR(dayD.price, liveCur).toFixed(2) + ' €' : '');
+    return '<div class="pos-mob-row" onclick="openEditPosition('+p.id+')">'
+      + '<img class="pos-mob-logo" src="'+esc(logoUrl)+'" alt="'+esc(p.ticker)+'" onerror="this.style.display=\'none\';this.nextSibling.style.display=\'flex\'">'
+      + '<div class="pos-mob-logo-fb" style="display:none;background:'+logoCol+'">'+esc(initials)+'</div>'
+      + '<div class="pos-mob-info">'
+        + '<div class="pos-mob-name">'+esc(displayName)+'</div>'
+        + '<div class="pos-mob-sub">'+esc(subStr)+'</div>'
+      + '</div>'
+      + '<div class="pos-mob-right">'
+        + '<div class="pos-mob-value">'+valStr+'</div>'
+        + '<div class="pos-mob-pct '+(pctIsPos?'pos':'neg')+'">'+pctStr+'</div>'
+      + '</div>'
+    + '</div>';
+  }).join('');
+}
 
 function setTradingSort(field){
   if(tradingSortField === field) tradingSortDir = -tradingSortDir;
